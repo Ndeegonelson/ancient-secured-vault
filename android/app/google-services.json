@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "237028663963",
+    "project_id": "ancient--docs",
+    "storage_bucket": "ancient--docs.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:237028663963:android:4740e5cbdf41c44ceadc3e",
+        "android_client_info": {
+          "package_name": "com.example.ancient_secure_docs"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "237028663963-aolov6q5oao8kt2fr1r1b2mgeagut642.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD6_dg41vrsddndJcp_uJm7DcY3CTlB96M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "237028663963-aolov6q5oao8kt2fr1r1b2mgeagut642.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
