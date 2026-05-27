@@ -59,8 +59,8 @@ class HomeScreen extends StatelessWidget {
       ),
 
       body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+       padding: const EdgeInsets.all(20),
+       child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
 
@@ -598,7 +598,7 @@ const SizedBox(height: 30),
     );
   }
 }
-class PDFViewerScreen extends StatelessWidget {
+class PDFViewerScreen extends StatefulWidget {
   final String pdfUrl;
   final String title;
 
@@ -607,16 +607,27 @@ class PDFViewerScreen extends StatelessWidget {
     required this.pdfUrl,
     required this.title,
   });
+  @override
+State<PDFViewerScreen> createState() =>
+    _PDFViewerScreenState();
+}
+
+class _PDFViewerScreenState
+    extends State<PDFViewerScreen> {
+
+  final TextEditingController searchController =
+      TextEditingController();
 
   @override
   Widget build(BuildContext context) {
-    final viewId = 'pdf-viewer-${pdfUrl.hashCode}';
+    final viewId =
+    'pdf-viewer-${widget.pdfUrl.hashCode}';
 
     ui.platformViewRegistry.registerViewFactory(
       viewId,
       (int viewId) {
         final iframe = html.IFrameElement()
-          ..src = '$pdfUrl#toolbar=0&navpanes=0&scrollbar=1'
+          ..src = '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1'
           ..style.border = 'none'
           ..style.width = '100%'
           ..style.height = '100%';
@@ -630,7 +641,7 @@ class PDFViewerScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.black,
         title: Text(
-          title,
+  widget.title,
           style: const TextStyle(color: Colors.greenAccent),
         ),
         iconTheme: const IconThemeData(color: Colors.greenAccent),
@@ -678,7 +689,7 @@ class PDFViewerScreen extends StatelessWidget {
 
               await FirebaseFirestore.instance.collection('reader_notes').add({
                 'userEmail': FirebaseAuth.instance.currentUser?.email,
-                'pdfTitle': title,
+                'pdfTitle': widget.title,
                 'selectedText': '',
                 'note': noteText,
                 'color': 'yellow',
@@ -728,7 +739,7 @@ IconButton(
                 stream: FirebaseFirestore.instance
                     .collection('reader_notes')
                     .where('userEmail', isEqualTo: user.email)
-                    .where('pdfTitle', isEqualTo: title)
+                    .where('pdfTitle', isEqualTo: widget.title)
                     .snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
@@ -763,48 +774,147 @@ IconButton(
                             'Color: ${note['color'] ?? 'yellow'}',
                             style: const TextStyle(color: Colors.white54),
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.redAccent),
-                            onPressed: () async {
-                              final confirmDelete = await showDialog(
-                                context: context,
-                                builder: (context) {
-                                  return AlertDialog(
-                                    backgroundColor: const Color(0xFF0F1117),
-                                    title: const Text(
-                                      'Delete Note?',
-                                      style: TextStyle(color: Colors.redAccent),
-                                    ),
-                                    content: const Text(
-                                      'Are you sure you want to permanently delete this note?',
-                                      style: TextStyle(color: Colors.white70),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context, false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context, true),
-                                        child: const Text(
-                                          'Delete',
-                                          style: TextStyle(color: Colors.redAccent),
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              );
+                        trailing: Row(
+  mainAxisSize: MainAxisSize.min,
+  children: [
 
-                              if (confirmDelete == true) {
-                                await FirebaseFirestore.instance
-                                    .collection('reader_notes')
-                                    .doc(notes[index].id)
-                                    .delete();
-                              }
-                            },
-                          ),
-                        ),
+    // EDIT BUTTON
+    IconButton(
+      icon: const Icon(Icons.edit, color: Colors.greenAccent),
+
+      onPressed: () async {
+
+        final editController =
+            TextEditingController(text: note['note'] ?? '');
+
+        final updatedNote = await showDialog(
+          context: context,
+
+          builder: (context) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0F1117),
+
+              title: const Text(
+                'Edit Note',
+                style: TextStyle(color: Colors.greenAccent),
+              ),
+
+              content: TextField(
+                controller: editController,
+                maxLines: 6,
+
+                style: const TextStyle(color: Colors.white),
+
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: 'Edit your note...',
+                  hintStyle: TextStyle(color: Colors.white54),
+                ),
+              ),
+
+              actions: [
+
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(
+                      context,
+                      editController.text.trim(),
+                    );
+                  },
+
+                  child: const Text(
+                    'Save',
+                    style: TextStyle(color: Colors.greenAccent),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+
+        if (updatedNote != null &&
+            updatedNote.toString().isNotEmpty) {
+
+          await FirebaseFirestore.instance
+              .collection('reader_notes')
+              .doc(notes[index].id)
+              .update({
+            'note': updatedNote,
+          });
+        }
+      },
+    ),
+
+    // DELETE BUTTON
+    IconButton(
+      icon: const Icon(Icons.delete, color: Colors.redAccent),
+
+      onPressed: () async {
+
+        final confirmDelete = await showDialog(
+          context: context,
+
+          builder: (context) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0F1117),
+
+              title: const Text(
+                'Delete Note?',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+
+              content: const Text(
+                'Are you sure you want to permanently delete this note?',
+                style: TextStyle(color: Colors.white70),
+              ),
+
+              actions: [
+
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(context, false),
+
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(context, true),
+
+                  child: const Text(
+                    'Delete',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+
+        if (confirmDelete == true) {
+
+          await FirebaseFirestore.instance
+              .collection('reader_notes')
+              .doc(notes[index].id)
+              .delete();
+        }
+      },
+    ),
+  ],
+  ),
+),
                       );
                     },
                   );
