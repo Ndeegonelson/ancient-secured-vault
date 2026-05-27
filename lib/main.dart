@@ -646,6 +646,30 @@ class _PDFViewerScreenState
         ),
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
+          IconButton(
+  icon: const Icon(Icons.bookmark_add, color: Colors.greenAccent),
+  onPressed: () async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    await FirebaseFirestore.instance
+        .collection('reading_positions')
+        .add({
+      'userEmail': user.email,
+      'pdfTitle': widget.title,
+      'pageNumber': 0,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reading position saved'),
+        ),
+      );
+    }
+  },
+),
   IconButton(
     icon: const Icon(Icons.note_add, color: Colors.greenAccent),
     onPressed: () {
