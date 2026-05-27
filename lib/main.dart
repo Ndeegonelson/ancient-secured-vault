@@ -643,10 +643,12 @@ void initState() {
 
   @override
   Widget build(BuildContext context) {
-    final viewId =
-    'pdf-viewer-${widget.pdfUrl.hashCode}';
     final savedPage =
     latestReadingPosition?['pageNumber'] ?? 0;
+    
+    final viewId =
+    'pdf-viewer-${widget.pdfUrl.hashCode}-$savedPage';
+    
 
     ui.platformViewRegistry.registerViewFactory(
       viewId,
@@ -673,27 +675,86 @@ void initState() {
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
           IconButton(
-  icon: const Icon(Icons.bookmark_add, color: Colors.greenAccent),
+  icon: const Icon(
+    Icons.bookmark_add,
+    color: Colors.greenAccent,
+  ),
   onPressed: () async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final pageController = TextEditingController();
 
-    await FirebaseFirestore.instance
-        .collection('reading_positions')
-        .add({
-      'userEmail': user.email,
-      'pdfTitle': widget.title,
-      'pageNumber': 0,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Save Reading Position',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: TextField(
+              controller: pageController,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'Enter current page',
+                hintStyle: TextStyle(color: Colors.white54),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  final user =
+                      FirebaseAuth.instance.currentUser;
 
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Reading position saved'),
-        ),
-      );
-    }
+                  if (user == null) return;
+
+                  final page =
+                      int.tryParse(pageController.text) ?? 0;
+
+                  await FirebaseFirestore.instance
+                      .collection('reading_positions')
+                      .add({
+                    'userEmail': user.email,
+                    'pdfTitle': widget.title,
+                    'pageNumber': page,
+                    'createdAt':
+                        FieldValue.serverTimestamp(),
+                  });
+
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Reading position saved: Page $page',
+                        ),
+                      ),
+                    );
+                  }
+
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text(
+                  'Save',
+                  style:
+                      TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   },
 ),
 IconButton(
