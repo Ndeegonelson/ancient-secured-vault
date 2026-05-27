@@ -670,6 +670,89 @@ class _PDFViewerScreenState
     }
   },
 ),
+IconButton(
+  icon: const Icon(Icons.history, color: Colors.greenAccent),
+  onPressed: () async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF0F1117),
+          title: const Text(
+            'Saved Reading Positions',
+            style: TextStyle(color: Colors.greenAccent),
+          ),
+          content: SizedBox(
+            width: 400,
+            height: 400,
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('reading_positions')
+                  .where('userEmail', isEqualTo: user.email)
+                  .where('pdfTitle', isEqualTo: widget.title)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
+
+                final positions = snapshot.data!.docs;
+
+                if (positions.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'No saved positions yet.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  itemCount: positions.length,
+                  itemBuilder: (context, index) {
+                    final position =
+                        positions[index].data() as Map<String, dynamic>;
+
+                    return Card(
+                      color: const Color(0xFF1A1D26),
+                      child: ListTile(
+                        title: Text(
+                          'Saved Position ${index + 1}',
+                          style:
+                              const TextStyle(color: Colors.white),
+                        ),
+                        subtitle: Text(
+                          'Page: ${position['pageNumber']}',
+                          style:
+                              const TextStyle(color: Colors.white54),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(),
+              child: const Text(
+                'Close',
+                style: TextStyle(color: Colors.greenAccent),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  },
+),
   IconButton(
     icon: const Icon(Icons.note_add, color: Colors.greenAccent),
     onPressed: () {
