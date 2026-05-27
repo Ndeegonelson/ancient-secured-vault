@@ -617,17 +617,43 @@ class _PDFViewerScreenState
 
   final TextEditingController searchController =
       TextEditingController();
+      Map<String, dynamic>? latestReadingPosition;
+      Future<void> loadLatestReadingPosition() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+
+  final snapshot = await FirebaseFirestore.instance
+      .collection('reading_positions')
+      .where('userEmail', isEqualTo: user.email)
+      .where('pdfTitle', isEqualTo: widget.title)
+      .get();
+
+  if (snapshot.docs.isNotEmpty) {
+    setState(() {
+      latestReadingPosition =
+          snapshot.docs.last.data();
+    });
+  }
+}
+@override
+void initState() {
+  super.initState();
+  loadLatestReadingPosition();
+}
 
   @override
   Widget build(BuildContext context) {
     final viewId =
     'pdf-viewer-${widget.pdfUrl.hashCode}';
+    final savedPage =
+    latestReadingPosition?['pageNumber'] ?? 0;
 
     ui.platformViewRegistry.registerViewFactory(
       viewId,
       (int viewId) {
         final iframe = html.IFrameElement()
-          ..src = '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1'
+          ..src =
+    '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1&page=$savedPage'
           ..style.border = 'none'
           ..style.width = '100%'
           ..style.height = '100%';
