@@ -676,26 +676,25 @@ void initState() {
         ),
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
-          IconButton(
+        IconButton(
   icon: const Icon(
     Icons.search,
-size: 20,
+    size: 20,
     color: Colors.greenAccent,
   ),
   onPressed: () {
     showDialog(
       context: context,
-      builder: (context) {
-        return PointerInterceptor(
-          child: AlertDialog(
+      builder: (dialogContext) {
+        return AlertDialog(
           backgroundColor: const Color(0xFF0F1117),
           title: const Text(
             'Search PDF',
             style: TextStyle(color: Colors.greenAccent),
           ),
           content: TextField(
-  autofocus: true,
-  controller: searchController,
+            autofocus: true,
+            controller: searchController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
               hintText: 'Enter keyword',
@@ -708,7 +707,7 @@ size: 20,
                 setState(() {
                   searchQuery = searchController.text;
                 });
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
               },
               child: const Text(
                 'Search',
