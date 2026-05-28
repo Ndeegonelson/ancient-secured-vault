@@ -58,6 +58,40 @@ class HomeScreen extends StatelessWidget {
           style: TextStyle(
             color: Colors.greenAccent,
             fontWeight: FontWeight.bold,
+            appBar: AppBar(
+  backgroundColor: Colors.black,
+  centerTitle: true,
+  title: const Text(
+    'Ancient Secure Docs',
+    style: TextStyle(
+      color: Colors.greenAccent,
+      fontWeight: FontWeight.bold,
+    ),
+  ),
+
+  actions: [
+    IconButton(
+      icon: const Icon(
+        Icons.search,
+        color: Colors.greenAccent,
+      ),
+      onPressed: () {
+        showDialog(
+          context: context,
+          builder: (context) {
+            return const AlertDialog(
+              backgroundColor: Color(0xFF0F1117),
+              content: Text(
+                'Global Search Coming Next...',
+                style: TextStyle(color: Colors.white),
+              ),
+            );
+          },
+        );
+      },
+    ),
+  ],
+),
           ),
         ),
       ),
