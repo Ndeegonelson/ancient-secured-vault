@@ -15,6 +15,7 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -620,6 +621,9 @@ class _PDFViewerScreenState
 
   final TextEditingController searchController =
       TextEditingController();
+
+final PdfViewerController pdfViewerController = PdfViewerController();
+final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
 
       String searchQuery = '';
       Map<String, dynamic>? latestReadingPosition;
@@ -1370,7 +1374,7 @@ IconButton(
       ),
       body: Stack(
         children: [
-          HtmlElementView(viewType: viewId),
+         HtmlElementView(viewType: viewId),
 
           Positioned.fill(
             child: IgnorePointer(
