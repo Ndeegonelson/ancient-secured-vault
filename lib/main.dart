@@ -623,6 +623,8 @@ class _PDFViewerScreenState
 
       String searchQuery = '';
       Map<String, dynamic>? latestReadingPosition;
+      int currentPdfPage = 0;
+
       Future<void> loadLatestReadingPosition() async {
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) return;
@@ -676,10 +678,10 @@ void initState() {
   @override
   Widget build(BuildContext context) {
     final savedPage =
-    latestReadingPosition?['pageNumber'] ?? 0;
+    currentPdfPage != 0 ? currentPdfPage : latestReadingPosition?['pageNumber'] ?? 0;
 
     final viewId =
-    'pdf-viewer-${widget.pdfUrl.hashCode}-$savedPage';
+    'pdf-viewer-${widget.pdfUrl.hashCode}-$savedPage-${DateTime.now().millisecondsSinceEpoch}';
     
 
     ui.platformViewRegistry.registerViewFactory(
@@ -744,7 +746,8 @@ if (keyword.isEmpty) return;
 showDialog(
   context: context,
   builder: (resultContext) {
-    return AlertDialog(
+    return PointerInterceptor(
+  child: AlertDialog(
       backgroundColor: const Color(0xFF0F1117),
       title: Text(
         'Search Results: $keyword',
@@ -779,18 +782,29 @@ showDialog(
 
                 return Card(
                   color: const Color(0xFF1A1D26),
-                  child: ListTile(
-                    title: Text(
-                      'Page ${data['pageNumber']}',
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    subtitle: Text(
-                      data['text'].toString(),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54),
-                    ),
-                  ),
+                 child: ListTile(
+  onTap: () {
+    Navigator.pop(resultContext);
+
+    final page = data['pageNumber'] ?? 1;
+
+    setState(() {
+  currentPdfPage = page;
+});
+  },
+
+  title: Text(
+    'Page ${data['pageNumber']}',
+    style: const TextStyle(color: Colors.white),
+  ),
+
+  subtitle: Text(
+    data['text'].toString(),
+    maxLines: 3,
+    overflow: TextOverflow.ellipsis,
+    style: const TextStyle(color: Colors.white54),
+  ),
+),
                 );
               },
             );
@@ -806,6 +820,7 @@ showDialog(
           ),
         ),
       ],
+     ),
     );
   },
 );
