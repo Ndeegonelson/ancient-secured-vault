@@ -642,7 +642,60 @@ class _PDFViewerScreenState
     });
   }
 }
- 
+ List<TextSpan> highlightSearchText(String text, String keyword) {
+  if (keyword.isEmpty) {
+    return [
+      TextSpan(
+        text: text,
+        style: const TextStyle(color: Colors.white54),
+      ),
+    ];
+  }
+
+  final spans = <TextSpan>[];
+  final lowerText = text.toLowerCase();
+  final lowerKeyword = keyword.toLowerCase();
+
+  int start = 0;
+  int index = lowerText.indexOf(lowerKeyword);
+
+  while (index != -1) {
+    if (index > start) {
+      spans.add(
+        TextSpan(
+          text: text.substring(start, index),
+          style: const TextStyle(color: Colors.white54),
+        ),
+      );
+    }
+
+    spans.add(
+      TextSpan(
+        text: text.substring(index, index + keyword.length),
+        style: const TextStyle(
+          color: Colors.black,
+          backgroundColor: Colors.greenAccent,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+
+    start = index + keyword.length;
+    index = lowerText.indexOf(lowerKeyword, start);
+  }
+
+  if (start < text.length) {
+    spans.add(
+      TextSpan(
+        text: text.substring(start),
+        style: const TextStyle(color: Colors.white54),
+      ),
+    );
+  }
+
+  return spans;
+}
+
 Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
   final response = await http.get(Uri.parse(widget.pdfUrl));
 
@@ -657,12 +710,22 @@ Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
       endPageIndex: i,
     );
 
-    if (text.toLowerCase().contains(keyword.toLowerCase())) {
-      results.add({
-        'pageNumber': i + 1,
-        'text': text,
-      });
-    }
+   final lowerText = text.toLowerCase();
+final lowerKeyword = keyword.toLowerCase();
+final matchIndex = lowerText.indexOf(lowerKeyword);
+
+if (matchIndex != -1) {
+  final snippetStart = matchIndex - 80 < 0 ? 0 : matchIndex - 80;
+  final snippetEnd =
+      matchIndex + 180 > text.length ? text.length : matchIndex + 180;
+
+  final snippet = text.substring(snippetStart, snippetEnd);
+
+  results.add({
+    'pageNumber': i + 1,
+    'text': snippet,
+  });
+}
   }
 
   document.dispose();
@@ -798,12 +861,16 @@ showDialog(
     style: const TextStyle(color: Colors.white),
   ),
 
-  subtitle: Text(
-    data['text'].toString(),
-    maxLines: 3,
-    overflow: TextOverflow.ellipsis,
-    style: const TextStyle(color: Colors.white54),
+  subtitle: RichText(
+  maxLines: 3,
+  overflow: TextOverflow.ellipsis,
+  text: TextSpan(
+    children: highlightSearchText(
+      data['text'].toString(),
+      keyword,
+    ),
   ),
+),
 ),
                 );
               },
