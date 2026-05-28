@@ -617,6 +617,8 @@ class _PDFViewerScreenState
 
   final TextEditingController searchController =
       TextEditingController();
+
+      String searchQuery = '';
       Map<String, dynamic>? latestReadingPosition;
       Future<void> loadLatestReadingPosition() async {
   final user = FirebaseAuth.instance.currentUser;
@@ -645,7 +647,7 @@ void initState() {
   Widget build(BuildContext context) {
     final savedPage =
     latestReadingPosition?['pageNumber'] ?? 0;
-    
+
     final viewId =
     'pdf-viewer-${widget.pdfUrl.hashCode}-$savedPage';
     
@@ -676,7 +678,51 @@ void initState() {
         actions: [
           IconButton(
   icon: const Icon(
+    Icons.search,
+size: 20,
+    color: Colors.greenAccent,
+  ),
+  onPressed: () {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF0F1117),
+          title: const Text(
+            'Search PDF',
+            style: TextStyle(color: Colors.greenAccent),
+          ),
+          content: TextField(
+            controller: searchController,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: 'Enter keyword',
+              hintStyle: TextStyle(color: Colors.grey),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  searchQuery = searchController.text;
+                });
+                Navigator.pop(context);
+              },
+              child: const Text(
+                'Search',
+                style: TextStyle(color: Colors.greenAccent),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  },
+),
+          IconButton(
+  icon: const Icon(
     Icons.bookmark_add,
+    size: 20,
     color: Colors.greenAccent,
   ),
   onPressed: () async {
@@ -758,7 +804,8 @@ void initState() {
   },
 ),
 IconButton(
-  icon: const Icon(Icons.history, color: Colors.greenAccent),
+  icon: const Icon(Icons.history, size: 20, color: Colors.greenAccent),
+ 
   onPressed: () async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -841,7 +888,8 @@ IconButton(
   },
 ),
   IconButton(
-    icon: const Icon(Icons.note_add, color: Colors.greenAccent),
+    icon: const Icon(Icons.note_add, size: 20, color: Colors.greenAccent),
+    
     onPressed: () {
  showDialog(
   barrierDismissible: false,
@@ -910,7 +958,8 @@ IconButton(
 },
   ),
 IconButton(
-  icon: const Icon(Icons.list_alt, color: Colors.greenAccent),
+  icon: const Icon(Icons.list_alt, size: 20, color: Colors.greenAccent),
+ 
   onPressed: () async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -985,7 +1034,8 @@ IconButton(
           context: context,
 
           builder: (context) {
-            return AlertDialog(
+  return PointerInterceptor(
+    child: AlertDialog(
               backgroundColor: const Color(0xFF0F1117),
 
               title: const Text(
@@ -1031,6 +1081,7 @@ IconButton(
                   ),
                 ),
               ],
+              ),
             );
           },
         );
