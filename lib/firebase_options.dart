@@ -71,4 +71,5 @@ class DefaultFirebaseOptions {
     authDomain: 'ancient--docs.firebaseapp.com',
     storageBucket: 'ancient--docs.firebasestorage.app',
   );
+
 }

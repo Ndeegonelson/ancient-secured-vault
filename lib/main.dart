@@ -12,6 +12,10 @@ import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:ui_web' as ui;
 import 'package:pointer_interceptor/pointer_interceptor.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -20,7 +24,6 @@ void main() async {
   );
 
   runApp(const AncientSecureDocsApp());
-
 }
 
 class AncientSecureDocsApp extends StatelessWidget {
@@ -637,6 +640,33 @@ class _PDFViewerScreenState
     });
   }
 }
+ 
+Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
+  final response = await http.get(Uri.parse(widget.pdfUrl));
+
+  final document = PdfDocument(inputBytes: response.bodyBytes);
+  final extractor = PdfTextExtractor(document);
+
+  final results = <Map<String, dynamic>>[];
+
+  for (int i = 0; i < document.pages.count; i++) {
+    final text = extractor.extractText(
+      startPageIndex: i,
+      endPageIndex: i,
+    );
+
+    if (text.toLowerCase().contains(keyword.toLowerCase())) {
+      results.add({
+        'pageNumber': i + 1,
+        'text': text,
+      });
+    }
+  }
+
+  document.dispose();
+  return results;
+}
+
 @override
 void initState() {
   super.initState();
@@ -702,17 +732,89 @@ void initState() {
             ),
           ),
           actions: [
-            TextButton(
+            PointerInterceptor(
+  child: TextButton(
               onPressed: () {
-                setState(() {
-                  searchQuery = searchController.text;
-                });
-                Navigator.pop(dialogContext);
+               final keyword = searchController.text.trim();
+
+Navigator.pop(dialogContext);
+
+if (keyword.isEmpty) return;
+
+showDialog(
+  context: context,
+  builder: (resultContext) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF0F1117),
+      title: Text(
+        'Search Results: $keyword',
+        style: const TextStyle(color: Colors.greenAccent),
+      ),
+      content: SizedBox(
+        width: 500,
+        height: 450,
+        child: FutureBuilder<List<Map<String, dynamic>>>(
+  future: searchPdfText(keyword),
+          
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final results = snapshot.data!;
+
+            if (results.isEmpty) {
+              return const Center(
+                child: Text(
+                  'No matching results found.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              );
+            }
+
+            return ListView.builder(
+              itemCount: results.length,
+              itemBuilder: (context, index) {
+                final data = results[index];
+
+                return Card(
+                  color: const Color(0xFF1A1D26),
+                  child: ListTile(
+                    title: Text(
+                      'Page ${data['pageNumber']}',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    subtitle: Text(
+                      data['text'].toString(),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(resultContext),
+          child: const Text(
+            'Close',
+            style: TextStyle(color: Colors.greenAccent),
+          ),
+        ),
+      ],
+    );
+  },
+);
               },
               child: const Text(
                 'Search',
                 style: TextStyle(color: Colors.greenAccent),
               ),
+  ),
             ),
           ],
         );
@@ -749,7 +851,7 @@ void initState() {
               ),
             ),
             actions: [
-              TextButton(
+             TextButton( 
                 onPressed: () {
                   Navigator.pop(dialogContext);
                 },
