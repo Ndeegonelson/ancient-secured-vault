@@ -686,14 +686,16 @@ size: 20,
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
+        return PointerInterceptor(
+          child: AlertDialog(
           backgroundColor: const Color(0xFF0F1117),
           title: const Text(
             'Search PDF',
             style: TextStyle(color: Colors.greenAccent),
           ),
           content: TextField(
-            controller: searchController,
+  autofocus: true,
+  controller: searchController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
               hintText: 'Enter keyword',
