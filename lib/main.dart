@@ -451,6 +451,29 @@ Future<void> indexPdfForSearch({
   document.dispose();
 }
 
+Future<void> indexExistingVaultPdfs() async {
+  final result = await FirebaseStorage.instance.ref('vault_pdfs').listAll();
+
+  for (final item in result.items) {
+    final url = await item.getDownloadURL();
+
+    final response = await http.get(Uri.parse(url));
+
+    await indexPdfForSearch(
+      pdfBytes: response.bodyBytes,
+      pdfUrl: url,
+      pdfTitle: item.name,
+      accessLevel: 'premium',
+    );
+  }
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Existing vault PDFs indexed successfully'),
+    ),
+  );
+}
+
   Future<void> loadPDFs() async {
     setState(() {
       isLoading = true;
@@ -556,6 +579,54 @@ Future<void> globalSearch() async {
     },
   );
 }
+List<TextSpan> highlightSearchText(
+  String text,
+  String keyword,
+) {
+  final lowerText = text.toLowerCase();
+  final lowerKeyword = keyword.toLowerCase();
+
+  final spans = <TextSpan>[];
+
+  int start = 0;
+
+  while (true) {
+    final index = lowerText.indexOf(lowerKeyword, start);
+
+    if (index == -1) {
+      spans.add(
+        TextSpan(
+          text: text.substring(start),
+          style: const TextStyle(color: Colors.white70),
+        ),
+      );
+      break;
+    }
+
+    if (index > start) {
+      spans.add(
+        TextSpan(
+          text: text.substring(start, index),
+          style: const TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+
+    spans.add(
+      TextSpan(
+        text: text.substring(index, index + keyword.length),
+        style: const TextStyle(
+          color: Colors.yellow,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+
+    start = index + keyword.length;
+  }
+
+  return spans;
+}
 
 Future<void> showGlobalSearchResults(String keyword) async {
   showDialog(
@@ -614,10 +685,26 @@ Future<void> showGlobalSearchResults(String keyword) async {
                         data['pdfTitle'] ?? '',
                         style: const TextStyle(color: Colors.white),
                       ),
-                      subtitle: Text(
-                        'Page ${data['pageNumber']}',
-                        style: const TextStyle(color: Colors.white70),
-                      ),
+                      subtitle: Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+    Text(
+      'Page ${data['pageNumber']}',
+      style: const TextStyle(color: Colors.white70),
+    ),
+    const SizedBox(height: 6),
+    RichText(
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        children: highlightSearchText(
+          data['text'].toString(),
+          keyword,
+        ),
+      ),
+    ),
+  ],
+),
                       onTap: () {
                         Navigator.pop(resultContext);
 
@@ -679,7 +766,8 @@ Future<void> showGlobalSearchResults(String keyword) async {
           ),
         ],
       ),
-      body: SizedBox.expand(
+      body: SafeArea(
+  child: SizedBox.expand(
   child: Padding(
     padding: const EdgeInsets.all(20),
     child: isLoading
@@ -809,6 +897,7 @@ const SizedBox(height: 30),
       ),
       ),
       ),
+      ),
     );
   }
 }
@@ -859,29 +948,36 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
     });
   }
 }
- List<TextSpan> highlightSearchText(String text, String keyword) {
-  if (keyword.isEmpty) {
-    return [
-      TextSpan(
-        text: text,
-        style: const TextStyle(color: Colors.white54),
-      ),
-    ];
-  }
 
-  final spans = <TextSpan>[];
+ List<TextSpan> highlightSearchText(
+  String text,
+  String keyword,
+) {
   final lowerText = text.toLowerCase();
   final lowerKeyword = keyword.toLowerCase();
 
-  int start = 0;
-  int index = lowerText.indexOf(lowerKeyword);
+  final spans = <TextSpan>[];
 
-  while (index != -1) {
+  int start = 0;
+
+  while (true) {
+    final index = lowerText.indexOf(lowerKeyword, start);
+
+    if (index == -1) {
+      spans.add(
+        TextSpan(
+          text: text.substring(start),
+          style: const TextStyle(color: Colors.white70),
+        ),
+      );
+      break;
+    }
+
     if (index > start) {
       spans.add(
         TextSpan(
           text: text.substring(start, index),
-          style: const TextStyle(color: Colors.white54),
+          style: const TextStyle(color: Colors.white70),
         ),
       );
     }
@@ -890,24 +986,13 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       TextSpan(
         text: text.substring(index, index + keyword.length),
         style: const TextStyle(
-          color: Colors.black,
-          backgroundColor: Colors.greenAccent,
+          color: Colors.yellow,
           fontWeight: FontWeight.bold,
         ),
       ),
     );
 
     start = index + keyword.length;
-    index = lowerText.indexOf(lowerKeyword, start);
-  }
-
-  if (start < text.length) {
-    spans.add(
-      TextSpan(
-        text: text.substring(start),
-        style: const TextStyle(color: Colors.white54),
-      ),
-    );
   }
 
   return spans;
@@ -939,9 +1024,11 @@ if (matchIndex != -1) {
   final snippet = text.substring(snippetStart, snippetEnd);
 
   results.add({
-    'pageNumber': i + 1,
-    'text': snippet,
-  });
+  'pdfTitle': widget.title,
+  'pdfUrl': widget.pdfUrl,
+  'pageNumber': i + 1,
+  'text': snippet,
+});
 }
   }
 
@@ -1080,17 +1167,32 @@ showDialog(
     'Page ${data['pageNumber']}',
     style: const TextStyle(color: Colors.white),
   ),
+subtitle: Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
 
-  subtitle: RichText(
-  maxLines: 3,
-  overflow: TextOverflow.ellipsis,
-  text: TextSpan(
-    children: highlightSearchText(
-      data['text'].toString(),
-      keyword,
+    Text(
+      'Page ${data['pageNumber']}',
+      style: const TextStyle(
+        color: Colors.white70,
+      ),
     ),
-  ),
+
+    const SizedBox(height: 6),
+
+    RichText(
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        children: highlightSearchText(
+          data['text'].toString(),
+          keyword,
+        ),
+      ),
+    ),
+  ],
 ),
+  
 ),
                 );
               },
