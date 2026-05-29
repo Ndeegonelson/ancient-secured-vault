@@ -50,14 +50,6 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        centerTitle: true,
-        title: const Text(
-          'Ancient Secure Docs',
-          style: TextStyle(
-            color: Colors.greenAccent,
-            fontWeight: FontWeight.bold,
             appBar: AppBar(
   backgroundColor: Colors.black,
   centerTitle: true,
@@ -69,32 +61,7 @@ class HomeScreen extends StatelessWidget {
     ),
   ),
 
-  actions: [
-    IconButton(
-      icon: const Icon(
-        Icons.search,
-        color: Colors.greenAccent,
-      ),
-      onPressed: () {
-        showDialog(
-          context: context,
-          builder: (context) {
-            return const AlertDialog(
-              backgroundColor: Color(0xFF0F1117),
-              content: Text(
-                'Global Search Coming Next...',
-                style: TextStyle(color: Colors.white),
-              ),
-            );
-          },
-        );
-      },
-    ),
-  ],
 ),
-          ),
-        ),
-      ),
 
       body: Padding(
        padding: const EdgeInsets.all(20),
@@ -477,6 +444,66 @@ Future<void> saveUserNote({
     });
   }
 
+Future<void> globalSearch() async {
+  final keywordController = TextEditingController();
+
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF0F1117),
+
+        title: const Text(
+          'Global Vault Search',
+          style: TextStyle(color: Colors.greenAccent),
+        ),
+
+        content: TextField(
+          controller: keywordController,
+          style: const TextStyle(color: Colors.white),
+
+          decoration: const InputDecoration(
+            hintText: 'Search all vault PDFs...',
+            hintStyle: TextStyle(color: Colors.white54),
+          ),
+        ),
+
+        actions: [
+
+  TextButton(
+    onPressed: () {
+      final keyword = keywordController.text.trim();
+
+      if (keyword.isEmpty) return;
+
+      Navigator.pop(context);
+
+      print('Global search keyword: $keyword');
+    },
+
+    child: const Text(
+      'Search',
+      style: TextStyle(color: Colors.greenAccent),
+    ),
+  ),
+
+  TextButton(
+    onPressed: () {
+      Navigator.pop(context);
+    },
+
+    child: const Text(
+      'Close',
+      style: TextStyle(color: Colors.greenAccent),
+    ),
+  ),
+
+],
+      );
+    },
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -495,7 +522,14 @@ Future<void> saveUserNote({
             IconButton(
               icon: const Icon(Icons.upload_file, color: Colors.greenAccent),
               onPressed: uploadPDF,
-            ),           
+            ),
+            IconButton(
+  icon: const Icon(
+    Icons.search,
+    color: Colors.greenAccent,
+  ),
+ onPressed: globalSearch,
+),           
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.greenAccent),
             onPressed: () async {
@@ -505,9 +539,10 @@ Future<void> saveUserNote({
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-       child: isLoading
+      body: SizedBox.expand(
+  child: Padding(
+    padding: const EdgeInsets.all(20),
+    child: isLoading
     ? const Center(child: CircularProgressIndicator())
     : SingleChildScrollView(
         child: Column(
@@ -631,6 +666,7 @@ const SizedBox(height: 30),
           ],
           ],
         ),
+      ),
       ),
       ),
     );
