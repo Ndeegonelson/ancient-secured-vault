@@ -368,35 +368,88 @@ Future<void> saveUserNote({
   }
 
   Future<void> uploadPDF() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-        withData: true,
-      );
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+      withData: true,
+    );
 
-      if (result != null) {
-        final fileBytes = result.files.first.bytes;
-        final fileName = result.files.first.name;
+    if (result != null) {
+      final fileBytes = result.files.first.bytes;
+      final fileName = result.files.first.name;
 
-        if (fileBytes != null) {
-          await FirebaseStorage.instance
-              .ref('vault_pdfs/$fileName')
-              .putData(fileBytes);
+      if (fileBytes != null) {
+        final ref = FirebaseStorage.instance.ref('vault_pdfs/$fileName');
 
-          await loadPDFs();
+        await ref.putData(fileBytes);
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$fileName uploaded successfully')),
-          );
-        }
+        final pdfUrl = await ref.getDownloadURL();
+
+        await indexPdfForSearch(
+          pdfBytes: fileBytes,
+          pdfUrl: pdfUrl,
+          pdfTitle: fileName,
+          accessLevel: 'premium',
+        );
+
+        await loadPDFs();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$fileName uploaded and indexed successfully'),
+          ),
+        );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
     }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(e.toString())),
+    );
   }
+}
+
+Future<void> indexPdfForSearch({
+  required Uint8List pdfBytes,
+  required String pdfUrl,
+  required String pdfTitle,
+  required String accessLevel,
+}) async {
+  final document = PdfDocument(inputBytes: pdfBytes);
+  final extractor = PdfTextExtractor(document);
+
+  for (int i = 0; i < document.pages.count; i++) {
+    final text = extractor.extractText(
+      startPageIndex: i,
+      endPageIndex: i,
+    );
+
+    if (text.trim().isEmpty) continue;
+
+    final lowerText = text.toLowerCase();
+
+    final keywords = lowerText
+        .replaceAll(RegExp(r'[^a-zA-Z0-9 ]'), ' ')
+        .split(' ')
+        .where((word) => word.trim().length > 2)
+        .toSet()
+        .take(300)
+        .toList();
+
+    await FirebaseFirestore.instance.collection('pdf_search_index').add({
+      'pdfTitle': pdfTitle,
+      'pdfUrl': pdfUrl,
+      'pageNumber': i + 1,
+      'text': text.length > 1200 ? text.substring(0, 1200) : text,
+      'textLower': lowerText,
+      'keywords': keywords,
+      'accessLevel': accessLevel,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  document.dispose();
+}
 
   Future<void> loadPDFs() async {
     setState(() {
@@ -478,7 +531,7 @@ Future<void> globalSearch() async {
 
       Navigator.pop(context);
 
-      print('Global search keyword: $keyword');
+      showGlobalSearchResults(keyword);
     },
 
     child: const Text(
@@ -499,6 +552,93 @@ Future<void> globalSearch() async {
   ),
 
 ],
+      );
+    },
+  );
+}
+
+Future<void> showGlobalSearchResults(String keyword) async {
+  showDialog(
+    context: context,
+    builder: (resultContext) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF0F1117),
+        title: Text(
+          'Search Results: $keyword',
+          style: const TextStyle(color: Colors.greenAccent),
+        ),
+        content: SizedBox(
+          width: 500,
+          height: 450,
+          child: FutureBuilder<QuerySnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('pdf_search_index')
+                .where(
+                  'keywords',
+                  arrayContains: keyword.toLowerCase(),
+                )
+                .limit(30)
+                .get(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(
+                  child: CircularProgressIndicator(),
+                );
+              }
+
+              final docs = snapshot.data!.docs;
+
+              if (docs.isEmpty) {
+                return const Center(
+                  child: Text(
+                    'No search results found.',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                );
+              }
+
+              return ListView.builder(
+                itemCount: docs.length,
+                itemBuilder: (context, index) {
+                  final data =
+                      docs[index].data() as Map<String, dynamic>;
+
+                  return Card(
+                    color: const Color(0xFF161616),
+                    child: ListTile(
+                      leading: const Icon(
+                        Icons.picture_as_pdf,
+                        color: Colors.greenAccent,
+                      ),
+                      title: Text(
+                        data['pdfTitle'] ?? '',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        'Page ${data['pageNumber']}',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      onTap: () {
+                        Navigator.pop(resultContext);
+
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => PDFViewerScreen(
+                              pdfUrl: data['pdfUrl'],
+                              title: data['pdfTitle'],
+                              initialPage: data['pageNumber'] ?? 0,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
       );
     },
   );
@@ -675,12 +815,15 @@ const SizedBox(height: 30),
 class PDFViewerScreen extends StatefulWidget {
   final String pdfUrl;
   final String title;
+  final int initialPage;
 
   const PDFViewerScreen({
-    super.key,
-    required this.pdfUrl,
-    required this.title,
-  });
+  super.key,
+  required this.pdfUrl,
+  required this.title,
+  this.initialPage = 0,
+});
+
   @override
 State<PDFViewerScreen> createState() =>
     _PDFViewerScreenState();
@@ -815,8 +958,11 @@ void initState() {
   @override
   Widget build(BuildContext context) {
     final savedPage =
-    currentPdfPage != 0 ? currentPdfPage : latestReadingPosition?['pageNumber'] ?? 0;
-
+    currentPdfPage != 0
+        ? currentPdfPage
+        : widget.initialPage != 0
+            ? widget.initialPage
+            : latestReadingPosition?['pageNumber'] ?? 0;
     final viewId =
     'pdf-viewer-${widget.pdfUrl.hashCode}-$savedPage-${DateTime.now().millisecondsSinceEpoch}';
     
