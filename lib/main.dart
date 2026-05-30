@@ -452,26 +452,48 @@ Future<void> indexPdfForSearch({
 }
 
 Future<void> indexExistingVaultPdfs() async {
-  final result = await FirebaseStorage.instance.ref('vault_pdfs').listAll();
+  try {
+    Future<void> indexFolder(String folderName, String level) async {
+      final result = await FirebaseStorage.instance.ref(folderName).listAll();
 
-  for (final item in result.items) {
-    final url = await item.getDownloadURL();
+      for (final item in result.items) {
+        final existing = await FirebaseFirestore.instance
+            .collection('pdf_search_index')
+            .where('pdfTitle', isEqualTo: item.name)
+            .limit(1)
+            .get();
 
-    final response = await http.get(Uri.parse(url));
+        if (existing.docs.isNotEmpty) {
+          continue;
+        }
 
-    await indexPdfForSearch(
-      pdfBytes: response.bodyBytes,
-      pdfUrl: url,
-      pdfTitle: item.name,
-      accessLevel: 'premium',
+        final url = await item.getDownloadURL();
+        final response = await http
+    .get(Uri.parse(url))
+    .timeout(const Duration(seconds: 25));
+
+        await indexPdfForSearch(
+          pdfBytes: response.bodyBytes,
+          pdfUrl: url,
+          pdfTitle: item.name,
+          accessLevel: level,
+        );
+      }
+    }
+
+    await indexFolder('free_pdfs', 'free');
+    await indexFolder('vault_pdfs', 'premium');
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('All vault PDFs indexed successfully'),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Indexing failed: $e')),
     );
   }
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Existing vault PDFs indexed successfully'),
-    ),
-  );
 }
 
   Future<void> loadPDFs() async {
@@ -715,6 +737,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
                               pdfUrl: data['pdfUrl'],
                               title: data['pdfTitle'],
                               initialPage: data['pageNumber'] ?? 0,
+                              initialSearchQuery: keyword,
                             ),
                           ),
                         );
@@ -755,7 +778,9 @@ Future<void> showGlobalSearchResults(String keyword) async {
     Icons.search,
     color: Colors.greenAccent,
   ),
- onPressed: globalSearch,
+
+onPressed: globalSearch,
+
 ),           
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.greenAccent),
@@ -905,12 +930,14 @@ class PDFViewerScreen extends StatefulWidget {
   final String pdfUrl;
   final String title;
   final int initialPage;
+final String initialSearchQuery;
 
   const PDFViewerScreen({
   super.key,
   required this.pdfUrl,
   required this.title,
   this.initialPage = 0,
+  this.initialSearchQuery = '',
 });
 
   @override
@@ -1059,7 +1086,7 @@ void initState() {
       (int viewId) {
         final iframe = html.IFrameElement()
           ..src =
-    '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1&page=$savedPage'
+    '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1&page=$savedPage&search=${Uri.encodeComponent(widget.initialSearchQuery)}'
           ..style.border = 'none'
           ..style.width = '100%'
           ..style.height = '100%';
@@ -1084,8 +1111,9 @@ void initState() {
     size: 20,
     color: Colors.greenAccent,
   ),
-  onPressed: () {
-    showDialog(
+
+ onPressed: () async {
+  showDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
@@ -1095,7 +1123,9 @@ void initState() {
             style: TextStyle(color: Colors.greenAccent),
           ),
           content: TextField(
-            autofocus: true,
+               enabled: true,
+               readOnly: false,
+               autofocus: true,
             controller: searchController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
