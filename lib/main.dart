@@ -1328,19 +1328,6 @@ Expanded(
 
             final results = snapshot.data!;
 
-            List<Map<String, dynamic>> filteredResults = results;
-
-if (accessFilter == 'free') {
-  filteredResults = results.where((doc) {
-    return (doc['accessLevel'] ?? 'free') == 'free';
-  }).toList();
-}
-
-if (accessFilter == 'premium') {
-  filteredResults = results.where((doc) {
-    return (doc['accessLevel'] ?? 'free') == 'premium';
-  }).toList();
-}
 
             if (results.isEmpty) {
               return const Center(
@@ -1352,9 +1339,9 @@ if (accessFilter == 'premium') {
             }
 
             return ListView.builder(
-              itemCount: filteredResults.length,
+              itemCount: results.length,
               itemBuilder: (context, index) {
-                final data = filteredResults[index];
+                final data = results[index];
 
                 return Card(
                   color: const Color(0xFF1A1D26),
