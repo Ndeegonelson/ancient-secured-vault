@@ -320,6 +320,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool hasActiveSubscription = false;
   String accessLevel = 'free';
   String searchMode = 'all';
+  String accessFilter = 'all';
   List<Map<String, dynamic>> userNotes = [];
 
   @override
@@ -1024,7 +1025,7 @@ class _PDFViewerScreenState
   final TextEditingController searchController =
       TextEditingController();
 
-      String searchMode = 'all';
+      String accessFilter = 'all';
 
 final PdfViewerController pdfViewerController = PdfViewerController();
 final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
@@ -1241,30 +1242,30 @@ showDialog(
 
       ChoiceChip(
         label: const Text('All'),
-        selected: searchMode == 'all',
+        selected: accessFilter == 'all',
         onSelected: (_) {
           setState(() {
-            searchMode = 'all';
+            accessFilter = 'all';
           });
         },
       ),
 
       ChoiceChip(
-        label: const Text('Titles'),
-        selected: searchMode == 'title',
+       label: const Text('Free'),
+        selected: accessFilter == 'free',
         onSelected: (_) {
           setState(() {
-            searchMode = 'title';
+            accessFilter = 'free';
           });
         },
       ),
 
       ChoiceChip(
-        label: const Text('Content'),
-        selected: searchMode == 'content',
+        label: const Text('Premium'),
+        selected: accessFilter == 'premium',
         onSelected: (_) {
           setState(() {
-            searchMode = 'content';
+            accessFilter = 'premium';
           });
         },
       ),
@@ -1284,6 +1285,20 @@ Expanded(
 
             final results = snapshot.data!;
 
+            List<Map<String, dynamic>> filteredResults = results;
+
+if (accessFilter == 'free') {
+  filteredResults = results.where((doc) {
+    return (doc['accessLevel'] ?? 'free') == 'free';
+  }).toList();
+}
+
+if (accessFilter == 'premium') {
+  filteredResults = results.where((doc) {
+    return (doc['accessLevel'] ?? 'free') == 'premium';
+  }).toList();
+}
+
             if (results.isEmpty) {
               return const Center(
                 child: Text(
@@ -1294,9 +1309,9 @@ Expanded(
             }
 
             return ListView.builder(
-              itemCount: results.length,
+              itemCount: filteredResults.length,
               itemBuilder: (context, index) {
-                final data = results[index];
+                final data = filteredResults[index];
 
                 return Card(
                   color: const Color(0xFF1A1D26),
