@@ -319,6 +319,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool isAdmin = false;
   bool hasActiveSubscription = false;
   String accessLevel = 'free';
+  String searchMode = 'all';
   List<Map<String, dynamic>> userNotes = [];
 
   @override
@@ -417,6 +418,8 @@ Future<void> indexPdfForSearch({
 }) async {
   final document = PdfDocument(inputBytes: pdfBytes);
   final extractor = PdfTextExtractor(document);
+
+
 
   for (int i = 0; i < document.pages.count; i++) {
     final text = extractor.extractText(
@@ -656,14 +659,20 @@ Future<void> showGlobalSearchResults(String keyword) async {
     builder: (resultContext) {
       return AlertDialog(
         backgroundColor: const Color(0xFF0F1117),
+
         title: Text(
           'Search Results: $keyword',
           style: const TextStyle(color: Colors.greenAccent),
         ),
+
+        contentPadding: const EdgeInsets.all(20),
+
         content: SizedBox(
           width: 500,
           height: 450,
-          child: FutureBuilder<QuerySnapshot>(
+          
+         child: FutureBuilder<QuerySnapshot>(
+
             future: FirebaseFirestore.instance
                 .collection('pdf_search_index')
                 .where(
@@ -681,6 +690,37 @@ Future<void> showGlobalSearchResults(String keyword) async {
 
               final docs = snapshot.data!.docs;
 
+final seen = <String>{};
+
+final uniqueDocs = docs.where((doc) {
+  final data = doc.data() as Map<String, dynamic>;
+  final key = '${data['pdfTitle']}_${data['pageNumber']}';
+
+  if (seen.contains(key)) {
+    return false;
+  }
+
+  seen.add(key);
+  return true;
+}).toList();
+
+final rankedDocs = [...uniqueDocs];
+
+rankedDocs.sort((a, b) {
+  final aData = a.data() as Map<String, dynamic>;
+  final bData = b.data() as Map<String, dynamic>;
+
+  final aTitle = (aData['pdfTitle'] ?? '').toString().toLowerCase();
+  final bTitle = (bData['pdfTitle'] ?? '').toString().toLowerCase();
+
+  final searchTerm = keyword.toLowerCase();
+
+  final aTitleMatch = aTitle.contains(searchTerm) ? 1 : 0;
+  final bTitleMatch = bTitle.contains(searchTerm) ? 1 : 0;
+
+  return bTitleMatch.compareTo(aTitleMatch);
+});
+
               if (docs.isEmpty) {
                 return const Center(
                   child: Text(
@@ -691,10 +731,10 @@ Future<void> showGlobalSearchResults(String keyword) async {
               }
 
               return ListView.builder(
-                itemCount: docs.length,
+                itemCount: rankedDocs.length,
                 itemBuilder: (context, index) {
-                  final data =
-                      docs[index].data() as Map<String, dynamic>;
+                 final data =
+    rankedDocs[index].data() as Map<String, dynamic>;
 
                   return Card(
                     color: const Color(0xFF161616),
@@ -767,12 +807,45 @@ Future<void> showGlobalSearchResults(String keyword) async {
           'Ancient Secure Vault',
           style: TextStyle(color: Colors.greenAccent),
         ),
+
         actions: [
           if (isAdmin)
             IconButton(
               icon: const Icon(Icons.upload_file, color: Colors.greenAccent),
               onPressed: uploadPDF,
             ),
+
+if (isAdmin)
+  IconButton(
+    tooltip: 'Index Vault PDFs',
+    icon: const Icon(Icons.manage_search, color: Colors.greenAccent),
+    onPressed: () async {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(
+          backgroundColor: Color(0xFF0F1117),
+          content: Row(
+            children: [
+              CircularProgressIndicator(color: Colors.greenAccent),
+              SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  'Indexing vault PDFs...',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      await indexExistingVaultPdfs();
+
+      Navigator.pop(context);
+    },
+  ),
+
             IconButton(
   icon: const Icon(
     Icons.search,
@@ -950,6 +1023,8 @@ class _PDFViewerScreenState
 
   final TextEditingController searchController =
       TextEditingController();
+
+      String searchMode = 'all';
 
 final PdfViewerController pdfViewerController = PdfViewerController();
 final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
@@ -1156,6 +1231,49 @@ showDialog(
       content: SizedBox(
         width: 500,
         height: 450,
+        
+        child: Column(
+  children: [
+
+  Wrap(
+    spacing: 10,
+    children: [
+
+      ChoiceChip(
+        label: const Text('All'),
+        selected: searchMode == 'all',
+        onSelected: (_) {
+          setState(() {
+            searchMode = 'all';
+          });
+        },
+      ),
+
+      ChoiceChip(
+        label: const Text('Titles'),
+        selected: searchMode == 'title',
+        onSelected: (_) {
+          setState(() {
+            searchMode = 'title';
+          });
+        },
+      ),
+
+      ChoiceChip(
+        label: const Text('Content'),
+        selected: searchMode == 'content',
+        onSelected: (_) {
+          setState(() {
+            searchMode = 'content';
+          });
+        },
+      ),
+    ],
+  ),
+
+  const SizedBox(height: 20),
+
+Expanded(
         child: FutureBuilder<List<Map<String, dynamic>>>(
   future: searchPdfText(keyword),
           
@@ -1228,6 +1346,9 @@ subtitle: Column(
               },
             );
           },
+        ),
+        ),
+        ],
         ),
       ),
       actions: [
