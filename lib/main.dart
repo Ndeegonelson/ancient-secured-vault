@@ -655,141 +655,216 @@ List<TextSpan> highlightSearchText(
 }
 
 Future<void> showGlobalSearchResults(String keyword) async {
+  String accessFilter = 'all';
+
   showDialog(
     context: context,
     builder: (resultContext) {
-      return AlertDialog(
-        backgroundColor: const Color(0xFF0F1117),
-
-        title: Text(
-          'Search Results: $keyword',
-          style: const TextStyle(color: Colors.greenAccent),
-        ),
-
-        contentPadding: const EdgeInsets.all(20),
-
-        content: SizedBox(
-          width: 500,
-          height: 450,
+      return StatefulBuilder(
+        builder: (context, setState) {
           
-         child: FutureBuilder<QuerySnapshot>(
+          return AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
 
-            future: FirebaseFirestore.instance
-                .collection('pdf_search_index')
-                .where(
-                  'keywords',
-                  arrayContains: keyword.toLowerCase(),
-                )
-                .limit(30)
-                .get(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return const Center(
-                  child: CircularProgressIndicator(),
-                );
-              }
+            title: Text(
+              'Search Results: $keyword',
+              style: const TextStyle(
+                color: Colors.greenAccent,
+              ),
+            ),
 
-              final docs = snapshot.data!.docs;
+            contentPadding: const EdgeInsets.all(20),
 
-final seen = <String>{};
+            content: SizedBox(
+              width: 500,
+              height: 500,
 
-final uniqueDocs = docs.where((doc) {
-  final data = doc.data() as Map<String, dynamic>;
-  final key = '${data['pdfTitle']}_${data['pageNumber']}';
+              child: Column(
+                children: [
 
-  if (seen.contains(key)) {
-    return false;
-  }
+                  Wrap(
+                    spacing: 10,
+                    children: [
 
-  seen.add(key);
-  return true;
-}).toList();
+                      ChoiceChip(
+                        label: const Text('All'),
+                        selected: accessFilter == 'all',
+                        onSelected: (_) {
+                          setState(() {
+                            accessFilter = 'all';
+                          });
+                        },
+                      ),
 
-final rankedDocs = [...uniqueDocs];
+                      ChoiceChip(
+                        label: const Text('Free'),
+                        selected: accessFilter == 'free',
+                        onSelected: (_) {
+                          setState(() {
+                            accessFilter = 'free';
+                          });
+                        },
+                      ),
 
-rankedDocs.sort((a, b) {
-  final aData = a.data() as Map<String, dynamic>;
-  final bData = b.data() as Map<String, dynamic>;
-
-  final aTitle = (aData['pdfTitle'] ?? '').toString().toLowerCase();
-  final bTitle = (bData['pdfTitle'] ?? '').toString().toLowerCase();
-
-  final searchTerm = keyword.toLowerCase();
-
-  final aTitleMatch = aTitle.contains(searchTerm) ? 1 : 0;
-  final bTitleMatch = bTitle.contains(searchTerm) ? 1 : 0;
-
-  return bTitleMatch.compareTo(aTitleMatch);
-});
-
-              if (docs.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'No search results found.',
-                    style: TextStyle(color: Colors.white70),
+                      ChoiceChip(
+                        label: const Text('Premium'),
+                        selected: accessFilter == 'premium',
+                        onSelected: (_) {
+                          setState(() {
+                            accessFilter = 'premium';
+                          });
+                        },
+                      ),
+                    ],
                   ),
-                );
-              }
 
-              return ListView.builder(
-                itemCount: rankedDocs.length,
-                itemBuilder: (context, index) {
-                 final data =
-    rankedDocs[index].data() as Map<String, dynamic>;
+                  const SizedBox(height: 15),
 
-                  return Card(
-                    color: const Color(0xFF161616),
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.picture_as_pdf,
-                        color: Colors.greenAccent,
-                      ),
-                      title: Text(
-                        data['pdfTitle'] ?? '',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      subtitle: Column(
-  crossAxisAlignment: CrossAxisAlignment.start,
-  children: [
-    Text(
-      'Page ${data['pageNumber']}',
-      style: const TextStyle(color: Colors.white70),
-    ),
-    const SizedBox(height: 6),
-    RichText(
-      maxLines: 3,
-      overflow: TextOverflow.ellipsis,
-      text: TextSpan(
-        children: highlightSearchText(
-          data['text'].toString(),
-          keyword,
-        ),
-      ),
-    ),
-  ],
-),
-                      onTap: () {
-                        Navigator.pop(resultContext);
+                  Expanded(
+                    child: FutureBuilder<QuerySnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('pdf_search_index')
+                          .where(
+                            'keywords',
+                            arrayContains: keyword.toLowerCase(),
+                          )
+                          .limit(30)
+                          .get(),
 
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => PDFViewerScreen(
-                              pdfUrl: data['pdfUrl'],
-                              title: data['pdfTitle'],
-                              initialPage: data['pageNumber'] ?? 0,
-                              initialSearchQuery: keyword,
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+
+                        final docs = snapshot.data!.docs;
+
+                        List<QueryDocumentSnapshot> filteredDocs = docs;
+
+                        if (accessFilter == 'free') {
+                          filteredDocs = docs.where((doc) {
+                            final data =
+                                doc.data() as Map<String, dynamic>;
+
+                            return (data['accessLevel'] ?? 'free') ==
+                                'free';
+                          }).toList();
+                        }
+
+                        if (accessFilter == 'premium') {
+                          filteredDocs = docs.where((doc) {
+                            final data =
+                                doc.data() as Map<String, dynamic>;
+
+                            return (data['accessLevel'] ?? 'free') ==
+                                'premium';
+                          }).toList();
+                        }
+
+                        if (filteredDocs.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No matching results found.',
+                              style: TextStyle(
+                                color: Colors.white70,
+                              ),
                             ),
-                          ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          itemCount: filteredDocs.length,
+
+                          itemBuilder: (context, index) {
+                            final data = filteredDocs[index].data()
+                                as Map<String, dynamic>;
+
+                            return Card(
+                              color: const Color(0xFF1A1D26),
+
+                              child: ListTile(
+                                leading: Icon(
+                                  Icons.picture_as_pdf,
+                                  color:
+                                      (data['accessLevel'] ?? 'free') ==
+                                              'premium'
+                                          ? Colors.amber
+                                          : Colors.greenAccent,
+                                ),
+
+                                title: Text(
+                                  data['pdfTitle'] ?? '',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                  ),
+                                ),
+
+                                subtitle: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+
+                                  children: [
+
+                                    Text(
+                                      'Page ${data['pageNumber']}',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 6),
+
+                                    Text(
+                                      data['text']
+                                          .toString()
+                                          .substring(
+                                            0,
+                                            data['text']
+                                                        .toString()
+                                                        .length >
+                                                    150
+                                                ? 150
+                                                : data['text']
+                                                    .toString()
+                                                    .length,
+                                          ),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                onTap: () {
+                                  Navigator.pop(resultContext);
+                                },
+                              ),
+                            );
+                          },
                         );
                       },
                     ),
-                  );
-                },
-              );
-            },
-          ),
-        ),
+                  ),
+                ],
+              ),
+            ),
+
+            actions: [
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(resultContext),
+
+                child: const Text(
+                  'Close',
+                  style: TextStyle(
+                    color: Colors.greenAccent,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       );
     },
   );
@@ -1192,7 +1267,9 @@ void initState() {
   showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
+
+        return PointerInterceptor(
+  child: AlertDialog(
           backgroundColor: const Color(0xFF0F1117),
           title: const Text(
             'Search PDF',
@@ -1222,8 +1299,7 @@ if (keyword.isEmpty) return;
 showDialog(
   context: context,
   builder: (resultContext) {
-    return PointerInterceptor(
-  child: AlertDialog(
+    return AlertDialog(
       backgroundColor: const Color(0xFF0F1117),
       title: Text(
         'Search Results: $keyword',
@@ -1235,42 +1311,6 @@ showDialog(
         
         child: Column(
   children: [
-
-  Wrap(
-    spacing: 10,
-    children: [
-
-      ChoiceChip(
-        label: const Text('All'),
-        selected: accessFilter == 'all',
-        onSelected: (_) {
-          setState(() {
-            accessFilter = 'all';
-          });
-        },
-      ),
-
-      ChoiceChip(
-       label: const Text('Free'),
-        selected: accessFilter == 'free',
-        onSelected: (_) {
-          setState(() {
-            accessFilter = 'free';
-          });
-        },
-      ),
-
-      ChoiceChip(
-        label: const Text('Premium'),
-        selected: accessFilter == 'premium',
-        onSelected: (_) {
-          setState(() {
-            accessFilter = 'premium';
-          });
-        },
-      ),
-    ],
-  ),
 
   const SizedBox(height: 20),
 
@@ -1366,6 +1406,7 @@ subtitle: Column(
         ],
         ),
       ),
+    
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(resultContext),
@@ -1375,7 +1416,6 @@ subtitle: Column(
           ),
         ),
       ],
-     ),
     );
   },
 );
@@ -1384,9 +1424,10 @@ subtitle: Column(
                 'Search',
                 style: TextStyle(color: Colors.greenAccent),
               ),
-  ),
+             ),
             ),
           ],
+         ),
         );
       },
     );
