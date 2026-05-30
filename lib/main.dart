@@ -851,17 +851,19 @@ Future<void> showGlobalSearchResults(String keyword) async {
             ),
 
             actions: [
-              TextButton(
-                onPressed: () =>
-                    Navigator.pop(resultContext),
+              PointerInterceptor(
+  child: TextButton(
+    onPressed: () =>
+        Navigator.pop(resultContext),
 
-                child: const Text(
-                  'Close',
-                  style: TextStyle(
-                    color: Colors.greenAccent,
-                  ),
-                ),
-              ),
+    child: const Text(
+      'Close',
+      style: TextStyle(
+        color: Colors.greenAccent,
+      ),
+    ),
+  ),
+),
             ],
           );
         },
@@ -1299,7 +1301,8 @@ if (keyword.isEmpty) return;
 showDialog(
   context: context,
   builder: (resultContext) {
-    return AlertDialog(
+   return PointerInterceptor(
+  child: AlertDialog(
       backgroundColor: const Color(0xFF0F1117),
       title: Text(
         'Search Results: $keyword',
@@ -1416,6 +1419,7 @@ subtitle: Column(
           ),
         ),
       ],
+  ),
     );
   },
 );
