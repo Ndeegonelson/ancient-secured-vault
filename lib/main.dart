@@ -1622,7 +1622,9 @@ subtitle: Column(
     color: Colors.greenAccent,
   ),
   onPressed: () async {
-    final pageController = TextEditingController();
+    final pageController = TextEditingController(
+      text: currentPdfPage.toString(),
+    );
 
     showDialog(
       context: this.context,
@@ -1666,7 +1668,18 @@ subtitle: Column(
                     if (user == null) return;
 
                     final page =
-                        int.tryParse(pageController.text) ?? 0;
+                        int.tryParse(pageController.text.trim()) ?? 0;
+
+                    if (page < 1) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Please enter a valid page number.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
 
                     await FirebaseFirestore.instance
                         .collection('reading_positions')
