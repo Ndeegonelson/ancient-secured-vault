@@ -5,17 +5,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'firebase_options.dart';
-import 'package:flutter/services.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:html' as html;
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:ui_web' as ui;
 import 'package:pointer_interceptor/pointer_interceptor.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -96,7 +92,7 @@ class HomeScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.12),
+                color: Colors.green.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: Colors.greenAccent,
@@ -119,13 +115,13 @@ class HomeScreen extends StatelessWidget {
                   SizedBox(height: 15),
 
                   Text(
-                    '• Secure PDF Streaming\n'
-                    '• Text-to-Speech Audio Reading\n'
-                    '• Highlights & Smart Notes\n'
-                    '• Subscription Access\n'
-                    '• Reading Progress Tracking\n'
-                    '• Watermark Security\n'
-                    '• Encrypted Content Access',
+                    '- Secure PDF Streaming\n'
+                    '- Text-to-Speech Audio Reading\n'
+                    '- Highlights & Smart Notes\n'
+                    '- Subscription Access\n'
+                    '- Reading Progress Tracking\n'
+                    '- Watermark Security\n'
+                    '- Encrypted Content Access',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -275,6 +271,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       password: passwordController.text.trim(),
                     );
 
+                    if (!context.mounted) return;
+
                    Navigator.push(
   context,
   MaterialPageRoute(
@@ -282,6 +280,8 @@ class _LoginScreenState extends State<LoginScreen> {
   ),
 );
                   } catch (e) {
+                    if (!context.mounted) return;
+
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(e.toString()),
@@ -318,6 +318,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool isLoading = false;
   bool isAdmin = false;
   bool hasActiveSubscription = false;
+  String? pdfLoadError;
   String accessLevel = 'free';
   String searchMode = 'all';
   String accessFilter = 'all';
@@ -397,6 +398,8 @@ Future<void> saveUserNote({
 
         await loadPDFs();
 
+        if (!mounted) return;
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('$fileName uploaded and indexed successfully'),
@@ -405,6 +408,8 @@ Future<void> saveUserNote({
       }
     }
   } catch (e) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(e.toString())),
     );
@@ -488,12 +493,16 @@ Future<void> indexExistingVaultPdfs() async {
     await indexFolder('free_pdfs', 'free');
     await indexFolder('vault_pdfs', 'premium');
 
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('All vault PDFs indexed successfully'),
       ),
     );
   } catch (e) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Indexing failed: $e')),
     );
@@ -503,6 +512,7 @@ Future<void> indexExistingVaultPdfs() async {
   Future<void> loadPDFs() async {
     setState(() {
       isLoading = true;
+      pdfLoadError = null;
     });
 
     try {
@@ -531,15 +541,33 @@ Future<void> indexExistingVaultPdfs() async {
         });
       }
 
+      loadedFreeFiles.sort(
+        (a, b) => a['name'].toString().compareTo(b['name'].toString()),
+      );
+      loadedPremiumFiles.sort(
+        (a, b) => a['name'].toString().compareTo(b['name'].toString()),
+      );
+
+      if (!mounted) return;
+
       setState(() {
         freePdfFiles = loadedFreeFiles;
         premiumPdfFiles = loadedPremiumFiles;
+        pdfLoadError = null;
       });
     } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        pdfLoadError = 'Could not load vault PDFs. Please try again.';
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
       );
     }
+
+    if (!mounted) return;
 
     setState(() {
       isLoading = false;
@@ -874,7 +902,6 @@ Future<void> showGlobalSearchResults(String keyword) async {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
     final bool canAccessMainVault = isAdmin || hasActiveSubscription;
 
     return Scaffold(
@@ -920,6 +947,8 @@ if (isAdmin)
 
       await indexExistingVaultPdfs();
 
+      if (!context.mounted) return;
+
       Navigator.pop(context);
     },
   ),
@@ -937,6 +966,7 @@ onPressed: globalSearch,
             icon: const Icon(Icons.logout, color: Colors.greenAccent),
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
+              if (!context.mounted) return;
               Navigator.pop(context);
             },
           ),
@@ -956,7 +986,7 @@ onPressed: globalSearch,
             Text(
               canAccessMainVault
                   ? 'Main Vault Access: Active'
-                  : 'Free Zone Only — Subscribe to unlock the Main Vault',
+                  : 'Free Zone Only - Subscribe to unlock the Main Vault',
               style: const TextStyle(
                 color: Colors.greenAccent,
                 fontSize: 22,
@@ -965,6 +995,39 @@ onPressed: globalSearch,
             ),
 
             const SizedBox(height: 30),
+
+if (pdfLoadError != null) ...[
+  Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Colors.redAccent.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.redAccent),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.error_outline, color: Colors.redAccent),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            pdfLoadError!,
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
+        TextButton(
+          onPressed: loadPDFs,
+          child: const Text(
+            'Retry',
+            style: TextStyle(color: Colors.greenAccent),
+          ),
+        ),
+      ],
+    ),
+  ),
+  const SizedBox(height: 20),
+],
+
 const Text(
   'FREE ACCESS ZONE',
   style: TextStyle(
@@ -976,13 +1039,22 @@ const Text(
 
 const SizedBox(height: 15),
 
+if (freePdfFiles.isEmpty)
+  const Padding(
+    padding: EdgeInsets.symmetric(vertical: 12),
+    child: Text(
+      'No free PDFs available yet.',
+      style: TextStyle(color: Colors.white70),
+    ),
+  )
+else
 ListView.builder(
   shrinkWrap: true,
   physics: const NeverScrollableScrollPhysics(),
   itemCount: freePdfFiles.length,
   itemBuilder: (context, index) {
     return Card(
-      color: Colors.orange.withOpacity(0.12),
+      color: Colors.orange.withValues(alpha: 0.12),
       child: ListTile(
         leading: const Icon(
           Icons.picture_as_pdf,
@@ -1025,6 +1097,15 @@ const SizedBox(height: 30),
 
             const SizedBox(height: 15),
 
+            if (premiumPdfFiles.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'No protected PDFs available yet.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              )
+            else
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -1032,7 +1113,7 @@ const SizedBox(height: 30),
               itemBuilder: (context, index) {
 
                 return Card(
-                  color: Colors.green.withOpacity(0.12),
+                  color: Colors.green.withValues(alpha: 0.12),
 
                   child: ListTile(
                     leading: const Icon(
@@ -1493,6 +1574,8 @@ subtitle: Column(
                     );
                   }
 
+                  if (!dialogContext.mounted) return;
+
                   Navigator.pop(dialogContext);
                 },
                 child: const Text(
@@ -1644,7 +1727,11 @@ IconButton(
                 'createdAt': FieldValue.serverTimestamp(),
               });
 
+              if (!dialogContext.mounted) return;
+
               Navigator.of(dialogContext).pop();
+
+              if (!context.mounted) return;
 
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Note saved successfully')),
