@@ -1248,6 +1248,27 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       int? pdfPageCount;
       String currentSearchQuery = '';
 
+List<QueryDocumentSnapshot> sortReadingPositionsByNewest(
+  List<QueryDocumentSnapshot> positions,
+) {
+  final sortedPositions = List<QueryDocumentSnapshot>.from(positions);
+
+  sortedPositions.sort((a, b) {
+    final aData = a.data() as Map<String, dynamic>;
+    final bData = b.data() as Map<String, dynamic>;
+    final aCreatedAt = aData['createdAt'];
+    final bCreatedAt = bData['createdAt'];
+
+    if (aCreatedAt is Timestamp && bCreatedAt is Timestamp) {
+      return bCreatedAt.compareTo(aCreatedAt);
+    }
+
+    return 0;
+  });
+
+  return sortedPositions;
+}
+
       Future<void> loadLatestReadingPosition() async {
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) return;
@@ -1259,7 +1280,8 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       .get();
 
   if (snapshot.docs.isNotEmpty) {
-    final position = snapshot.docs.last.data();
+    final position = sortReadingPositionsByNewest(snapshot.docs).first.data()
+        as Map<String, dynamic>;
     final savedPage =
         int.tryParse(position['pageNumber'].toString()) ?? 1;
 
@@ -1806,7 +1828,8 @@ IconButton(
                       );
                     }
 
-                    final positions = snapshot.data!.docs;
+                    final positions =
+                        sortReadingPositionsByNewest(snapshot.data!.docs);
 
                     if (positions.isEmpty) {
                       return const Center(
