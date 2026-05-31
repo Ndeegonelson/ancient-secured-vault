@@ -1362,6 +1362,66 @@ Future<int> loadPdfPageCount() async {
   }
 }
 
+Future<bool> saveReadingPositionPage(int page) async {
+  final user = FirebaseAuth.instance.currentUser;
+
+  if (user == null) {
+    return false;
+  }
+
+  if (page < 1) {
+    if (!mounted) return false;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please enter a valid page number.'),
+      ),
+    );
+    return false;
+  }
+
+  late final int pageCount;
+
+  try {
+    pageCount = await loadPdfPageCount();
+  } catch (e) {
+    if (!mounted) return false;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(e.toString())),
+    );
+    return false;
+  }
+
+  if (page > pageCount) {
+    if (!mounted) return false;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('This document has only $pageCount pages.'),
+      ),
+    );
+    return false;
+  }
+
+  await FirebaseFirestore.instance.collection('reading_positions').add({
+    'userEmail': user.email,
+    'pdfTitle': widget.title,
+    'pageNumber': page,
+    'createdAt': FieldValue.serverTimestamp(),
+  });
+
+  if (!mounted) return false;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('Reading position saved: Page $page'),
+    ),
+  );
+
+  return true;
+}
+
  List<TextSpan> highlightSearchText(
   String text,
   String keyword,
@@ -1708,77 +1768,17 @@ subtitle: Column(
               PointerInterceptor(
                 child: TextButton(
                   onPressed: () async {
-                    final user =
-                        FirebaseAuth.instance.currentUser;
-
-                    if (user == null) return;
-
                     final page =
                         int.tryParse(pageController.text.trim()) ?? 0;
 
-                    if (page < 1) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Please enter a valid page number.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-
-                    late final int pageCount;
-
-                    try {
-                      pageCount = await loadPdfPageCount();
-                    } catch (e) {
-                      if (!context.mounted) return;
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(e.toString()),
-                        ),
-                      );
-                      return;
-                    }
-
-                    if (page > pageCount) {
-                      if (!context.mounted) return;
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'This document has only $pageCount pages.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-
-                    await FirebaseFirestore.instance
-                        .collection('reading_positions')
-                        .add({
-                      'userEmail': user.email,
-                      'pdfTitle': widget.title,
-                      'pageNumber': page,
-                      'createdAt':
-                          FieldValue.serverTimestamp(),
-                    });
-
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Reading position saved: Page $page',
-                          ),
-                        ),
-                      );
-                    }
+                    final saved =
+                        await saveReadingPositionPage(page);
 
                     if (!dialogContext.mounted) return;
 
-                    Navigator.pop(dialogContext);
+                    if (saved) {
+                      Navigator.pop(dialogContext);
+                    }
                   },
                   child: const Text(
                     'Save',
