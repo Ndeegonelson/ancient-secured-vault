@@ -59,7 +59,9 @@ class HomeScreen extends StatelessWidget {
 
 ),
 
-      body: Padding(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
        padding: const EdgeInsets.all(20),
        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -132,7 +134,7 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
 
-            const Spacer(),
+            const SizedBox(height: 40),
 
             SizedBox(
               width: double.infinity,
@@ -170,6 +172,8 @@ class HomeScreen extends StatelessWidget {
           ],
         ),
       ),
+        ),
+      ),
     );
   }
 }
@@ -186,6 +190,13 @@ class _LoginScreenState extends State<LoginScreen> {
   final passwordController = TextEditingController();
 
   @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -195,9 +206,11 @@ class _LoginScreenState extends State<LoginScreen> {
           style: TextStyle(color: Colors.greenAccent),
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(25),
-        child: Column(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(25),
+            child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 30),
@@ -299,6 +312,8 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ],
+        ),
+      ),
         ),
       ),
     );
