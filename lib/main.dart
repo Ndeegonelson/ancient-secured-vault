@@ -1245,6 +1245,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       late final String viewId;
       html.IFrameElement? pdfIframe;
       int currentPdfPage = 1;
+      int? pdfPageCount;
       String currentSearchQuery = '';
 
       Future<void> loadLatestReadingPosition() async {
@@ -1314,6 +1315,29 @@ void openPdfPage(
     pageNumber: currentPdfPage,
     searchQuery: currentSearchQuery,
   );
+}
+
+Future<int> loadPdfPageCount() async {
+  if (pdfPageCount != null) {
+    return pdfPageCount!;
+  }
+
+  final response = await http
+      .get(Uri.parse(widget.pdfUrl))
+      .timeout(const Duration(seconds: 30));
+
+  if (response.statusCode >= 400) {
+    throw Exception('Could not check the PDF page count.');
+  }
+
+  final document = PdfDocument(inputBytes: response.bodyBytes);
+
+  try {
+    pdfPageCount = document.pages.count;
+    return pdfPageCount!;
+  } finally {
+    document.dispose();
+  }
 }
 
  List<TextSpan> highlightSearchText(
@@ -1675,6 +1699,34 @@ subtitle: Column(
                         const SnackBar(
                           content: Text(
                             'Please enter a valid page number.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
+                    late final int pageCount;
+
+                    try {
+                      pageCount = await loadPdfPageCount();
+                    } catch (e) {
+                      if (!context.mounted) return;
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(e.toString()),
+                        ),
+                      );
+                      return;
+                    }
+
+                    if (page > pageCount) {
+                      if (!context.mounted) return;
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'This document has only $pageCount pages.',
                           ),
                         ),
                       );
