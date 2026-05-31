@@ -880,7 +880,44 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                 ),
 
                                 onTap: () {
+                                  final resultAccessLevel =
+                                      data['accessLevel']?.toString() ??
+                                          'free';
+
+                                  if (resultAccessLevel == 'premium' &&
+                                      !(isAdmin || hasActiveSubscription)) {
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Subscription required to open this PDF.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final pageNumber =
+                                      data['pageNumber'] is int
+                                          ? data['pageNumber'] as int
+                                          : int.tryParse(
+                                                data['pageNumber'].toString(),
+                                              ) ??
+                                              0;
+
                                   Navigator.pop(resultContext);
+
+                                  Navigator.push(
+                                    this.context,
+                                    MaterialPageRoute(
+                                      builder: (context) => PDFViewerScreen(
+                                        pdfUrl: data['pdfUrl'].toString(),
+                                        title: data['pdfTitle'].toString(),
+                                        initialPage: pageNumber,
+                                        initialSearchQuery: keyword,
+                                      ),
+                                    ),
+                                  );
                                 },
                               ),
                             );
@@ -1205,7 +1242,10 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
 
       String searchQuery = '';
       Map<String, dynamic>? latestReadingPosition;
-      int currentPdfPage = 0;
+      late final String viewId;
+      html.IFrameElement? pdfIframe;
+      int currentPdfPage = 1;
+      String currentSearchQuery = '';
 
       Future<void> loadLatestReadingPosition() async {
   final user = FirebaseAuth.instance.currentUser;
@@ -1218,11 +1258,62 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       .get();
 
   if (snapshot.docs.isNotEmpty) {
-    setState(() {
-      latestReadingPosition =
-          snapshot.docs.last.data();
-    });
+    final position = snapshot.docs.last.data();
+    final savedPage =
+        int.tryParse(position['pageNumber'].toString()) ?? 1;
+
+    latestReadingPosition = position;
+
+    if (widget.initialPage == 0) {
+      openPdfPage(savedPage);
+    }
   }
+}
+
+String buildPdfViewerUrl({
+  required int pageNumber,
+  String searchQuery = '',
+}) {
+  final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
+  final safeSearchQuery = searchQuery.trim();
+  final searchFragment = safeSearchQuery.isEmpty
+      ? ''
+      : '&search=${Uri.encodeComponent(safeSearchQuery)}';
+
+  return '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1&page=$safePageNumber$searchFragment';
+}
+
+void registerPdfViewer() {
+  ui.platformViewRegistry.registerViewFactory(
+    viewId,
+    (int viewId) {
+      final iframe = html.IFrameElement()
+        ..src = buildPdfViewerUrl(
+          pageNumber: currentPdfPage,
+          searchQuery: currentSearchQuery,
+        )
+        ..style.border = 'none'
+        ..style.width = '100%'
+        ..style.height = '100%';
+
+      pdfIframe = iframe;
+      return iframe;
+    },
+  );
+}
+
+void openPdfPage(
+  int pageNumber, {
+  String? searchQuery,
+}) {
+  final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
+  currentPdfPage = safePageNumber;
+  currentSearchQuery = searchQuery ?? currentSearchQuery;
+
+  pdfIframe?.src = buildPdfViewerUrl(
+    pageNumber: currentPdfPage,
+    searchQuery: currentSearchQuery,
+  );
 }
 
  List<TextSpan> highlightSearchText(
@@ -1275,20 +1366,27 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
 }
 
 Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
-  final response = await http.get(Uri.parse(widget.pdfUrl));
+  final response = await http
+      .get(Uri.parse(widget.pdfUrl))
+      .timeout(const Duration(seconds: 30));
+
+  if (response.statusCode >= 400) {
+    throw Exception('PDF text search could not load this document.');
+  }
 
   final document = PdfDocument(inputBytes: response.bodyBytes);
   final extractor = PdfTextExtractor(document);
 
-  final results = <Map<String, dynamic>>[];
+  try {
+    final results = <Map<String, dynamic>>[];
 
-  for (int i = 0; i < document.pages.count; i++) {
-    final text = extractor.extractText(
-      startPageIndex: i,
-      endPageIndex: i,
-    );
+    for (int i = 0; i < document.pages.count; i++) {
+      final text = extractor.extractText(
+        startPageIndex: i,
+        endPageIndex: i,
+      );
 
-   final lowerText = text.toLowerCase();
+      final lowerText = text.toLowerCase();
 final lowerKeyword = keyword.toLowerCase();
 final matchIndex = lowerText.indexOf(lowerKeyword);
 
@@ -1308,48 +1406,33 @@ if (matchIndex != -1) {
 }
   }
 
-  document.dispose();
-  return results;
+    return results;
+  } finally {
+    document.dispose();
+  }
 }
 
 @override
 void initState() {
   super.initState();
+  viewId =
+      'pdf-viewer-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
+  currentPdfPage = widget.initialPage < 1 ? 1 : widget.initialPage;
+  currentSearchQuery = widget.initialSearchQuery;
+  registerPdfViewer();
   loadLatestReadingPosition();
 }
 
   @override
   Widget build(BuildContext context) {
-    final savedPage =
-    currentPdfPage != 0
-        ? currentPdfPage
-        : widget.initialPage != 0
-            ? widget.initialPage
-            : latestReadingPosition?['pageNumber'] ?? 0;
-    final viewId =
-    'pdf-viewer-${widget.pdfUrl.hashCode}-$savedPage-${DateTime.now().millisecondsSinceEpoch}';
-    
-
-    ui.platformViewRegistry.registerViewFactory(
-      viewId,
-      (int viewId) {
-        final iframe = html.IFrameElement()
-          ..src =
-    '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1&page=$savedPage&search=${Uri.encodeComponent(widget.initialSearchQuery)}'
-          ..style.border = 'none'
-          ..style.width = '100%'
-          ..style.height = '100%';
-
-        return iframe;
-      },
-    );
-
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
       appBar: AppBar(
         backgroundColor: Colors.black,
         title: Text(
   widget.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(color: Colors.greenAccent),
         ),
         iconTheme: const IconThemeData(color: Colors.greenAccent),
@@ -1363,7 +1446,7 @@ void initState() {
 
  onPressed: () async {
   showDialog(
-      context: context,
+      context: this.context,
       builder: (dialogContext) {
 
         return PointerInterceptor(
@@ -1395,7 +1478,7 @@ Navigator.pop(dialogContext);
 if (keyword.isEmpty) return;
 
 showDialog(
-  context: context,
+  context: this.context,
   builder: (resultContext) {
    return PointerInterceptor(
   child: AlertDialog(
@@ -1418,6 +1501,15 @@ Expanded(
   future: searchPdfText(keyword),
           
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Text(
+                  'Search failed: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              );
+            }
+
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -1445,11 +1537,14 @@ Expanded(
   onTap: () {
     Navigator.pop(resultContext);
 
-    final page = data['pageNumber'] ?? 1;
+    final page = data['pageNumber'] is int
+        ? data['pageNumber'] as int
+        : int.tryParse(data['pageNumber'].toString()) ?? 1;
 
-    setState(() {
-  currentPdfPage = page;
-});
+    openPdfPage(
+      page,
+      searchQuery: keyword,
+    );
   },
 
   title: Text(
@@ -1530,7 +1625,7 @@ subtitle: Column(
     final pageController = TextEditingController();
 
     showDialog(
-      context: context,
+      context: this.context,
       builder: (dialogContext) {
         return PointerInterceptor(
           child: AlertDialog(
@@ -1539,64 +1634,70 @@ subtitle: Column(
               'Save Reading Position',
               style: TextStyle(color: Colors.greenAccent),
             ),
-            content: TextField(
-              controller: pageController,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: 'Enter current page',
-                hintStyle: TextStyle(color: Colors.white54),
+            content: PointerInterceptor(
+              child: TextField(
+                controller: pageController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  hintText: 'Enter current page',
+                  hintStyle: TextStyle(color: Colors.white54),
+                ),
               ),
             ),
             actions: [
-             TextButton( 
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                },
-                child: const Text(
-                  'Cancel',
-                  style: TextStyle(color: Colors.redAccent),
+              PointerInterceptor(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
                 ),
               ),
-              TextButton(
-                onPressed: () async {
-                  final user =
-                      FirebaseAuth.instance.currentUser;
+              PointerInterceptor(
+                child: TextButton(
+                  onPressed: () async {
+                    final user =
+                        FirebaseAuth.instance.currentUser;
 
-                  if (user == null) return;
+                    if (user == null) return;
 
-                  final page =
-                      int.tryParse(pageController.text) ?? 0;
+                    final page =
+                        int.tryParse(pageController.text) ?? 0;
 
-                  await FirebaseFirestore.instance
-                      .collection('reading_positions')
-                      .add({
-                    'userEmail': user.email,
-                    'pdfTitle': widget.title,
-                    'pageNumber': page,
-                    'createdAt':
-                        FieldValue.serverTimestamp(),
-                  });
+                    await FirebaseFirestore.instance
+                        .collection('reading_positions')
+                        .add({
+                      'userEmail': user.email,
+                      'pdfTitle': widget.title,
+                      'pageNumber': page,
+                      'createdAt':
+                          FieldValue.serverTimestamp(),
+                    });
 
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Reading position saved: Page $page',
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Reading position saved: Page $page',
+                          ),
                         ),
-                      ),
-                    );
-                  }
+                      );
+                    }
 
-                  if (!dialogContext.mounted) return;
+                    if (!dialogContext.mounted) return;
 
-                  Navigator.pop(dialogContext);
-                },
-                child: const Text(
-                  'Save',
-                  style:
-                      TextStyle(color: Colors.greenAccent),
+                    Navigator.pop(dialogContext);
+                  },
+                  child: const Text(
+                    'Save',
+                    style:
+                        TextStyle(color: Colors.greenAccent),
+                  ),
                 ),
               ),
             ],
@@ -1614,77 +1715,91 @@ IconButton(
     if (user == null) return;
 
     showDialog(
-      context: context,
+      context: this.context,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF0F1117),
-          title: const Text(
-            'Saved Reading Positions',
-            style: TextStyle(color: Colors.greenAccent),
-          ),
-          content: SizedBox(
-            width: 400,
-            height: 400,
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('reading_positions')
-                  .where('userEmail', isEqualTo: user.email)
-                  .where('pdfTitle', isEqualTo: widget.title)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                }
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Saved Reading Positions',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: PointerInterceptor(
+              child: SizedBox(
+                width: 400,
+                height: 400,
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('reading_positions')
+                      .where('userEmail', isEqualTo: user.email)
+                      .where('pdfTitle', isEqualTo: widget.title)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(
+                        child: CircularProgressIndicator(),
+                      );
+                    }
 
-                final positions = snapshot.data!.docs;
+                    final positions = snapshot.data!.docs;
 
-                if (positions.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'No saved positions yet.',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  itemCount: positions.length,
-                  itemBuilder: (context, index) {
-                    final position =
-                        positions[index].data() as Map<String, dynamic>;
-
-                    return Card(
-                      color: const Color(0xFF1A1D26),
-                      child: ListTile(
-                        title: Text(
-                          'Saved Position ${index + 1}',
-                          style:
-                              const TextStyle(color: Colors.white),
+                    if (positions.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          'No saved positions yet.',
+                          style: TextStyle(color: Colors.white70),
                         ),
-                        subtitle: Text(
-                          'Page: ${position['pageNumber']}',
-                          style:
-                              const TextStyle(color: Colors.white54),
-                        ),
-                      ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: positions.length,
+                      itemBuilder: (context, index) {
+                        final position =
+                            positions[index].data() as Map<String, dynamic>;
+                        final page = int.tryParse(
+                              position['pageNumber'].toString(),
+                            ) ??
+                            1;
+
+                        return Card(
+                          color: const Color(0xFF1A1D26),
+                          child: ListTile(
+                            onTap: () {
+                              Navigator.of(dialogContext).pop();
+                              openPdfPage(page);
+                            },
+                            title: Text(
+                              'Saved Position ${index + 1}',
+                              style:
+                                  const TextStyle(color: Colors.white),
+                            ),
+                            subtitle: Text(
+                              'Page: $page',
+                              style:
+                                  const TextStyle(color: Colors.white54),
+                            ),
+                          ),
+                        );
+                      },
                     );
                   },
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(),
-              child: const Text(
-                'Close',
-                style: TextStyle(color: Colors.greenAccent),
+                ),
               ),
             ),
-          ],
+            actions: [
+              PointerInterceptor(
+                child: TextButton(
+                  onPressed: () =>
+                      Navigator.of(dialogContext).pop(),
+                  child: const Text(
+                    'Close',
+                    style: TextStyle(color: Colors.greenAccent),
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
