@@ -348,7 +348,9 @@ class UserAccessState {
   bool get canAccessMainVault => isAdmin || hasActiveSubscription;
 
   bool canOpenPdfWithAccessLevel(String documentAccessLevel) {
-    if (documentAccessLevel == 'premium') {
+    final normalizedAccessLevel = documentAccessLevel.trim().toLowerCase();
+
+    if (normalizedAccessLevel == 'premium') {
       return canAccessMainVault;
     }
 
@@ -370,16 +372,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    loadPDFs();
-    checkUserRole();
+    loadDashboardData();
   }
-Future<void> saveUserNote({
-  required String pdfTitle,
-  required String selectedText,
-  required String note,
-  required String color,
-  required int pageNumber,
-}) async {
+
+  Future<void> loadDashboardData() async {
+    await checkUserRole();
+    await loadPDFs();
+  }
+
+  Future<void> saveUserNote({
+    required String pdfTitle,
+    required String selectedText,
+    required String note,
+    required String color,
+    required int pageNumber,
+  }) async {
   final user = FirebaseAuth.instance.currentUser;
   if (user == null) return;
 
@@ -560,9 +567,6 @@ Future<void> indexExistingVaultPdfs() async {
       final freeResult =
           await FirebaseStorage.instance.ref('free_pdfs').listAll();
 
-      final premiumResult =
-          await FirebaseStorage.instance.ref('vault_pdfs').listAll();
-
       final loadedFreeFiles = <Map<String, dynamic>>[];
       final loadedPremiumFiles = <Map<String, dynamic>>[];
 
@@ -574,12 +578,17 @@ Future<void> indexExistingVaultPdfs() async {
         });
       }
 
-      for (var item in premiumResult.items) {
-        final url = await item.getDownloadURL();
-        loadedPremiumFiles.add({
-          'name': item.name,
-          'url': url,
-        });
+      if (userAccess.canAccessMainVault) {
+        final premiumResult =
+            await FirebaseStorage.instance.ref('vault_pdfs').listAll();
+
+        for (var item in premiumResult.items) {
+          final url = await item.getDownloadURL();
+          loadedPremiumFiles.add({
+            'name': item.name,
+            'url': url,
+          });
+        }
       }
 
       loadedFreeFiles.sort(
@@ -809,10 +818,19 @@ Future<void> showGlobalSearchResults(String keyword) async {
 
                         final docs = snapshot.data!.docs;
 
-                        List<QueryDocumentSnapshot> filteredDocs = docs;
+                        List<QueryDocumentSnapshot> filteredDocs =
+                            docs.where((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          final documentAccessLevel =
+                              data['accessLevel']?.toString() ?? 'free';
+
+                          return userAccess.canOpenPdfWithAccessLevel(
+                            documentAccessLevel,
+                          );
+                        }).toList();
 
                         if (accessFilter == 'free') {
-                          filteredDocs = docs.where((doc) {
+                          filteredDocs = filteredDocs.where((doc) {
                             final data =
                                 doc.data() as Map<String, dynamic>;
 
@@ -822,7 +840,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
                         }
 
                         if (accessFilter == 'premium') {
-                          filteredDocs = docs.where((doc) {
+                          filteredDocs = filteredDocs.where((doc) {
                             final data =
                                 doc.data() as Map<String, dynamic>;
 
