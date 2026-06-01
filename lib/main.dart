@@ -326,15 +326,43 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
+class UserAccessState {
+  final bool isAdmin;
+  final bool hasActiveSubscription;
+  final String accessLevel;
+
+  const UserAccessState({
+    this.isAdmin = false,
+    this.hasActiveSubscription = false,
+    this.accessLevel = 'free',
+  });
+
+  factory UserAccessState.fromFirestore(Map<String, dynamic>? data) {
+    return UserAccessState(
+      isAdmin: data?['role'] == 'admin',
+      hasActiveSubscription: data?['subscriptionStatus'] == 'active',
+      accessLevel: data?['accessLevel']?.toString() ?? 'free',
+    );
+  }
+
+  bool get canAccessMainVault => isAdmin || hasActiveSubscription;
+
+  bool canOpenPdfWithAccessLevel(String documentAccessLevel) {
+    if (documentAccessLevel == 'premium') {
+      return canAccessMainVault;
+    }
+
+    return true;
+  }
+}
+
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
 
   bool isLoading = false;
-  bool isAdmin = false;
-  bool hasActiveSubscription = false;
+  UserAccessState userAccess = const UserAccessState();
   String? pdfLoadError;
-  String accessLevel = 'free';
   String searchMode = 'all';
   String accessFilter = 'all';
   List<Map<String, dynamic>> userNotes = [];
@@ -378,9 +406,7 @@ Future<void> saveUserNote({
       final data = doc.data();
 
       setState(() {
-        isAdmin = data?['role'] == 'admin';
-        hasActiveSubscription = data?['subscriptionStatus'] == 'active';
-        accessLevel = data?['accessLevel'] ?? 'free';
+        userAccess = UserAccessState.fromFirestore(data);
       });
     }
   }
@@ -884,8 +910,9 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                       data['accessLevel']?.toString() ??
                                           'free';
 
-                                  if (resultAccessLevel == 'premium' &&
-                                      !(isAdmin || hasActiveSubscription)) {
+                                  if (!userAccess.canOpenPdfWithAccessLevel(
+                                    resultAccessLevel,
+                                  )) {
                                     ScaffoldMessenger.of(this.context)
                                         .showSnackBar(
                                       const SnackBar(
@@ -954,7 +981,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
 
   @override
   Widget build(BuildContext context) {
-    final bool canAccessMainVault = isAdmin || hasActiveSubscription;
+    final bool canAccessMainVault = userAccess.canAccessMainVault;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
@@ -966,13 +993,13 @@ Future<void> showGlobalSearchResults(String keyword) async {
         ),
 
         actions: [
-          if (isAdmin)
+          if (userAccess.isAdmin)
             IconButton(
               icon: const Icon(Icons.upload_file, color: Colors.greenAccent),
               onPressed: uploadPDF,
             ),
 
-if (isAdmin)
+if (userAccess.isAdmin)
   IconButton(
     tooltip: 'Index Vault PDFs',
     icon: const Icon(Icons.manage_search, color: Colors.greenAccent),
