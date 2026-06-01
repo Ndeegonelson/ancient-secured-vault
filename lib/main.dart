@@ -652,7 +652,7 @@ Future<void> globalSearch() async {
 
   TextButton(
     onPressed: () {
-      final keyword = keywordController.text.trim();
+        final keyword = keywordController.text.trim();
 
       if (keyword.isEmpty) return;
 
@@ -960,6 +960,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                         title: data['pdfTitle'].toString(),
                                         initialPage: pageNumber,
                                         initialSearchQuery: keyword,
+                                        accessLevel: resultAccessLevel,
                                       ),
                                     ),
                                   );
@@ -1172,6 +1173,7 @@ ListView.builder(
               builder: (context) => PDFViewerScreen(
                 pdfUrl: freePdfFiles[index]['url'],
                 title: freePdfFiles[index]['name'],
+                accessLevel: 'free',
               ),
             ),
           );
@@ -1237,6 +1239,7 @@ const SizedBox(height: 30),
                           builder: (context) => PDFViewerScreen(
                             pdfUrl: premiumPdfFiles[index]['url'],
                             title: premiumPdfFiles[index]['name'],
+                            accessLevel: 'premium',
                           ),
                         ),
                       );
@@ -1259,7 +1262,8 @@ class PDFViewerScreen extends StatefulWidget {
   final String pdfUrl;
   final String title;
   final int initialPage;
-final String initialSearchQuery;
+  final String initialSearchQuery;
+  final String accessLevel;
 
   const PDFViewerScreen({
   super.key,
@@ -1267,6 +1271,7 @@ final String initialSearchQuery;
   required this.title,
   this.initialPage = 0,
   this.initialSearchQuery = '',
+  this.accessLevel = 'free',
 });
 
   @override
@@ -1292,6 +1297,59 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       int currentPdfPage = 1;
       int? pdfPageCount;
       String currentSearchQuery = '';
+      bool isCheckingViewerAccess = true;
+      bool canViewDocument = false;
+
+Future<UserAccessState> loadCurrentUserAccess() async {
+  final user = FirebaseAuth.instance.currentUser;
+
+  if (user == null) {
+    return const UserAccessState();
+  }
+
+  final doc = await FirebaseFirestore.instance
+      .collection('users')
+      .doc(user.email)
+      .get();
+
+  return UserAccessState.fromFirestore(doc.data());
+}
+
+Future<void> checkViewerAccess() async {
+  final access = await loadCurrentUserAccess();
+  final canOpen = access.canOpenPdfWithAccessLevel(widget.accessLevel);
+
+  if (!mounted) return;
+
+  setState(() {
+    canViewDocument = canOpen;
+    isCheckingViewerAccess = false;
+  });
+
+  if (!canOpen) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Subscription required to open this PDF.'),
+      ),
+    );
+    return;
+  }
+
+  registerPdfViewer();
+  loadLatestReadingPosition();
+}
+
+bool canUseViewerTools() {
+  if (canViewDocument) return true;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Subscription required to use this PDF.'),
+    ),
+  );
+
+  return false;
+}
 
 List<QueryDocumentSnapshot> sortReadingPositionsByNewest(
   List<QueryDocumentSnapshot> positions,
@@ -1570,8 +1628,7 @@ void initState() {
       'pdf-viewer-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
   currentPdfPage = widget.initialPage < 1 ? 1 : widget.initialPage;
   currentSearchQuery = widget.initialSearchQuery;
-  registerPdfViewer();
-  loadLatestReadingPosition();
+  checkViewerAccess();
 }
 
   @override
@@ -1596,6 +1653,8 @@ void initState() {
   ),
 
  onPressed: () async {
+    if (!canUseViewerTools()) return;
+
   showDialog(
       context: this.context,
       builder: (dialogContext) {
@@ -1773,6 +1832,8 @@ subtitle: Column(
     color: Colors.greenAccent,
   ),
   onPressed: () async {
+    if (!canUseViewerTools()) return;
+
     final pageController = TextEditingController(
       text: currentPdfPage.toString(),
     );
@@ -1813,6 +1874,8 @@ subtitle: Column(
               PointerInterceptor(
                 child: TextButton(
                   onPressed: () async {
+                    if (!canUseViewerTools()) return;
+
                     final page =
                         int.tryParse(pageController.text.trim()) ?? 0;
 
@@ -1843,6 +1906,8 @@ IconButton(
   icon: const Icon(Icons.history, size: 20, color: Colors.greenAccent),
  
   onPressed: () async {
+    if (!canUseViewerTools()) return;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -1942,6 +2007,8 @@ IconButton(
     icon: const Icon(Icons.note_add, size: 20, color: Colors.greenAccent),
     
     onPressed: () {
+      if (!canUseViewerTools()) return;
+
  showDialog(
   barrierDismissible: false,
   context: context,
@@ -2016,6 +2083,8 @@ IconButton(
   icon: const Icon(Icons.list_alt, size: 20, color: Colors.greenAccent),
  
   onPressed: () async {
+    if (!canUseViewerTools()) return;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -2238,7 +2307,22 @@ IconButton(
 ),
 ],
       ),
-      body: Stack(
+      body: isCheckingViewerAccess
+          ? const Center(
+              child: CircularProgressIndicator(color: Colors.greenAccent),
+            )
+          : !canViewDocument
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                      'Subscription required to open this PDF.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white70, fontSize: 16),
+                    ),
+                  ),
+                )
+              : Stack(
         children: [
          HtmlElementView(viewType: viewId),
 
