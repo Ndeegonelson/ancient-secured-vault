@@ -599,10 +599,9 @@ Future<void> indexExistingVaultPdfs() async {
       final loadedPremiumFiles = <Map<String, dynamic>>[];
 
       for (var item in freeResult.items) {
-        final url = await item.getDownloadURL();
         loadedFreeFiles.add({
           'name': item.name,
-          'url': url,
+          'storagePath': item.fullPath,
         });
       }
 
@@ -1238,12 +1237,20 @@ ListView.builder(
           'Free Access PDF',
           style: TextStyle(color: Colors.white70),
         ),
-        onTap: () {
+        onTap: () async {
+          final pdfUrl = await resolveSearchResultPdfUrl(
+            freePdfFiles[index],
+          );
+
+          if (pdfUrl == null) return;
+
+          if (!context.mounted) return;
+
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => PDFViewerScreen(
-                pdfUrl: freePdfFiles[index]['url'],
+                pdfUrl: pdfUrl,
                 title: freePdfFiles[index]['name'],
                 accessLevel: 'free',
               ),
