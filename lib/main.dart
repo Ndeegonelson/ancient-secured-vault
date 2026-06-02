@@ -1662,7 +1662,10 @@ List<QueryDocumentSnapshot> sortReadingPositionsByNewest(
     latestReadingPosition = position;
 
     if (widget.initialPage == 0) {
-      openPdfPage(savedPage);
+      openPdfPage(
+        savedPage,
+        source: 'latest_saved_position',
+      );
     }
   }
 }
@@ -1702,10 +1705,20 @@ void registerPdfViewer() {
 void openPdfPage(
   int pageNumber, {
   String? searchQuery,
+  String source = 'reader_navigation',
 }) {
   final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
   currentPdfPage = safePageNumber;
   currentSearchQuery = searchQuery ?? currentSearchQuery;
+
+  logReaderAction(
+    action: 'open_pdf_page',
+    details: {
+      'pageNumber': safePageNumber,
+      'source': source,
+      'hasSearchQuery': (searchQuery ?? '').trim().isNotEmpty,
+    },
+  );
 
   pdfIframe?.src = buildPdfViewerUrl(
     pageNumber: currentPdfPage,
@@ -2063,6 +2076,7 @@ Expanded(
     openPdfPage(
       page,
       searchQuery: keyword,
+      source: 'internal_search_result',
     );
   },
 
@@ -2274,7 +2288,10 @@ IconButton(
                           child: ListTile(
                             onTap: () {
                               Navigator.of(dialogContext).pop();
-                              openPdfPage(page);
+                              openPdfPage(
+                                page,
+                                source: 'saved_reading_position',
+                              );
                             },
                             title: Text(
                               'Saved Position ${index + 1}',
