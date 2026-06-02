@@ -1603,8 +1603,15 @@ Future<void> logReaderSessionLifecycle(
   }
 }
 
-bool canUseViewerTools() {
+bool canUseViewerTools(String attemptedAction) {
   if (canViewDocument) return true;
+
+  logReaderAction(
+    action: 'blocked_reader_tool_attempt',
+    details: {
+      'attemptedAction': attemptedAction,
+    },
+  );
 
   ScaffoldMessenger.of(context).showSnackBar(
     const SnackBar(
@@ -1955,7 +1962,7 @@ void dispose() {
   ),
 
  onPressed: () async {
-    if (!canUseViewerTools()) return;
+    if (!canUseViewerTools('internal_pdf_search')) return;
 
   showDialog(
       context: this.context,
@@ -2134,7 +2141,7 @@ subtitle: Column(
     color: Colors.greenAccent,
   ),
   onPressed: () async {
-    if (!canUseViewerTools()) return;
+    if (!canUseViewerTools('open_save_reading_position_dialog')) return;
 
     final pageController = TextEditingController(
       text: currentPdfPage.toString(),
@@ -2176,7 +2183,7 @@ subtitle: Column(
               PointerInterceptor(
                 child: TextButton(
                   onPressed: () async {
-                    if (!canUseViewerTools()) return;
+                    if (!canUseViewerTools('save_reading_position')) return;
 
                     final page =
                         int.tryParse(pageController.text.trim()) ?? 0;
@@ -2208,7 +2215,7 @@ IconButton(
   icon: const Icon(Icons.history, size: 20, color: Colors.greenAccent),
  
   onPressed: () async {
-    if (!canUseViewerTools()) return;
+    if (!canUseViewerTools('view_saved_reading_positions')) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -2309,7 +2316,7 @@ IconButton(
     icon: const Icon(Icons.note_add, size: 20, color: Colors.greenAccent),
     
     onPressed: () {
-      if (!canUseViewerTools()) return;
+      if (!canUseViewerTools('add_reader_note')) return;
 
  showDialog(
   barrierDismissible: false,
@@ -2393,7 +2400,7 @@ IconButton(
   icon: const Icon(Icons.list_alt, size: 20, color: Colors.greenAccent),
  
   onPressed: () async {
-    if (!canUseViewerTools()) return;
+    if (!canUseViewerTools('view_reader_notes')) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
