@@ -441,6 +441,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return header.contains('%PDF-');
   }
 
+  bool isSafeVaultPdfFileName(String fileName) {
+    final trimmedFileName = fileName.trim();
+
+    if (trimmedFileName.isEmpty) return false;
+    if (!trimmedFileName.toLowerCase().endsWith('.pdf')) return false;
+    if (trimmedFileName.contains('/') || trimmedFileName.contains(r'\')) {
+      return false;
+    }
+
+    return !trimmedFileName.codeUnits.any((codeUnit) => codeUnit < 32);
+  }
+
   Future<bool> storageObjectExists(Reference ref) async {
     try {
       await ref.getMetadata();
@@ -467,6 +479,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (result != null) {
       final fileBytes = result.files.first.bytes;
       final fileName = result.files.first.name;
+
+      if (!isSafeVaultPdfFileName(fileName)) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Use a simple PDF file name ending in .pdf before uploading.',
+            ),
+          ),
+        );
+        return;
+      }
 
       if (fileBytes == null) {
         if (!mounted) return;
