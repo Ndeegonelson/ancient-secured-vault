@@ -431,17 +431,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final fileName = result.files.first.name;
 
       if (fileBytes != null) {
-        final ref = FirebaseStorage.instance.ref('vault_pdfs/$fileName');
+        final storagePath = 'vault_pdfs/$fileName';
+        final ref = FirebaseStorage.instance.ref(storagePath);
 
         await ref.putData(fileBytes);
 
-        final pdfUrl = await ref.getDownloadURL();
-
         await indexPdfForSearch(
           pdfBytes: fileBytes,
-          pdfUrl: pdfUrl,
           pdfTitle: fileName,
           accessLevel: 'premium',
+          storagePath: storagePath,
         );
 
         await loadPDFs();
@@ -466,12 +465,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 Future<void> indexPdfForSearch({
   required Uint8List pdfBytes,
-  required String pdfUrl,
   required String pdfTitle,
   required String accessLevel,
+  required String storagePath,
+  String? pdfUrl,
 }) async {
   final document = PdfDocument(inputBytes: pdfBytes);
   final extractor = PdfTextExtractor(document);
+  final normalizedAccessLevel = accessLevel.trim().toLowerCase();
 
 
 
@@ -493,16 +494,24 @@ Future<void> indexPdfForSearch({
         .take(300)
         .toList();
 
-    await FirebaseFirestore.instance.collection('pdf_search_index').add({
+    final searchIndexData = <String, dynamic>{
       'pdfTitle': pdfTitle,
-      'pdfUrl': pdfUrl,
+      'storagePath': storagePath,
       'pageNumber': i + 1,
       'text': text.length > 1200 ? text.substring(0, 1200) : text,
       'textLower': lowerText,
       'keywords': keywords,
-      'accessLevel': accessLevel,
+      'accessLevel': normalizedAccessLevel,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+
+    if (normalizedAccessLevel != 'premium' && pdfUrl != null) {
+      searchIndexData['pdfUrl'] = pdfUrl;
+    }
+
+    await FirebaseFirestore.instance
+        .collection('pdf_search_index')
+        .add(searchIndexData);
   }
 
   document.dispose();
@@ -534,6 +543,7 @@ Future<void> indexExistingVaultPdfs() async {
           pdfUrl: url,
           pdfTitle: item.name,
           accessLevel: level,
+          storagePath: item.fullPath,
         );
       }
     }
@@ -623,6 +633,43 @@ Future<void> indexExistingVaultPdfs() async {
       isLoading = false;
     });
   }
+
+Future<String?> resolveSearchResultPdfUrl(
+  Map<String, dynamic> searchResult,
+) async {
+  final storagePath = searchResult['storagePath']?.toString() ?? '';
+
+  if (storagePath.trim().isNotEmpty) {
+    try {
+      return await FirebaseStorage.instance
+          .ref(storagePath)
+          .getDownloadURL();
+    } catch (e) {
+      if (!mounted) return null;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open this PDF: $e')),
+      );
+      return null;
+    }
+  }
+
+  final legacyPdfUrl = searchResult['pdfUrl']?.toString() ?? '';
+
+  if (legacyPdfUrl.trim().isNotEmpty) {
+    return legacyPdfUrl;
+  }
+
+  if (!mounted) return null;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('This search result is missing its document link.'),
+    ),
+  );
+
+  return null;
+}
 
 Future<void> globalSearch() async {
   final keywordController = TextEditingController();
@@ -923,7 +970,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                   ],
                                 ),
 
-                                onTap: () {
+                                onTap: () async {
                                   final resultAccessLevel =
                                       data['accessLevel']?.toString() ??
                                           'free';
@@ -942,6 +989,14 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                     return;
                                   }
 
+                                  final pdfUrl =
+                                      await resolveSearchResultPdfUrl(data);
+
+                                  if (pdfUrl == null) return;
+                                  if (!mounted || !resultContext.mounted) {
+                                    return;
+                                  }
+
                                   final pageNumber =
                                       data['pageNumber'] is int
                                           ? data['pageNumber'] as int
@@ -956,7 +1011,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                     this.context,
                                     MaterialPageRoute(
                                       builder: (context) => PDFViewerScreen(
-                                        pdfUrl: data['pdfUrl'].toString(),
+                                        pdfUrl: pdfUrl,
                                         title: data['pdfTitle'].toString(),
                                         initialPage: pageNumber,
                                         initialSearchQuery: keyword,
