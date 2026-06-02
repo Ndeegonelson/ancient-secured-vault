@@ -1478,6 +1478,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       bool isCheckingViewerAccess = true;
       bool canViewDocument = false;
       bool readerSessionStarted = false;
+      DateTime? readerSessionStartedAt;
       late final String readerSessionId;
 
 String get shortReaderSessionId {
@@ -1532,6 +1533,7 @@ Future<void> checkViewerAccess() async {
 
   registerPdfViewer();
   readerSessionStarted = true;
+  readerSessionStartedAt = DateTime.now();
   await logReaderSessionLifecycle('started');
   loadLatestReadingPosition();
 }
@@ -1580,7 +1582,10 @@ Future<void> logReaderAction({
   }
 }
 
-Future<void> logReaderSessionLifecycle(String event) async {
+Future<void> logReaderSessionLifecycle(
+  String event, {
+  Map<String, dynamic> details = const {},
+}) async {
   final user = FirebaseAuth.instance.currentUser;
 
   try {
@@ -1590,6 +1595,7 @@ Future<void> logReaderSessionLifecycle(String event) async {
       'readerSessionId': readerSessionId,
       'documentAccessLevel': widget.accessLevel,
       'event': event,
+      'details': details,
       'createdAt': FieldValue.serverTimestamp(),
     });
   } catch (_) {
@@ -1910,7 +1916,17 @@ void initState() {
 @override
 void dispose() {
   if (readerSessionStarted) {
-    logReaderSessionLifecycle('ended');
+    final startedAt = readerSessionStartedAt;
+    final durationSeconds = startedAt == null
+        ? 0
+        : DateTime.now().difference(startedAt).inSeconds;
+
+    logReaderSessionLifecycle(
+      'ended',
+      details: {
+        'durationSeconds': durationSeconds,
+      },
+    );
   }
 
   searchController.dispose();
