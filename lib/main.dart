@@ -480,7 +480,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final storagePath = 'vault_pdfs/$fileName';
         final ref = FirebaseStorage.instance.ref(storagePath);
 
-        await ref.putData(fileBytes);
+        await ref.putData(
+          fileBytes,
+          SettableMetadata(
+            contentType: 'application/pdf',
+            customMetadata: {
+              'accessLevel': 'premium',
+              'uploadedBy': FirebaseAuth.instance.currentUser?.email ?? '',
+              'originalFileName': fileName,
+            },
+          ),
+        );
 
         await indexPdfForSearch(
           pdfBytes: fileBytes,
