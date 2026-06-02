@@ -1477,6 +1477,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       String currentSearchQuery = '';
       bool isCheckingViewerAccess = true;
       bool canViewDocument = false;
+      bool readerSessionStarted = false;
       late final String readerSessionId;
 
 String get shortReaderSessionId {
@@ -1530,6 +1531,8 @@ Future<void> checkViewerAccess() async {
   }
 
   registerPdfViewer();
+  readerSessionStarted = true;
+  await logReaderSessionLifecycle('started');
   loadLatestReadingPosition();
 }
 
@@ -1574,6 +1577,23 @@ Future<void> logReaderAction({
     });
   } catch (_) {
     // Activity logging should not interrupt the reader experience.
+  }
+}
+
+Future<void> logReaderSessionLifecycle(String event) async {
+  final user = FirebaseAuth.instance.currentUser;
+
+  try {
+    await FirebaseFirestore.instance.collection('reader_session_logs').add({
+      'userEmail': user?.email,
+      'pdfTitle': widget.title,
+      'readerSessionId': readerSessionId,
+      'documentAccessLevel': widget.accessLevel,
+      'event': event,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  } catch (_) {
+    // Session logging should not interrupt the reader experience.
   }
 }
 
@@ -1885,6 +1905,16 @@ void initState() {
   currentPdfPage = widget.initialPage < 1 ? 1 : widget.initialPage;
   currentSearchQuery = widget.initialSearchQuery;
   checkViewerAccess();
+}
+
+@override
+void dispose() {
+  if (readerSessionStarted) {
+    logReaderSessionLifecycle('ended');
+  }
+
+  searchController.dispose();
+  super.dispose();
 }
 
   @override
