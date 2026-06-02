@@ -1546,6 +1546,26 @@ Future<void> logReaderAccessAttempt({
   }
 }
 
+Future<void> logReaderAction({
+  required String action,
+  Map<String, dynamic> details = const {},
+}) async {
+  final user = FirebaseAuth.instance.currentUser;
+
+  try {
+    await FirebaseFirestore.instance.collection('reader_activity_logs').add({
+      'userEmail': user?.email,
+      'pdfTitle': widget.title,
+      'documentAccessLevel': widget.accessLevel,
+      'action': action,
+      'details': details,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  } catch (_) {
+    // Activity logging should not interrupt the reader experience.
+  }
+}
+
 bool canUseViewerTools() {
   if (canViewDocument) return true;
 
@@ -1721,6 +1741,14 @@ Future<bool> saveReadingPositionPage(int page) async {
     'createdAt': FieldValue.serverTimestamp(),
   });
 
+  await logReaderAction(
+    action: 'save_reading_position',
+    details: {
+      'pageNumber': page,
+      'pageCount': pageCount,
+    },
+  );
+
   if (!mounted) return false;
 
   ScaffoldMessenger.of(context).showSnackBar(
@@ -1821,6 +1849,14 @@ if (matchIndex != -1) {
 });
 }
   }
+
+    await logReaderAction(
+      action: 'internal_pdf_search',
+      details: {
+        'keywordLength': keyword.length,
+        'resultCount': results.length,
+      },
+    );
 
     return results;
   } finally {
@@ -2263,6 +2299,14 @@ IconButton(
                 'pageNumber': 0,
                 'createdAt': FieldValue.serverTimestamp(),
               });
+
+              await logReaderAction(
+                action: 'add_reader_note',
+                details: {
+                  'noteLength': noteText.length,
+                  'pageNumber': 0,
+                },
+              );
 
               if (!dialogContext.mounted) return;
 
