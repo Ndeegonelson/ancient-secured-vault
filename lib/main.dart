@@ -2463,6 +2463,7 @@ IconButton(
                     itemCount: notes.length,
                     itemBuilder: (context, index) {
                       final note = notes[index].data() as Map<String, dynamic>;
+                      final noteId = notes[index].id;
 
                       return Card(
                         color: const Color(0xFF1A1D26),
@@ -2549,10 +2550,18 @@ IconButton(
 
           await FirebaseFirestore.instance
               .collection('reader_notes')
-              .doc(notes[index].id)
+              .doc(noteId)
               .update({
             'note': updatedNote,
           });
+
+          await logReaderAction(
+            action: 'edit_reader_note',
+            details: {
+              'noteId': noteId,
+              'noteLength': updatedNote.toString().length,
+            },
+          );
         }
       },
     ),
@@ -2610,8 +2619,15 @@ IconButton(
 
           await FirebaseFirestore.instance
               .collection('reader_notes')
-              .doc(notes[index].id)
+              .doc(noteId)
               .delete();
+
+          await logReaderAction(
+            action: 'delete_reader_note',
+            details: {
+              'noteId': noteId,
+            },
+          );
         }
       },
     ),
