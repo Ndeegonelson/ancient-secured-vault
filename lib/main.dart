@@ -441,6 +441,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return header.contains('%PDF-');
   }
 
+  Future<bool> storageObjectExists(Reference ref) async {
+    try {
+      await ref.getMetadata();
+      return true;
+    } on FirebaseException catch (e) {
+      if (e.code == 'object-not-found') {
+        return false;
+      }
+
+      rethrow;
+    }
+  }
+
   Future<void> uploadPDF() async {
   if (!requireVaultManagerAccess()) return;
 
@@ -479,6 +492,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         final storagePath = 'vault_pdfs/$fileName';
         final ref = FirebaseStorage.instance.ref(storagePath);
+
+        final alreadyExists = await storageObjectExists(ref);
+
+        if (alreadyExists) {
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'A protected PDF with this name already exists. Rename the file before uploading.',
+              ),
+            ),
+          );
+          return;
+        }
 
         await ref.putData(
           fileBytes,
