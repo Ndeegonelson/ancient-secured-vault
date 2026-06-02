@@ -593,10 +593,9 @@ Future<void> indexExistingVaultPdfs() async {
             await FirebaseStorage.instance.ref('vault_pdfs').listAll();
 
         for (var item in premiumResult.items) {
-          final url = await item.getDownloadURL();
           loadedPremiumFiles.add({
             'name': item.name,
-            'url': url,
+            'storagePath': item.fullPath,
           });
         }
       }
@@ -1285,14 +1284,21 @@ const SizedBox(height: 30),
                       style: TextStyle(color: Colors.white70),
                     ),
 
-                    onTap: () {
+                    onTap: () async {
+                      final pdfUrl = await resolveSearchResultPdfUrl(
+                        premiumPdfFiles[index],
+                      );
+
+                      if (pdfUrl == null) return;
+
+                      if (!context.mounted) return;
 
                       Navigator.push(
                         context,
 
                         MaterialPageRoute(
                           builder: (context) => PDFViewerScreen(
-                            pdfUrl: premiumPdfFiles[index]['url'],
+                            pdfUrl: pdfUrl,
                             title: premiumPdfFiles[index]['name'],
                             accessLevel: 'premium',
                           ),
