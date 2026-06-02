@@ -1499,6 +1499,13 @@ Future<void> checkViewerAccess() async {
 
   if (!mounted) return;
 
+  await logReaderAccessAttempt(
+    allowed: canOpen,
+    userAccess: access,
+  );
+
+  if (!mounted) return;
+
   setState(() {
     canViewDocument = canOpen;
     isCheckingViewerAccess = false;
@@ -1515,6 +1522,28 @@ Future<void> checkViewerAccess() async {
 
   registerPdfViewer();
   loadLatestReadingPosition();
+}
+
+Future<void> logReaderAccessAttempt({
+  required bool allowed,
+  required UserAccessState userAccess,
+}) async {
+  final user = FirebaseAuth.instance.currentUser;
+
+  try {
+    await FirebaseFirestore.instance.collection('reader_access_logs').add({
+      'userEmail': user?.email,
+      'pdfTitle': widget.title,
+      'documentAccessLevel': widget.accessLevel,
+      'userAccessLevel': userAccess.accessLevel,
+      'isAdmin': userAccess.isAdmin,
+      'hasActiveSubscription': userAccess.hasActiveSubscription,
+      'allowed': allowed,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  } catch (_) {
+    // Logging should not block the reader if Firestore rules are not ready yet.
+  }
 }
 
 bool canUseViewerTools() {
