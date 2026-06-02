@@ -2157,6 +2157,15 @@ subtitle: Column(
   onPressed: () async {
     if (!canUseViewerTools('open_save_reading_position_dialog')) return;
 
+    await logReaderAction(
+      action: 'open_save_reading_position_dialog',
+      details: {
+        'currentPdfPage': currentPdfPage,
+      },
+    );
+
+    if (!mounted) return;
+
     final pageController = TextEditingController(
       text: currentPdfPage.toString(),
     );
@@ -2233,6 +2242,12 @@ IconButton(
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+
+    await logReaderAction(
+      action: 'view_saved_reading_positions',
+    );
+
+    if (!mounted) return;
 
     showDialog(
       context: this.context,
@@ -2422,9 +2437,15 @@ IconButton(
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    await logReaderAction(
+      action: 'view_reader_notes',
+    );
+
+    if (!mounted) return;
+
     showDialog(
       barrierDismissible: false,
-      context: context,
+      context: this.context,
       builder: (dialogContext) {
         return PointerInterceptor(
           child: AlertDialog(
