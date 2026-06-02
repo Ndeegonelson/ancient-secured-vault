@@ -347,6 +347,8 @@ class UserAccessState {
 
   bool get canAccessMainVault => isAdmin || hasActiveSubscription;
 
+  bool get canManageVault => isAdmin;
+
   bool canOpenPdfWithAccessLevel(String documentAccessLevel) {
     final normalizedAccessLevel = documentAccessLevel.trim().toLowerCase();
 
@@ -378,6 +380,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> loadDashboardData() async {
     await checkUserRole();
     await loadPDFs();
+  }
+
+  bool requireVaultManagerAccess() {
+    if (userAccess.canManageVault) return true;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Admin access required for this vault action.'),
+      ),
+    );
+
+    return false;
   }
 
   Future<void> saveUserNote({
@@ -419,6 +433,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> uploadPDF() async {
+  if (!requireVaultManagerAccess()) return;
+
   try {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -518,6 +534,8 @@ Future<void> indexPdfForSearch({
 }
 
 Future<void> indexExistingVaultPdfs() async {
+  if (!requireVaultManagerAccess()) return;
+
   try {
     Future<void> indexFolder(String folderName, String level) async {
       final result = await FirebaseStorage.instance.ref(folderName).listAll();
