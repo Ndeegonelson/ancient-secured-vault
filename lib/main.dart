@@ -1477,6 +1477,15 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       String currentSearchQuery = '';
       bool isCheckingViewerAccess = true;
       bool canViewDocument = false;
+      late final String readerSessionId;
+
+String get shortReaderSessionId {
+  if (readerSessionId.length <= 8) {
+    return readerSessionId;
+  }
+
+  return readerSessionId.substring(readerSessionId.length - 8);
+}
 
 Future<UserAccessState> loadCurrentUserAccess() async {
   final user = FirebaseAuth.instance.currentUser;
@@ -1534,6 +1543,7 @@ Future<void> logReaderAccessAttempt({
     await FirebaseFirestore.instance.collection('reader_access_logs').add({
       'userEmail': user?.email,
       'pdfTitle': widget.title,
+      'readerSessionId': readerSessionId,
       'documentAccessLevel': widget.accessLevel,
       'userAccessLevel': userAccess.accessLevel,
       'isAdmin': userAccess.isAdmin,
@@ -1556,6 +1566,7 @@ Future<void> logReaderAction({
     await FirebaseFirestore.instance.collection('reader_activity_logs').add({
       'userEmail': user?.email,
       'pdfTitle': widget.title,
+      'readerSessionId': readerSessionId,
       'documentAccessLevel': widget.accessLevel,
       'action': action,
       'details': details,
@@ -1867,6 +1878,8 @@ if (matchIndex != -1) {
 @override
 void initState() {
   super.initState();
+  readerSessionId =
+      'reader-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
   viewId =
       'pdf-viewer-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
   currentPdfPage = widget.initialPage < 1 ? 1 : widget.initialPage;
@@ -2585,7 +2598,9 @@ IconButton(
                   child: RotatedBox(
                     quarterTurns: 3,
                     child: Text(
-                      'Protected by Ancient Secure Docs\n${FirebaseAuth.instance.currentUser?.email ?? ''}',
+                      'Protected by Ancient Secure Docs\n'
+                      '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
+                      'Session: $shortReaderSessionId',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.greenAccent,
