@@ -432,6 +432,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  bool looksLikePdfFile(Uint8List fileBytes) {
+    if (fileBytes.length < 5) return false;
+
+    final headerLength = fileBytes.length < 1024 ? fileBytes.length : 1024;
+    final header = String.fromCharCodes(fileBytes.take(headerLength));
+
+    return header.contains('%PDF-');
+  }
+
   Future<void> uploadPDF() async {
   if (!requireVaultManagerAccess()) return;
 
@@ -446,7 +455,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final fileBytes = result.files.first.bytes;
       final fileName = result.files.first.name;
 
-      if (fileBytes != null) {
+      if (fileBytes == null) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not read the selected PDF file.'),
+          ),
+        );
+        return;
+      }
+
+      if (!looksLikePdfFile(fileBytes)) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Only valid PDF files can be uploaded.'),
+          ),
+        );
+        return;
+      }
+
         final storagePath = 'vault_pdfs/$fileName';
         final ref = FirebaseStorage.instance.ref(storagePath);
 
@@ -468,7 +498,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             content: Text('$fileName uploaded and indexed successfully'),
           ),
         );
-      }
     }
   } catch (e) {
     if (!mounted) return;
