@@ -1124,6 +1124,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                         initialPage: pageNumber,
                                         initialSearchQuery: keyword,
                                         accessLevel: resultAccessLevel,
+                                        openSource: 'global_search_result',
                                       ),
                                     ),
                                   );
@@ -1345,6 +1346,7 @@ ListView.builder(
                 pdfUrl: pdfUrl,
                 title: freePdfFiles[index]['name'],
                 accessLevel: 'free',
+                openSource: 'free_dashboard',
               ),
             ),
           );
@@ -1418,6 +1420,7 @@ const SizedBox(height: 30),
                             pdfUrl: pdfUrl,
                             title: premiumPdfFiles[index]['name'],
                             accessLevel: 'premium',
+                            openSource: 'premium_dashboard',
                           ),
                         ),
                       );
@@ -1442,6 +1445,7 @@ class PDFViewerScreen extends StatefulWidget {
   final int initialPage;
   final String initialSearchQuery;
   final String accessLevel;
+  final String openSource;
 
   const PDFViewerScreen({
   super.key,
@@ -1450,6 +1454,7 @@ class PDFViewerScreen extends StatefulWidget {
   this.initialPage = 0,
   this.initialSearchQuery = '',
   this.accessLevel = 'free',
+  this.openSource = 'direct_open',
 });
 
   @override
@@ -1534,7 +1539,14 @@ Future<void> checkViewerAccess() async {
   registerPdfViewer();
   readerSessionStarted = true;
   readerSessionStartedAt = DateTime.now();
-  await logReaderSessionLifecycle('started');
+  await logReaderSessionLifecycle(
+    'started',
+    details: {
+      'initialPage': widget.initialPage,
+      'currentPdfPage': currentPdfPage,
+      'hasInitialSearchQuery': widget.initialSearchQuery.trim().isNotEmpty,
+    },
+  );
   loadLatestReadingPosition();
 }
 
@@ -1550,7 +1562,10 @@ Future<void> logReaderAccessAttempt({
       'pdfTitle': widget.title,
       'readerSessionId': readerSessionId,
       'documentAccessLevel': widget.accessLevel,
+      'openSource': widget.openSource,
       'userAccessLevel': userAccess.accessLevel,
+      'initialPage': widget.initialPage,
+      'hasInitialSearchQuery': widget.initialSearchQuery.trim().isNotEmpty,
       'isAdmin': userAccess.isAdmin,
       'hasActiveSubscription': userAccess.hasActiveSubscription,
       'allowed': allowed,
@@ -1573,6 +1588,7 @@ Future<void> logReaderAction({
       'pdfTitle': widget.title,
       'readerSessionId': readerSessionId,
       'documentAccessLevel': widget.accessLevel,
+      'openSource': widget.openSource,
       'action': action,
       'details': details,
       'createdAt': FieldValue.serverTimestamp(),
@@ -1594,6 +1610,7 @@ Future<void> logReaderSessionLifecycle(
       'pdfTitle': widget.title,
       'readerSessionId': readerSessionId,
       'documentAccessLevel': widget.accessLevel,
+      'openSource': widget.openSource,
       'event': event,
       'details': details,
       'createdAt': FieldValue.serverTimestamp(),
@@ -2707,7 +2724,8 @@ IconButton(
                     child: Text(
                       'Protected by Ancient Secure Docs\n'
                       '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
-                      'Session: $shortReaderSessionId',
+                      'Session: $shortReaderSessionId\n'
+                      'Source: ${widget.openSource}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.greenAccent,
