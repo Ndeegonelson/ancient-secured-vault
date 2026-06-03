@@ -48,7 +48,7 @@ class ReaderTtsService extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initialized) return;
 
-    await _flutterTts.awaitSpeakCompletion(true);
+    await _flutterTts.awaitSpeakCompletion(false);
     await _flutterTts.setVolume(1.0);
     await _flutterTts.setPitch(1.0);
     await _applyLanguage();

@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'firebase_options.dart';
+import 'services/reader_tts_service.dart';
+import 'widgets/reader_narration_dialog.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:html' as html;
 import 'package:http/http.dart' as http;
@@ -1496,6 +1498,8 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       bool showReaderStatusOverlay = true;
       DateTime? readerSessionStartedAt;
       late final String readerSessionId;
+      late final ReaderTtsService readerTtsService;
+      final Map<int, String> narrationPageTextCache = {};
 
 String get shortReaderSessionId {
   if (readerSessionId.length <= 8) {
@@ -2118,9 +2122,131 @@ Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
   }
 }
 
+Future<String> loadNarrationTextForPage(int pageNumber) async {
+  final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
+  final cachedText = narrationPageTextCache[safePageNumber];
+
+  if (cachedText != null) {
+    return cachedText;
+  }
+
+  final response = await http
+      .get(Uri.parse(widget.pdfUrl))
+      .timeout(const Duration(seconds: 30));
+
+  if (response.statusCode >= 400) {
+    throw Exception('Narration could not load this PDF.');
+  }
+
+  final document = PdfDocument(inputBytes: response.bodyBytes);
+
+  try {
+    final pageCount = document.pages.count;
+
+    if (safePageNumber > pageCount) {
+      throw Exception('This document has only $pageCount pages.');
+    }
+
+    pdfPageCount = pageCount;
+
+    final extractor = PdfTextExtractor(document);
+    final text = extractor.extractText(
+      startPageIndex: safePageNumber - 1,
+      endPageIndex: safePageNumber - 1,
+    ).trim();
+
+    narrationPageTextCache[safePageNumber] = text;
+    return text;
+  } finally {
+    document.dispose();
+  }
+}
+
+Future<void> showReaderNarrationDialog() async {
+  if (!canUseViewerTools('page_narration')) return;
+
+  final narrationPage = currentPdfPage;
+  final narrationText = loadNarrationTextForPage(narrationPage);
+
+  await logReaderAction(
+    action: 'open_page_narration',
+    details: {
+      'pageNumber': narrationPage,
+    },
+  );
+
+  if (!mounted) return;
+
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      return ReaderNarrationDialog(
+        service: readerTtsService,
+        pageNumber: narrationPage,
+        narrationText: narrationText,
+        onLanguageChanged: (language) async {
+          await readerTtsService.setLanguage(language);
+          await logReaderAction(
+            action: 'change_narration_language',
+            details: {
+              'language': language.locale,
+              'pageNumber': narrationPage,
+            },
+          );
+        },
+        onRateChangeEnd: (rate) async {
+          await logReaderAction(
+            action: 'change_narration_speed',
+            details: {
+              'rate': rate,
+              'pageNumber': narrationPage,
+            },
+          );
+        },
+        onPlay: (text) async {
+          final started = await readerTtsService.speakPage(
+            text: text,
+            pageNumber: narrationPage,
+          );
+
+          if (started) {
+            await logReaderAction(
+              action: 'start_page_narration',
+              details: {
+                'pageNumber': narrationPage,
+                'language': readerTtsService.language.locale,
+                'rate': readerTtsService.rate,
+              },
+            );
+          }
+        },
+        onPause: () async {
+          await readerTtsService.pause();
+          await logReaderAction(
+            action: 'pause_page_narration',
+            details: {
+              'pageNumber': narrationPage,
+            },
+          );
+        },
+        onStop: () async {
+          await readerTtsService.stop();
+          await logReaderAction(
+            action: 'stop_page_narration',
+            details: {
+              'pageNumber': narrationPage,
+            },
+          );
+        },
+      );
+    },
+  );
+}
+
 @override
 void initState() {
   super.initState();
+  readerTtsService = ReaderTtsService();
   readerSessionId =
       'reader-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
   viewId =
@@ -2147,6 +2273,7 @@ void dispose() {
   }
 
   searchController.dispose();
+  readerTtsService.dispose();
   super.dispose();
 }
 
@@ -2176,6 +2303,15 @@ void dispose() {
         ),
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
+        IconButton(
+          tooltip: 'Narrate tracked page',
+          icon: const Icon(
+            Icons.record_voice_over,
+            size: 20,
+            color: Colors.greenAccent,
+          ),
+          onPressed: showReaderNarrationDialog,
+        ),
         IconButton(
           tooltip: showReaderStatusOverlay
               ? 'Hide reader status'
