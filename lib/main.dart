@@ -2229,53 +2229,16 @@ void dispose() {
   showDialog(
       context: this.context,
       builder: (dialogContext) {
+        void submitSearch() {
+          final keyword = searchController.text.trim();
 
-        return PointerInterceptor(
-  child: AlertDialog(
-          backgroundColor: const Color(0xFF0F1117),
-          title: const Text(
-            'Search This PDF',
-            style: TextStyle(color: Colors.greenAccent),
-          ),
-          content: TextField(
-               enabled: true,
-               readOnly: false,
-               autofocus: true,
-            controller: searchController,
-            textInputAction: TextInputAction.search,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              labelText: 'Search term',
-              labelStyle: TextStyle(color: Colors.white70),
-              hintText: 'Keyword or phrase',
-              hintStyle: TextStyle(color: Colors.grey),
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            PointerInterceptor(
-              child: TextButton(
-                onPressed: () {
-                  searchController.clear();
-                },
-                child: const Text(
-                  'Clear',
-                  style: TextStyle(color: Colors.white70),
-                ),
-              ),
-            ),
-            PointerInterceptor(
-  child: TextButton(
-              onPressed: () {
-               final keyword = searchController.text.trim();
+          Navigator.pop(dialogContext);
 
-Navigator.pop(dialogContext);
+          if (keyword.isEmpty) return;
 
-if (keyword.isEmpty) return;
-
-showDialog(
-  context: this.context,
-  builder: (resultContext) {
+          showDialog(
+            context: this.context,
+            builder: (resultContext) {
    return PointerInterceptor(
   child: AlertDialog(
       backgroundColor: const Color(0xFF0F1117),
@@ -2408,7 +2371,46 @@ subtitle: Column(
     );
   },
 );
-              },
+        }
+
+        return PointerInterceptor(
+  child: AlertDialog(
+          backgroundColor: const Color(0xFF0F1117),
+          title: const Text(
+            'Search This PDF',
+            style: TextStyle(color: Colors.greenAccent),
+          ),
+          content: TextField(
+               enabled: true,
+               readOnly: false,
+               autofocus: true,
+            controller: searchController,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => submitSearch(),
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              labelText: 'Search term',
+              labelStyle: TextStyle(color: Colors.white70),
+              hintText: 'Keyword or phrase',
+              hintStyle: TextStyle(color: Colors.grey),
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            PointerInterceptor(
+              child: TextButton(
+                onPressed: () {
+                  searchController.clear();
+                },
+                child: const Text(
+                  'Clear',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            ),
+            PointerInterceptor(
+  child: TextButton(
+              onPressed: submitSearch,
               child: const Text(
                 'Search',
                 style: TextStyle(color: Colors.greenAccent),
