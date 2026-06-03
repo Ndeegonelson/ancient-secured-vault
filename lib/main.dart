@@ -2515,7 +2515,7 @@ IconButton(
           ),
         );
       },
-    );
+    ).whenComplete(pageController.dispose);
   },
 ),
           IconButton(
@@ -2633,7 +2633,7 @@ IconButton(
           ),
         );
       },
-    );
+    ).whenComplete(pageController.dispose);
   },
 ),
 IconButton(
@@ -2762,12 +2762,12 @@ IconButton(
     onPressed: () {
       if (!canUseViewerTools('add_reader_note')) return;
 
+ final noteController = TextEditingController();
+
  showDialog(
   barrierDismissible: false,
   context: context,
   builder: (dialogContext) {
-    final noteController = TextEditingController();
-
     return PointerInterceptor(
       child: AlertDialog(
         backgroundColor: const Color(0xFF0F1117),
@@ -2852,7 +2852,7 @@ IconButton(
       ),
     );
   },
-);
+).whenComplete(noteController.dispose);
 },
   ),
 IconButton(
@@ -3018,6 +3018,8 @@ IconButton(
             );
           },
         );
+
+        editController.dispose();
 
         if (updatedNote != null &&
             updatedNote.toString().isNotEmpty) {
