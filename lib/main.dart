@@ -2928,6 +2928,7 @@ IconButton(
                         note['pageNumber'],
                       );
                       final noteTime = formatReaderNoteTime(note);
+                      final notePreview = (note['note'] ?? '').toString();
 
                       return Card(
                         color: const Color(0xFF1A1D26),
@@ -2986,18 +2987,27 @@ IconButton(
                 style: TextStyle(color: Colors.greenAccent),
               ),
 
-              content: TextField(
-                controller: editController,
-                maxLines: 6,
-
-                style: const TextStyle(color: Colors.white),
-
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  hintText: 'Edit your note...',
-                  hintStyle: TextStyle(color: Colors.white54),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Linked page: $notePage',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: editController,
+                    maxLines: 6,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Edit your note...',
+                      hintStyle: TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                ],
                 ),
-              ),
 
               actions: [
 
@@ -3084,41 +3094,61 @@ IconButton(
           context: context,
 
           builder: (context) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF0F1117),
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
 
-              title: const Text(
-                'Delete Note?',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-
-              content: const Text(
-                'Are you sure you want to permanently delete this note?',
-                style: TextStyle(color: Colors.white70),
-              ),
-
-              actions: [
-
-                TextButton(
-                  onPressed: () =>
-                      Navigator.pop(context, false),
-
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(color: Colors.white70),
-                  ),
+                title: const Text(
+                  'Delete Note?',
+                  style: TextStyle(color: Colors.redAccent),
                 ),
 
-                TextButton(
-                  onPressed: () =>
-                      Navigator.pop(context, true),
-
-                  child: const Text(
-                    'Delete',
-                    style: TextStyle(color: Colors.redAccent),
-                  ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Page $notePage',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      notePreview,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'This note will be permanently deleted.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ],
                 ),
-              ],
+
+                actions: [
+
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.pop(context, false),
+
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.pop(context, true),
+
+                    child: const Text(
+                      'Delete',
+                      style: TextStyle(color: Colors.redAccent),
+                    ),
+                  ),
+                ],
+              ),
             );
           },
         );
