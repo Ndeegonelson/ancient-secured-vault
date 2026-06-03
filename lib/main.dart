@@ -1869,13 +1869,37 @@ Future<bool> goToPdfPage(int page) async {
     return false;
   }
 
+  late final int pageCount;
+
+  try {
+    pageCount = await loadPdfPageCount();
+  } catch (e) {
+    if (!mounted) return false;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(e.toString())),
+    );
+    return false;
+  }
+
+  if (page > pageCount) {
+    if (!mounted) return false;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('This document has only $pageCount pages.'),
+      ),
+    );
+    return false;
+  }
+
   openPdfPage(page, source: 'manual_page_jump');
 
   if (!mounted) return false;
 
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text('Opened page $page'),
+      content: Text('Opened page $page of $pageCount'),
     ),
   );
 
@@ -2443,7 +2467,9 @@ IconButton(
                   labelStyle: const TextStyle(color: Colors.white70),
                   hintText: 'Page number',
                   hintStyle: const TextStyle(color: Colors.white54),
-                  helperText: 'Tracked page: $currentPdfPage',
+                  helperText: pdfPageCount == null
+                      ? 'Tracked page: $currentPdfPage'
+                      : 'Tracked page: $currentPdfPage of $pdfPageCount',
                   helperStyle: const TextStyle(color: Colors.white54),
                   border: const OutlineInputBorder(),
                 ),
