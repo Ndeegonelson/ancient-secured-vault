@@ -1125,6 +1125,9 @@ Future<void> showGlobalSearchResults(String keyword) async {
                                         initialSearchQuery: keyword,
                                         accessLevel: resultAccessLevel,
                                         openSource: 'global_search_result',
+                                        storagePath:
+                                            data['storagePath']?.toString() ??
+                                                '',
                                       ),
                                     ),
                                   );
@@ -1347,6 +1350,8 @@ ListView.builder(
                 title: freePdfFiles[index]['name'],
                 accessLevel: 'free',
                 openSource: 'free_dashboard',
+                storagePath:
+                    freePdfFiles[index]['storagePath']?.toString() ?? '',
               ),
             ),
           );
@@ -1421,6 +1426,9 @@ const SizedBox(height: 30),
                             title: premiumPdfFiles[index]['name'],
                             accessLevel: 'premium',
                             openSource: 'premium_dashboard',
+                            storagePath: premiumPdfFiles[index]['storagePath']
+                                    ?.toString() ??
+                                '',
                           ),
                         ),
                       );
@@ -1446,6 +1454,7 @@ class PDFViewerScreen extends StatefulWidget {
   final String initialSearchQuery;
   final String accessLevel;
   final String openSource;
+  final String storagePath;
 
   const PDFViewerScreen({
   super.key,
@@ -1455,6 +1464,7 @@ class PDFViewerScreen extends StatefulWidget {
   this.initialSearchQuery = '',
   this.accessLevel = 'free',
   this.openSource = 'direct_open',
+  this.storagePath = '',
 });
 
   @override
@@ -1492,6 +1502,16 @@ String get shortReaderSessionId {
   }
 
   return readerSessionId.substring(readerSessionId.length - 8);
+}
+
+String get normalizedReaderStoragePath => widget.storagePath.trim();
+
+void addStoragePathToLog(Map<String, dynamic> logData) {
+  final storagePath = normalizedReaderStoragePath;
+
+  if (storagePath.isNotEmpty) {
+    logData['storagePath'] = storagePath;
+  }
 }
 
 Future<UserAccessState> loadCurrentUserAccess() async {
@@ -1557,7 +1577,7 @@ Future<void> logReaderAccessAttempt({
   final user = FirebaseAuth.instance.currentUser;
 
   try {
-    await FirebaseFirestore.instance.collection('reader_access_logs').add({
+    final logData = <String, dynamic>{
       'userEmail': user?.email,
       'pdfTitle': widget.title,
       'readerSessionId': readerSessionId,
@@ -1570,7 +1590,13 @@ Future<void> logReaderAccessAttempt({
       'hasActiveSubscription': userAccess.hasActiveSubscription,
       'allowed': allowed,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+
+    addStoragePathToLog(logData);
+
+    await FirebaseFirestore.instance.collection('reader_access_logs').add(
+          logData,
+        );
   } catch (_) {
     // Logging should not block the reader if Firestore rules are not ready yet.
   }
@@ -1583,7 +1609,7 @@ Future<void> logReaderAction({
   final user = FirebaseAuth.instance.currentUser;
 
   try {
-    await FirebaseFirestore.instance.collection('reader_activity_logs').add({
+    final logData = <String, dynamic>{
       'userEmail': user?.email,
       'pdfTitle': widget.title,
       'readerSessionId': readerSessionId,
@@ -1592,7 +1618,13 @@ Future<void> logReaderAction({
       'action': action,
       'details': details,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+
+    addStoragePathToLog(logData);
+
+    await FirebaseFirestore.instance.collection('reader_activity_logs').add(
+          logData,
+        );
   } catch (_) {
     // Activity logging should not interrupt the reader experience.
   }
@@ -1605,7 +1637,7 @@ Future<void> logReaderSessionLifecycle(
   final user = FirebaseAuth.instance.currentUser;
 
   try {
-    await FirebaseFirestore.instance.collection('reader_session_logs').add({
+    final logData = <String, dynamic>{
       'userEmail': user?.email,
       'pdfTitle': widget.title,
       'readerSessionId': readerSessionId,
@@ -1614,7 +1646,13 @@ Future<void> logReaderSessionLifecycle(
       'event': event,
       'details': details,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+
+    addStoragePathToLog(logData);
+
+    await FirebaseFirestore.instance.collection('reader_session_logs').add(
+          logData,
+        );
   } catch (_) {
     // Session logging should not interrupt the reader experience.
   }
