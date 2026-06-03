@@ -1506,6 +1506,26 @@ String get shortReaderSessionId {
 
 String get normalizedReaderStoragePath => widget.storagePath.trim();
 
+String twoDigits(int value) => value.toString().padLeft(2, '0');
+
+String formatReaderTimestamp(DateTime? value) {
+  if (value == null) return 'pending';
+
+  return '${value.year}-'
+      '${twoDigits(value.month)}-'
+      '${twoDigits(value.day)} '
+      '${twoDigits(value.hour)}:'
+      '${twoDigits(value.minute)}';
+}
+
+String get readerWatermarkText {
+  return 'Protected by Ancient Secure Docs\n'
+      '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
+      'Session: $shortReaderSessionId\n'
+      'Access: ${widget.accessLevel} | Source: ${widget.openSource}\n'
+      'Opened: ${formatReaderTimestamp(readerSessionStartedAt)}';
+}
+
 void addStoragePathToLog(Map<String, dynamic> logData) {
   final storagePath = normalizedReaderStoragePath;
 
@@ -2760,14 +2780,11 @@ IconButton(
                   child: RotatedBox(
                     quarterTurns: 3,
                     child: Text(
-                      'Protected by Ancient Secure Docs\n'
-                      '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
-                      'Session: $shortReaderSessionId\n'
-                      'Source: ${widget.openSource}',
+                      readerWatermarkText,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.greenAccent,
-                        fontSize: 40,
+                        fontSize: 34,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
