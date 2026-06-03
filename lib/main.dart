@@ -1522,6 +1522,14 @@ String formatReaderTimestamp(DateTime? value) {
       '${twoDigits(value.minute)}';
 }
 
+String formatSavedPositionTime(dynamic value) {
+  if (value is Timestamp) {
+    return formatReaderTimestamp(value.toDate());
+  }
+
+  return 'saving...';
+}
+
 String get readerWatermarkText {
   return 'Protected by Ancient Secure Docs\n'
       '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
@@ -1803,6 +1811,31 @@ void openPdfPage(
     pageNumber: currentPdfPage,
     searchQuery: currentSearchQuery,
   );
+}
+
+Future<bool> goToPdfPage(int page) async {
+  if (page < 1) {
+    if (!mounted) return false;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please enter a valid page number.'),
+      ),
+    );
+    return false;
+  }
+
+  openPdfPage(page, source: 'manual_page_jump');
+
+  if (!mounted) return false;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('Opened page $page'),
+    ),
+  );
+
+  return true;
 }
 
 Future<int> loadPdfPageCount() async {
@@ -2244,6 +2277,96 @@ subtitle: Column(
     );
   },
 ),
+IconButton(
+  tooltip: 'Go to page',
+  icon: const Icon(
+    Icons.input,
+    size: 20,
+    color: Colors.greenAccent,
+  ),
+  onPressed: () async {
+    if (!canUseViewerTools('manual_page_jump')) return;
+
+    await logReaderAction(
+      action: 'open_manual_page_jump_dialog',
+      details: {
+        'currentPdfPage': currentPdfPage,
+      },
+    );
+
+    if (!mounted) return;
+
+    final pageController = TextEditingController(
+      text: currentPdfPage.toString(),
+    );
+
+    showDialog(
+      context: this.context,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Go to Page',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: PointerInterceptor(
+              child: TextField(
+                controller: pageController,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Page to open',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintText: 'Page number',
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  helperText: 'Tracked page: $currentPdfPage',
+                  helperStyle: const TextStyle(color: Colors.white54),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            actions: [
+              PointerInterceptor(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
+                ),
+              ),
+              PointerInterceptor(
+                child: TextButton(
+                  onPressed: () async {
+                    final page =
+                        int.tryParse(pageController.text.trim()) ?? 0;
+
+                    final opened = await goToPdfPage(page);
+
+                    if (!dialogContext.mounted) return;
+
+                    if (opened) {
+                      Navigator.pop(dialogContext);
+                    }
+                  },
+                  child: const Text(
+                    'Open',
+                    style: TextStyle(color: Colors.greenAccent),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  },
+),
           IconButton(
   tooltip: 'Save reading position',
   icon: const Icon(
@@ -2311,6 +2434,27 @@ subtitle: Column(
                   onPressed: () async {
                     if (!canUseViewerTools('save_reading_position')) return;
 
+                    final saved =
+                        await saveReadingPositionPage(currentPdfPage);
+
+                    if (!dialogContext.mounted) return;
+
+                    if (saved) {
+                      Navigator.pop(dialogContext);
+                    }
+                  },
+                  child: const Text(
+                    'Save Tracked',
+                    style:
+                        TextStyle(color: Colors.greenAccent),
+                  ),
+                ),
+              ),
+              PointerInterceptor(
+                child: TextButton(
+                  onPressed: () async {
+                    if (!canUseViewerTools('save_reading_position')) return;
+
                     final page =
                         int.tryParse(pageController.text.trim()) ?? 0;
 
@@ -2324,7 +2468,7 @@ subtitle: Column(
                     }
                   },
                   child: const Text(
-                    'Save',
+                    'Save Typed',
                     style:
                         TextStyle(color: Colors.greenAccent),
                   ),
@@ -2401,6 +2545,9 @@ IconButton(
                               position['pageNumber'].toString(),
                             ) ??
                             1;
+                        final savedAt = formatSavedPositionTime(
+                          position['createdAt'],
+                        );
 
                         return Card(
                           color: const Color(0xFF1A1D26),
@@ -2413,14 +2560,19 @@ IconButton(
                               );
                             },
                             title: Text(
-                              'Saved Position ${index + 1}',
+                              'Page $page',
                               style:
                                   const TextStyle(color: Colors.white),
                             ),
                             subtitle: Text(
-                              'Page: $page',
+                              'Saved: $savedAt',
                               style:
                                   const TextStyle(color: Colors.white54),
+                            ),
+                            trailing: const Icon(
+                              Icons.open_in_new,
+                              color: Colors.greenAccent,
+                              size: 18,
                             ),
                           ),
                         );
