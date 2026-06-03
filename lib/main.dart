@@ -2043,6 +2043,7 @@ void dispose() {
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
         IconButton(
+  tooltip: 'Search in PDF',
   icon: const Icon(
     Icons.search,
     size: 20,
@@ -2224,6 +2225,7 @@ subtitle: Column(
   },
 ),
           IconButton(
+  tooltip: 'Save reading position',
   icon: const Icon(
     Icons.bookmark_add,
     size: 20,
@@ -2310,6 +2312,7 @@ subtitle: Column(
   },
 ),
 IconButton(
+  tooltip: 'Saved reading positions',
   icon: const Icon(Icons.history, size: 20, color: Colors.greenAccent),
  
   onPressed: () async {
@@ -2418,8 +2421,9 @@ IconButton(
       },
     );
   },
-),
+  ),
   IconButton(
+    tooltip: 'Add reader note',
     icon: const Icon(Icons.note_add, size: 20, color: Colors.greenAccent),
     
     onPressed: () {
@@ -2504,6 +2508,7 @@ IconButton(
 },
   ),
 IconButton(
+  tooltip: 'Reader notes',
   icon: const Icon(Icons.list_alt, size: 20, color: Colors.greenAccent),
  
   onPressed: () async {
@@ -2578,6 +2583,7 @@ IconButton(
 
     // EDIT BUTTON
     IconButton(
+      tooltip: 'Edit note',
       icon: const Icon(Icons.edit, color: Colors.greenAccent),
 
       onPressed: () async {
@@ -2664,6 +2670,7 @@ IconButton(
 
     // DELETE BUTTON
     IconButton(
+      tooltip: 'Delete note',
       icon: const Icon(Icons.delete, color: Colors.redAccent),
 
       onPressed: () async {
