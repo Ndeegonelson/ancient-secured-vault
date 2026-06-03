@@ -900,7 +900,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
             backgroundColor: const Color(0xFF0F1117),
 
             title: Text(
-              'Search Results: $keyword',
+              'Vault Results for "$keyword"',
               style: const TextStyle(
                 color: Colors.greenAccent,
               ),
@@ -1007,7 +1007,7 @@ Future<void> showGlobalSearchResults(String keyword) async {
                         if (filteredDocs.isEmpty) {
                           return const Center(
                             child: Text(
-                              'No matching results found.',
+                              'No matching vault documents found.',
                               style: TextStyle(
                                 color: Colors.white70,
                               ),
@@ -2061,7 +2061,7 @@ void dispose() {
   child: AlertDialog(
           backgroundColor: const Color(0xFF0F1117),
           title: const Text(
-            'Search PDF',
+            'Search This PDF',
             style: TextStyle(color: Colors.greenAccent),
           ),
           content: TextField(
@@ -2071,7 +2071,7 @@ void dispose() {
             controller: searchController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
-              hintText: 'Enter keyword',
+              hintText: 'Keyword or phrase',
               hintStyle: TextStyle(color: Colors.grey),
             ),
           ),
@@ -2092,7 +2092,7 @@ showDialog(
   child: AlertDialog(
       backgroundColor: const Color(0xFF0F1117),
       title: Text(
-        'Search Results: $keyword',
+        'Results for "$keyword"',
         style: const TextStyle(color: Colors.greenAccent),
       ),
       content: SizedBox(
@@ -2128,7 +2128,7 @@ Expanded(
             if (results.isEmpty) {
               return const Center(
                 child: Text(
-                  'No matching results found.',
+                  'No matches in this PDF.',
                   style: TextStyle(color: Colors.white70),
                 ),
               );
@@ -2157,7 +2157,7 @@ Expanded(
   },
 
   title: Text(
-    'Page ${data['pageNumber']}',
+    'Open Page ${data['pageNumber']}',
     style: const TextStyle(color: Colors.white),
   ),
 subtitle: Column(
@@ -2165,7 +2165,7 @@ subtitle: Column(
   children: [
 
     Text(
-      'Page ${data['pageNumber']}',
+      'Matching excerpt',
       style: const TextStyle(
         color: Colors.white70,
       ),
@@ -2254,7 +2254,7 @@ subtitle: Column(
           child: AlertDialog(
             backgroundColor: const Color(0xFF0F1117),
             title: const Text(
-              'Save Reading Position',
+              'Save Current Position',
               style: TextStyle(color: Colors.greenAccent),
             ),
             content: PointerInterceptor(
@@ -2263,7 +2263,7 @@ subtitle: Column(
                 keyboardType: TextInputType.number,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                  hintText: 'Enter current page',
+                  hintText: 'Page number',
                   hintStyle: TextStyle(color: Colors.white54),
                 ),
               ),
@@ -2334,7 +2334,7 @@ IconButton(
           child: AlertDialog(
             backgroundColor: const Color(0xFF0F1117),
             title: const Text(
-              'Saved Reading Positions',
+              'Saved Positions',
               style: TextStyle(color: Colors.greenAccent),
             ),
             content: PointerInterceptor(
@@ -2360,7 +2360,7 @@ IconButton(
                     if (positions.isEmpty) {
                       return const Center(
                         child: Text(
-                          'No saved positions yet.',
+                          'No saved positions for this PDF yet.',
                           style: TextStyle(color: Colors.white70),
                         ),
                       );
@@ -2439,7 +2439,7 @@ IconButton(
       child: AlertDialog(
         backgroundColor: const Color(0xFF0F1117),
         title: const Text(
-          'Add Reader Note',
+          'Add Note',
           style: TextStyle(color: Colors.greenAccent),
         ),
         content: TextField(
@@ -2448,7 +2448,7 @@ IconButton(
           maxLines: 5,
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
-            hintText: 'Write your note here...',
+            hintText: 'Write a note for this PDF',
             hintStyle: TextStyle(color: Colors.white54),
             border: OutlineInputBorder(),
           ),
@@ -2531,7 +2531,7 @@ IconButton(
           child: AlertDialog(
             backgroundColor: const Color(0xFF0F1117),
             title: const Text(
-              'My Reader Notes',
+              'Reader Notes',
               style: TextStyle(color: Colors.greenAccent),
             ),
             content: SizedBox(
@@ -2553,7 +2553,7 @@ IconButton(
                   if (notes.isEmpty) {
                     return const Center(
                       child: Text(
-                        'No notes saved for this document yet.',
+                        'No notes saved for this PDF yet.',
                         style: TextStyle(color: Colors.white70),
                       ),
                     );
