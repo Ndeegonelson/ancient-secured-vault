@@ -1506,6 +1506,10 @@ String get shortReaderSessionId {
 
 String get normalizedReaderStoragePath => widget.storagePath.trim();
 
+String get readerSourceLabel => widget.openSource.replaceAll('_', ' ');
+
+String get readerAccessLabel => widget.accessLevel.trim().toUpperCase();
+
 String twoDigits(int value) => value.toString().padLeft(2, '0');
 
 String formatReaderTimestamp(DateTime? value) {
@@ -1522,7 +1526,7 @@ String get readerWatermarkText {
   return 'Protected by Ancient Secure Docs\n'
       '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
       'Session: $shortReaderSessionId\n'
-      'Access: ${widget.accessLevel} | Source: ${widget.openSource}\n'
+      'Access: $readerAccessLabel | Source: $readerSourceLabel\n'
       'Opened: ${formatReaderTimestamp(readerSessionStartedAt)}';
 }
 
@@ -2034,11 +2038,23 @@ void dispose() {
       backgroundColor: const Color(0xFF0F1117),
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: Text(
-  widget.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: Colors.greenAccent),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.greenAccent),
+            ),
+            Text(
+              '$readerAccessLabel - $readerSourceLabel',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ],
         ),
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
@@ -2069,10 +2085,14 @@ void dispose() {
                readOnly: false,
                autofocus: true,
             controller: searchController,
+            textInputAction: TextInputAction.search,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
+              labelText: 'Search term',
+              labelStyle: TextStyle(color: Colors.white70),
               hintText: 'Keyword or phrase',
               hintStyle: TextStyle(color: Colors.grey),
+              border: OutlineInputBorder(),
             ),
           ),
           actions: [
@@ -2261,10 +2281,16 @@ subtitle: Column(
               child: TextField(
                 controller: pageController,
                 keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
+                  labelText: 'Page to save',
+                  labelStyle: const TextStyle(color: Colors.white70),
                   hintText: 'Page number',
-                  hintStyle: TextStyle(color: Colors.white54),
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  helperText: 'Tracked page: $currentPdfPage',
+                  helperStyle: const TextStyle(color: Colors.white54),
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ),
@@ -2446,8 +2472,11 @@ IconButton(
           autofocus: true,
           controller: noteController,
           maxLines: 5,
+          textInputAction: TextInputAction.newline,
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
+            labelText: 'Note',
+            labelStyle: TextStyle(color: Colors.white70),
             hintText: 'Write a note for this PDF',
             hintStyle: TextStyle(color: Colors.white54),
             border: OutlineInputBorder(),
