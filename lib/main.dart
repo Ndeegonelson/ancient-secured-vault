@@ -2164,14 +2164,29 @@ void dispose() {
             color: Colors.greenAccent,
           ),
           onPressed: () {
+            final nextVisible = !showReaderStatusOverlay;
+
             setState(() {
-              showReaderStatusOverlay = !showReaderStatusOverlay;
+              showReaderStatusOverlay = nextVisible;
             });
+
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  nextVisible
+                      ? 'Reader status shown.'
+                      : 'Reader status hidden.',
+                ),
+              ),
+            );
 
             logReaderAction(
               action: 'toggle_reader_status_overlay',
               details: {
-                'visible': showReaderStatusOverlay,
+                'visible': nextVisible,
+                'currentPdfPage': currentPdfPage,
+                'hasActiveSearch': currentSearchQuery.trim().isNotEmpty,
               },
             );
           },
