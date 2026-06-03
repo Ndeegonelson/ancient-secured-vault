@@ -1557,6 +1557,13 @@ String formatSearchResultSummary(List<Map<String, dynamic>> results) {
   return '${results.length} $matchLabel across $matchedPages $pageLabel';
 }
 
+String get readerStatusText {
+  final searchText = currentSearchQuery.trim();
+  final searchStatus = searchText.isEmpty ? 'No active search' : 'Search: $searchText';
+
+  return 'Page $currentPdfPage | $readerAccessLabel | $searchStatus';
+}
+
 String get readerWatermarkText {
   return 'Protected by Ancient Secure Docs\n'
       '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
@@ -1822,8 +1829,17 @@ void openPdfPage(
   String source = 'reader_navigation',
 }) {
   final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
-  currentPdfPage = safePageNumber;
-  currentSearchQuery = searchQuery ?? currentSearchQuery;
+  final nextSearchQuery = searchQuery ?? currentSearchQuery;
+
+  if (mounted) {
+    setState(() {
+      currentPdfPage = safePageNumber;
+      currentSearchQuery = nextSearchQuery;
+    });
+  } else {
+    currentPdfPage = safePageNumber;
+    currentSearchQuery = nextSearchQuery;
+  }
 
   logReaderAction(
     action: 'open_pdf_page',
@@ -3080,6 +3096,34 @@ IconButton(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 16,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  border: Border.all(color: Colors.greenAccent),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  readerStatusText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
                   ),
                 ),
               ),
