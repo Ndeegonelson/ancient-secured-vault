@@ -2448,6 +2448,19 @@ IconButton(
     showDialog(
       context: this.context,
       builder: (dialogContext) {
+        Future<void> submitPageJump() async {
+          final page =
+              int.tryParse(pageController.text.trim()) ?? 0;
+
+          final opened = await goToPdfPage(page);
+
+          if (!dialogContext.mounted) return;
+
+          if (opened) {
+            Navigator.pop(dialogContext);
+          }
+        }
+
         return PointerInterceptor(
           child: AlertDialog(
             backgroundColor: const Color(0xFF0F1117),
@@ -2461,6 +2474,7 @@ IconButton(
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
                 autofocus: true,
+                onSubmitted: (_) => submitPageJump(),
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   labelText: 'Page to open',
@@ -2470,6 +2484,7 @@ IconButton(
                   helperText: pdfPageCount == null
                       ? 'Tracked page: $currentPdfPage'
                       : 'Tracked page: $currentPdfPage of $pdfPageCount',
+                  suffixText: 'Enter opens',
                   helperStyle: const TextStyle(color: Colors.white54),
                   border: const OutlineInputBorder(),
                 ),
@@ -2489,18 +2504,7 @@ IconButton(
               ),
               PointerInterceptor(
                 child: TextButton(
-                  onPressed: () async {
-                    final page =
-                        int.tryParse(pageController.text.trim()) ?? 0;
-
-                    final opened = await goToPdfPage(page);
-
-                    if (!dialogContext.mounted) return;
-
-                    if (opened) {
-                      Navigator.pop(dialogContext);
-                    }
-                  },
+                  onPressed: submitPageJump,
                   child: const Text(
                     'Open',
                     style: TextStyle(color: Colors.greenAccent),
@@ -2540,6 +2544,22 @@ IconButton(
     showDialog(
       context: this.context,
       builder: (dialogContext) {
+        Future<void> submitTypedSave() async {
+          if (!canUseViewerTools('save_reading_position')) return;
+
+          final page =
+              int.tryParse(pageController.text.trim()) ?? 0;
+
+          final saved =
+              await saveReadingPositionPage(page);
+
+          if (!dialogContext.mounted) return;
+
+          if (saved) {
+            Navigator.pop(dialogContext);
+          }
+        }
+
         return PointerInterceptor(
           child: AlertDialog(
             backgroundColor: const Color(0xFF0F1117),
@@ -2552,6 +2572,7 @@ IconButton(
                 controller: pageController,
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
+                onSubmitted: (_) => submitTypedSave(),
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   labelText: 'Page to save',
@@ -2559,6 +2580,7 @@ IconButton(
                   hintText: 'Page number',
                   hintStyle: const TextStyle(color: Colors.white54),
                   helperText: 'Tracked page: $currentPdfPage',
+                  suffixText: 'Enter saves',
                   helperStyle: const TextStyle(color: Colors.white54),
                   border: const OutlineInputBorder(),
                 ),
@@ -2599,21 +2621,7 @@ IconButton(
               ),
               PointerInterceptor(
                 child: TextButton(
-                  onPressed: () async {
-                    if (!canUseViewerTools('save_reading_position')) return;
-
-                    final page =
-                        int.tryParse(pageController.text.trim()) ?? 0;
-
-                    final saved =
-                        await saveReadingPositionPage(page);
-
-                    if (!dialogContext.mounted) return;
-
-                    if (saved) {
-                      Navigator.pop(dialogContext);
-                    }
-                  },
+                  onPressed: submitTypedSave,
                   child: const Text(
                     'Save Typed',
                     style:
