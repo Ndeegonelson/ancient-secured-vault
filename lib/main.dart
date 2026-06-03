@@ -1546,6 +1546,17 @@ String formatReaderNoteTime(Map<String, dynamic> note) {
   return 'Saved: ${formatSavedPositionTime(note['createdAt'])}';
 }
 
+String formatSearchResultSummary(List<Map<String, dynamic>> results) {
+  final matchedPages = results
+      .map((result) => readStoredPageNumber(result['pageNumber']))
+      .toSet()
+      .length;
+  final matchLabel = results.length == 1 ? 'match' : 'matches';
+  final pageLabel = matchedPages == 1 ? 'page' : 'pages';
+
+  return '${results.length} $matchLabel across $matchedPages $pageLabel';
+}
+
 String get readerWatermarkText {
   return 'Protected by Ancient Secure Docs\n'
       '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
@@ -1995,6 +2006,12 @@ Future<bool> saveReadingPositionPage(int page) async {
 }
 
 Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
+  final normalizedKeyword = keyword.trim().toLowerCase();
+
+  if (normalizedKeyword.isEmpty) {
+    return [];
+  }
+
   final response = await http
       .get(Uri.parse(widget.pdfUrl))
       .timeout(const Duration(seconds: 30));
@@ -2016,23 +2033,30 @@ Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
       );
 
       final lowerText = text.toLowerCase();
-final lowerKeyword = keyword.toLowerCase();
-final matchIndex = lowerText.indexOf(lowerKeyword);
+      var matchIndex = lowerText.indexOf(normalizedKeyword);
+      var matchNumber = 0;
 
-if (matchIndex != -1) {
-  final snippetStart = matchIndex - 80 < 0 ? 0 : matchIndex - 80;
-  final snippetEnd =
-      matchIndex + 180 > text.length ? text.length : matchIndex + 180;
+      while (matchIndex != -1) {
+        matchNumber++;
 
-  final snippet = text.substring(snippetStart, snippetEnd);
+        final snippetStart = matchIndex - 80 < 0 ? 0 : matchIndex - 80;
+        final snippetEnd = matchIndex + 180 > text.length
+            ? text.length
+            : matchIndex + 180;
 
-  results.add({
-  'pdfTitle': widget.title,
-  'pdfUrl': widget.pdfUrl,
-  'pageNumber': i + 1,
-  'text': snippet,
-});
-}
+        final snippet = text.substring(snippetStart, snippetEnd);
+
+        results.add({
+          'pdfTitle': widget.title,
+          'pdfUrl': widget.pdfUrl,
+          'pageNumber': i + 1,
+          'matchNumber': matchNumber,
+          'text': snippet,
+        });
+
+        final nextStart = matchIndex + normalizedKeyword.length;
+        matchIndex = lowerText.indexOf(normalizedKeyword, nextStart);
+      }
   }
 
     await logReaderAction(
@@ -2040,6 +2064,10 @@ if (matchIndex != -1) {
       details: {
         'keywordLength': keyword.length,
         'resultCount': results.length,
+        'pageCount': results
+            .map((result) => readStoredPageNumber(result['pageNumber']))
+            .toSet()
+            .length,
       },
     );
 
@@ -2146,6 +2174,17 @@ void dispose() {
           ),
           actions: [
             PointerInterceptor(
+              child: TextButton(
+                onPressed: () {
+                  searchController.clear();
+                },
+                child: const Text(
+                  'Clear',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            ),
+            PointerInterceptor(
   child: TextButton(
               onPressed: () {
                final keyword = searchController.text.trim();
@@ -2204,9 +2243,19 @@ Expanded(
             }
 
             return ListView.builder(
-              itemCount: results.length,
+              itemCount: results.length + 1,
               itemBuilder: (context, index) {
-                final data = results[index];
+                if (index == 0) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      formatSearchResultSummary(results),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  );
+                }
+
+                final data = results[index - 1];
 
                 return Card(
                   color: const Color(0xFF1A1D26),
@@ -2226,7 +2275,7 @@ Expanded(
   },
 
   title: Text(
-    'Open Page ${data['pageNumber']}',
+    'Open Page ${data['pageNumber']} - Match ${data['matchNumber'] ?? 1}',
     style: const TextStyle(color: Colors.white),
   ),
 subtitle: Column(
