@@ -1530,6 +1530,22 @@ String formatSavedPositionTime(dynamic value) {
   return 'saving...';
 }
 
+int readStoredPageNumber(dynamic value) {
+  final page = int.tryParse(value.toString()) ?? 1;
+
+  return page < 1 ? 1 : page;
+}
+
+String formatReaderNoteTime(Map<String, dynamic> note) {
+  final updatedAt = note['updatedAt'];
+
+  if (updatedAt is Timestamp) {
+    return 'Updated: ${formatReaderTimestamp(updatedAt.toDate())}';
+  }
+
+  return 'Saved: ${formatSavedPositionTime(note['createdAt'])}';
+}
+
 String get readerWatermarkText {
   return 'Protected by Ancient Secure Docs\n'
       '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
@@ -2626,12 +2642,14 @@ IconButton(
           maxLines: 5,
           textInputAction: TextInputAction.newline,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Note',
-            labelStyle: TextStyle(color: Colors.white70),
+            labelStyle: const TextStyle(color: Colors.white70),
             hintText: 'Write a note for this PDF',
-            hintStyle: TextStyle(color: Colors.white54),
-            border: OutlineInputBorder(),
+            hintStyle: const TextStyle(color: Colors.white54),
+            helperText: 'Linked to page $currentPdfPage',
+            helperStyle: const TextStyle(color: Colors.white54),
+            border: const OutlineInputBorder(),
           ),
         ),
         actions: [
@@ -2648,21 +2666,31 @@ IconButton(
 
               if (noteText.isEmpty) return;
 
-              await FirebaseFirestore.instance.collection('reader_notes').add({
+              final noteData = <String, dynamic>{
                 'userEmail': FirebaseAuth.instance.currentUser?.email,
                 'pdfTitle': widget.title,
                 'selectedText': '',
                 'note': noteText,
                 'color': 'yellow',
-                'pageNumber': 0,
+                'pageNumber': currentPdfPage,
                 'createdAt': FieldValue.serverTimestamp(),
-              });
+              };
+
+              final storagePath = normalizedReaderStoragePath;
+
+              if (storagePath.isNotEmpty) {
+                noteData['storagePath'] = storagePath;
+              }
+
+              await FirebaseFirestore.instance
+                  .collection('reader_notes')
+                  .add(noteData);
 
               await logReaderAction(
                 action: 'add_reader_note',
                 details: {
                   'noteLength': noteText.length,
-                  'pageNumber': 0,
+                  'pageNumber': currentPdfPage,
                 },
               );
 
@@ -2729,7 +2757,8 @@ IconButton(
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final notes = snapshot.data!.docs;
+                  final notes =
+                      sortReadingPositionsByNewest(snapshot.data!.docs);
 
                   if (notes.isEmpty) {
                     return const Center(
@@ -2746,17 +2775,40 @@ IconButton(
                     itemBuilder: (context, index) {
                       final note = notes[index].data() as Map<String, dynamic>;
                       final noteId = notes[index].id;
+                      final notePage = readStoredPageNumber(
+                        note['pageNumber'],
+                      );
+                      final noteTime = formatReaderNoteTime(note);
 
                       return Card(
                         color: const Color(0xFF1A1D26),
                         child: ListTile(
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            openPdfPage(
+                              notePage,
+                              source: 'reader_note',
+                            );
+                          },
                           title: Text(
                             note['note'] ?? '',
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: Colors.white),
                           ),
-                          subtitle: Text(
-                            'Color: ${note['color'] ?? 'yellow'}',
-                            style: const TextStyle(color: Colors.white54),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text(
+                                'Page $notePage',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              Text(
+                                noteTime,
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                            ],
                           ),
                         trailing: Row(
   mainAxisSize: MainAxisSize.min,
@@ -2836,6 +2888,7 @@ IconButton(
               .doc(noteId)
               .update({
             'note': updatedNote,
+            'updatedAt': FieldValue.serverTimestamp(),
           });
 
           await logReaderAction(
@@ -2843,6 +2896,7 @@ IconButton(
             details: {
               'noteId': noteId,
               'noteLength': updatedNote.toString().length,
+              'pageNumber': notePage,
             },
           );
         }
@@ -2910,6 +2964,7 @@ IconButton(
             action: 'delete_reader_note',
             details: {
               'noteId': noteId,
+              'pageNumber': notePage,
             },
           );
         }
