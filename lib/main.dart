@@ -2698,6 +2698,7 @@ IconButton(
                       itemBuilder: (context, index) {
                         final position =
                             positions[index].data() as Map<String, dynamic>;
+                        final positionId = positions[index].id;
                         final page = int.tryParse(
                               position['pageNumber'].toString(),
                             ) ??
@@ -2726,10 +2727,104 @@ IconButton(
                               style:
                                   const TextStyle(color: Colors.white54),
                             ),
-                            trailing: const Icon(
-                              Icons.open_in_new,
-                              color: Colors.greenAccent,
-                              size: 18,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.open_in_new,
+                                  color: Colors.greenAccent,
+                                  size: 18,
+                                ),
+                                IconButton(
+                                  tooltip: 'Delete saved position',
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.redAccent,
+                                    size: 20,
+                                  ),
+                                  onPressed: () async {
+                                    final confirmDelete = await showDialog<bool>(
+                                      context: this.context,
+                                      builder: (confirmContext) {
+                                        return PointerInterceptor(
+                                          child: AlertDialog(
+                                            backgroundColor:
+                                                const Color(0xFF0F1117),
+                                            title: const Text(
+                                              'Delete Saved Position?',
+                                              style: TextStyle(
+                                                color: Colors.redAccent,
+                                              ),
+                                            ),
+                                            content: Text(
+                                              'Remove the saved position for page $page?',
+                                              style: const TextStyle(
+                                                color: Colors.white70,
+                                              ),
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(
+                                                      confirmContext,
+                                                      false,
+                                                    ),
+                                                child: const Text(
+                                                  'Cancel',
+                                                  style: TextStyle(
+                                                    color: Colors.white70,
+                                                  ),
+                                                ),
+                                              ),
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(
+                                                      confirmContext,
+                                                      true,
+                                                    ),
+                                                child: const Text(
+                                                  'Delete',
+                                                  style: TextStyle(
+                                                    color: Colors.redAccent,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    );
+
+                                    if (confirmDelete != true) return;
+
+                                    await FirebaseFirestore.instance
+                                        .collection('reading_positions')
+                                        .doc(positionId)
+                                        .delete();
+
+                                    await logReaderAction(
+                                      action: 'delete_reading_position',
+                                      details: {
+                                        'positionId': positionId,
+                                        'pageNumber': page,
+                                      },
+                                    );
+
+                                    if (!mounted) return;
+
+                                    ScaffoldMessenger.of(this.context)
+                                        .hideCurrentSnackBar();
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Saved position removed: Page $page',
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
                             ),
                           ),
                         );
