@@ -2805,7 +2805,15 @@ IconButton(
             onPressed: () async {
               final noteText = noteController.text.trim();
 
-              if (noteText.isEmpty) return;
+              if (noteText.isEmpty) {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Write a note before saving.'),
+                  ),
+                );
+                return;
+              }
 
               final noteData = <String, dynamic>{
                 'userEmail': FirebaseAuth.instance.currentUser?.email,
@@ -3023,8 +3031,21 @@ IconButton(
 
         editController.dispose();
 
-        if (updatedNote != null &&
-            updatedNote.toString().isNotEmpty) {
+        if (updatedNote == null) {
+          return;
+        }
+
+        if (updatedNote.toString().isEmpty) {
+          if (!context.mounted) return;
+
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Write a note before saving changes.'),
+            ),
+          );
+          return;
+        }
 
           await FirebaseFirestore.instance
               .collection('reader_notes')
@@ -3042,7 +3063,13 @@ IconButton(
               'pageNumber': notePage,
             },
           );
-        }
+
+          if (!context.mounted) return;
+
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Note updated successfully')),
+          );
       },
     ),
 
@@ -3109,6 +3136,13 @@ IconButton(
               'noteId': noteId,
               'pageNumber': notePage,
             },
+          );
+
+          if (!context.mounted) return;
+
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Note deleted')),
           );
         }
       },
