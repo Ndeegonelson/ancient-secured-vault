@@ -1493,6 +1493,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       bool isCheckingViewerAccess = true;
       bool canViewDocument = false;
       bool readerSessionStarted = false;
+      bool showReaderStatusOverlay = true;
       DateTime? readerSessionStartedAt;
       late final String readerSessionId;
 
@@ -2151,6 +2152,30 @@ void dispose() {
         ),
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
+        IconButton(
+          tooltip: showReaderStatusOverlay
+              ? 'Hide reader status'
+              : 'Show reader status',
+          icon: Icon(
+            showReaderStatusOverlay
+                ? Icons.visibility_off
+                : Icons.visibility,
+            size: 20,
+            color: Colors.greenAccent,
+          ),
+          onPressed: () {
+            setState(() {
+              showReaderStatusOverlay = !showReaderStatusOverlay;
+            });
+
+            logReaderAction(
+              action: 'toggle_reader_status_overlay',
+              details: {
+                'visible': showReaderStatusOverlay,
+              },
+            );
+          },
+        ),
         IconButton(
   tooltip: 'Search in PDF',
   icon: const Icon(
@@ -3101,34 +3126,35 @@ IconButton(
               ),
             ),
           ),
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
-            child: IgnorePointer(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.72),
-                  border: Border.all(color: Colors.greenAccent),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  readerStatusText,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
+          if (showReaderStatusOverlay)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    border: Border.all(color: Colors.greenAccent),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    readerStatusText,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
