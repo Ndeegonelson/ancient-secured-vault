@@ -137,6 +137,42 @@ class ReaderNarrationDialog extends StatelessWidget {
                             onLanguageChanged(selection.first);
                           },
                         ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    service.activeLocale == null
+                                        ? 'Selected voice: unavailable'
+                                        : 'Active browser voice: ${service.activeLocale}',
+                                    style: TextStyle(
+                                      color: service.activeLocale == null
+                                          ? Colors.orangeAccent
+                                          : Colors.white54,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    service.detectedVoiceSummary,
+                                    style: const TextStyle(
+                                      color: Colors.white38,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Refresh browser voices',
+                              onPressed: service.refreshVoices,
+                              icon: const Icon(Icons.refresh),
+                              color: Colors.greenAccent,
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 20),
                         Text(
                           'Speed: ${service.rate.toStringAsFixed(2)}x',
