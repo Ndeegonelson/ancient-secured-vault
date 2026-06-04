@@ -89,12 +89,21 @@ class ReaderCloudNarrationAudioSegment {
       return false;
     }
 
-    return timingCues.every(
-      (cue) =>
-          cue.startCharacter >= startCharacter &&
-          cue.endCharacter > cue.startCharacter &&
-          cue.endCharacter <= endCharacter,
-    );
+    var previousAudioOffset = Duration.zero;
+
+    for (final cue in timingCues) {
+      if (cue.startCharacter < startCharacter ||
+          cue.endCharacter <= cue.startCharacter ||
+          cue.endCharacter > endCharacter ||
+          cue.audioOffset < previousAudioOffset ||
+          (duration != null && cue.audioOffset > duration!)) {
+        return false;
+      }
+
+      previousAudioOffset = cue.audioOffset;
+    }
+
+    return true;
   }
 }
 

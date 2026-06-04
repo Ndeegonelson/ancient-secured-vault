@@ -195,4 +195,43 @@ void main() {
 
     expect(() => registry.synthesize(request), throwsA(isA<StateError>()));
   });
+
+  test('out-of-order timing cues are rejected before playback', () async {
+    final provider = FakeCloudNarrationProvider(
+      key: 'future-provider',
+      displayName: 'Future Provider',
+      status: readyStatus,
+      synthesisResult: ReaderCloudNarrationAudioSegment(
+        audioBytes: Uint8List.fromList([1]),
+        contentType: 'audio/mpeg',
+        startCharacter: 0,
+        endCharacter: 9,
+        timingCues: const [
+          ReaderCloudNarrationTimingCue(
+            startCharacter: 0,
+            endCharacter: 4,
+            audioOffset: Duration(seconds: 1),
+          ),
+          ReaderCloudNarrationTimingCue(
+            startCharacter: 4,
+            endCharacter: 9,
+            audioOffset: Duration(milliseconds: 500),
+          ),
+        ],
+      ),
+    );
+    final registry = ReaderCloudNarrationRegistry(providers: [provider]);
+    const request = ReaderCloudNarrationSynthesisRequest(
+      text: 'Narration',
+      voice: ReaderNarrationVoice(
+        name: 'Ama',
+        locale: 'en-GH',
+        provider: ReaderNarrationVoiceProvider.cloudAi,
+        providerKey: 'future-provider',
+      ),
+      rate: 0.8,
+    );
+
+    expect(() => registry.synthesize(request), throwsA(isA<StateError>()));
+  });
 }
