@@ -12,6 +12,7 @@ class FakeCloudNarrationProvider implements ReaderCloudNarrationProvider {
     required this.status,
     this.voices = const [],
     this.shouldThrow = false,
+    this.synthesisResult,
   });
 
   @override
@@ -23,6 +24,7 @@ class FakeCloudNarrationProvider implements ReaderCloudNarrationProvider {
   final ReaderCloudNarrationProviderStatus status;
   final List<ReaderNarrationVoice> voices;
   final bool shouldThrow;
+  ReaderCloudNarrationAudioSegment? synthesisResult;
   ReaderCloudNarrationSynthesisRequest? lastRequest;
 
   @override
@@ -48,19 +50,20 @@ class FakeCloudNarrationProvider implements ReaderCloudNarrationProvider {
     ReaderCloudNarrationSynthesisRequest request,
   ) async {
     lastRequest = request;
-    return ReaderCloudNarrationAudioSegment(
-      audioBytes: Uint8List.fromList([1, 2, 3]),
-      contentType: 'audio/mpeg',
-      startCharacter: request.startCharacter,
-      endCharacter: request.text.length,
-      timingCues: const [
-        ReaderCloudNarrationTimingCue(
-          startCharacter: 4,
-          endCharacter: 11,
-          audioOffset: Duration(milliseconds: 250),
-        ),
-      ],
-    );
+    return synthesisResult ??
+        ReaderCloudNarrationAudioSegment(
+          audioBytes: Uint8List.fromList([1, 2, 3]),
+          contentType: 'audio/mpeg',
+          startCharacter: request.startCharacter,
+          endCharacter: request.endCharacter,
+          timingCues: const [
+            ReaderCloudNarrationTimingCue(
+              startCharacter: 4,
+              endCharacter: 11,
+              audioOffset: Duration(milliseconds: 250),
+            ),
+          ],
+        );
   }
 }
 
@@ -155,7 +158,7 @@ void main() {
       expect(segment.audioBytes, [1, 2, 3]);
       expect(segment.contentType, 'audio/mpeg');
       expect(segment.startCharacter, 4);
-      expect(segment.endCharacter, request.text.length);
+      expect(segment.endCharacter, request.endCharacter);
       expect(segment.isEmpty, isFalse);
       expect(segment.timingCues.single.startCharacter, 4);
       expect(
@@ -165,4 +168,31 @@ void main() {
       expect(provider.capabilities.supportsWordTimings, isTrue);
     },
   );
+
+  test('invalid provider audio is rejected before playback', () async {
+    final provider = FakeCloudNarrationProvider(
+      key: 'future-provider',
+      displayName: 'Future Provider',
+      status: readyStatus,
+      synthesisResult: ReaderCloudNarrationAudioSegment(
+        audioBytes: Uint8List(0),
+        contentType: 'audio/mpeg',
+        startCharacter: 0,
+        endCharacter: 0,
+      ),
+    );
+    final registry = ReaderCloudNarrationRegistry(providers: [provider]);
+    const request = ReaderCloudNarrationSynthesisRequest(
+      text: 'Protected narration text.',
+      voice: ReaderNarrationVoice(
+        name: 'Ama',
+        locale: 'en-GH',
+        provider: ReaderNarrationVoiceProvider.cloudAi,
+        providerKey: 'future-provider',
+      ),
+      rate: 0.8,
+    );
+
+    expect(() => registry.synthesize(request), throwsA(isA<StateError>()));
+  });
 }

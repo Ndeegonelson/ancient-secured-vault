@@ -74,6 +74,13 @@ class ReaderCloudNarrationRegistry {
       throw StateError(status.message);
     }
 
-    return provider.synthesize(request);
+    final segment = await provider.synthesize(request);
+    if (!segment.isValidFor(request)) {
+      throw StateError(
+        '${provider.displayName} returned an invalid narration segment.',
+      );
+    }
+
+    return segment;
   }
 }

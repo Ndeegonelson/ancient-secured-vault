@@ -46,6 +46,8 @@ class ReaderCloudNarrationSynthesisRequest {
   final ReaderNarrationVoice voice;
   final double rate;
   final int startCharacter;
+
+  int get endCharacter => startCharacter + text.length;
 }
 
 class ReaderCloudNarrationTimingCue {
@@ -78,6 +80,22 @@ class ReaderCloudNarrationAudioSegment {
   final List<ReaderCloudNarrationTimingCue> timingCues;
 
   bool get isEmpty => audioBytes.isEmpty;
+
+  bool isValidFor(ReaderCloudNarrationSynthesisRequest request) {
+    if (isEmpty ||
+        startCharacter != request.startCharacter ||
+        endCharacter <= startCharacter ||
+        endCharacter > request.endCharacter) {
+      return false;
+    }
+
+    return timingCues.every(
+      (cue) =>
+          cue.startCharacter >= startCharacter &&
+          cue.endCharacter > cue.startCharacter &&
+          cue.endCharacter <= endCharacter,
+    );
+  }
 }
 
 abstract interface class ReaderCloudNarrationProvider {
