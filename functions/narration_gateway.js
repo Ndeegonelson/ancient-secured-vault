@@ -26,13 +26,23 @@ function createNarrationCatalogHandler({loadUserAccess, loadCatalog}) {
   };
 }
 
-function createNarrationSynthesisHandler({loadUserAccess, synthesize}) {
+function createNarrationSynthesisHandler({
+  loadUserAccess,
+  consumeUsage,
+  synthesize,
+}) {
   requireDependency(loadUserAccess, "loadUserAccess");
+  requireDependency(consumeUsage, "consumeUsage");
   requireDependency(synthesize, "synthesize");
 
   return async (request) => {
-    await requireCloudNarrationAccess(request, loadUserAccess);
+    const access = await requireCloudNarrationAccess(request, loadUserAccess);
     const input = validateSynthesisInput(request.data);
+    await consumeUsageSafely(() => consumeUsage({
+      uid: request.auth.uid,
+      access,
+      characterCount: input.text.length,
+    }));
 
     const result = await callProviderSafely(
         () => synthesize(input),
@@ -332,6 +342,21 @@ async function callProviderSafely(
     return await operation();
   } catch (_) {
     throw new HttpsError("unavailable", fallbackMessage);
+  }
+}
+
+async function consumeUsageSafely(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof HttpsError &&
+        error.code === "resource-exhausted") {
+      throw error;
+    }
+    throw new HttpsError(
+        "unavailable",
+        "Cloud narration allowance could not be verified.",
+    );
   }
 }
 

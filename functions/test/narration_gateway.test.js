@@ -32,6 +32,13 @@ function expectHttpsCode(code) {
   };
 }
 
+function createTestSynthesisHandler(options) {
+  return createNarrationSynthesisHandler({
+    consumeUsage: async () => {},
+    ...options,
+  });
+}
+
 test("catalog requires an authenticated user", async () => {
   let accessReads = 0;
   const handler = createNarrationCatalogHandler({
@@ -113,8 +120,12 @@ test("admins can access cloud narration without an active subscription", async (
 
 test("synthesis rejects oversized text before calling a paid provider", async () => {
   let synthesisCalls = 0;
-  const handler = createNarrationSynthesisHandler({
+  let usageCalls = 0;
+  const handler = createTestSynthesisHandler({
     loadUserAccess: async () => premiumAccess,
+    consumeUsage: async () => {
+      usageCalls++;
+    },
     synthesize: async () => {
       synthesisCalls++;
       return {};
@@ -130,12 +141,125 @@ test("synthesis rejects oversized text before calling a paid provider", async ()
       expectHttpsCode("invalid-argument"),
   );
   assert.equal(synthesisCalls, 0);
+  assert.equal(usageCalls, 0);
+});
+
+test("free users cannot consume quota or call the paid provider", async () => {
+  let usageCalls = 0;
+  let synthesisCalls = 0;
+  const handler = createTestSynthesisHandler({
+    loadUserAccess: async () => ({
+      role: "reader",
+      subscriptionStatus: "inactive",
+    }),
+    consumeUsage: async () => {
+      usageCalls++;
+    },
+    synthesize: async () => {
+      synthesisCalls++;
+      return {};
+    },
+  });
+
+  await assert.rejects(
+      handler(authenticatedRequest({
+        text: "Protected narration.",
+        voiceId: "provider-voice-1",
+        rate: 1,
+      })),
+      expectHttpsCode("permission-denied"),
+  );
+  assert.equal(usageCalls, 0);
+  assert.equal(synthesisCalls, 0);
+});
+
+test("synthesis consumes server usage before calling a paid provider", async () => {
+  const events = [];
+  const handler = createTestSynthesisHandler({
+    loadUserAccess: async () => premiumAccess,
+    consumeUsage: async (usage) => {
+      events.push(["usage", usage]);
+    },
+    synthesize: async (input) => {
+      events.push(["provider", input]);
+      return {
+        audioBase64: Buffer.from([1]).toString("base64"),
+        contentType: "audio/mpeg",
+        startCharacter: input.startCharacter,
+        endCharacter: input.startCharacter + input.text.length,
+      };
+    },
+  });
+
+  await handler(authenticatedRequest({
+    text: "Protected narration.",
+    voiceId: "provider-voice-1",
+    rate: 1,
+  }));
+
+  assert.equal(events[0][0], "usage");
+  assert.deepEqual(events[0][1], {
+    uid: "reader-123",
+    access: premiumAccess,
+    characterCount: 20,
+  });
+  assert.equal(events[1][0], "provider");
+});
+
+test("exhausted allowance blocks the paid provider call", async () => {
+  let synthesisCalls = 0;
+  const handler = createTestSynthesisHandler({
+    loadUserAccess: async () => premiumAccess,
+    consumeUsage: async () => {
+      throw new HttpsError(
+          "resource-exhausted",
+          "Your daily cloud narration allowance has been reached.",
+      );
+    },
+    synthesize: async () => {
+      synthesisCalls++;
+      return {};
+    },
+  });
+
+  await assert.rejects(
+      handler(authenticatedRequest({
+        text: "Protected narration.",
+        voiceId: "provider-voice-1",
+        rate: 1,
+      })),
+      expectHttpsCode("resource-exhausted"),
+  );
+  assert.equal(synthesisCalls, 0);
+});
+
+test("quota storage failures are sanitized before reaching Flutter", async () => {
+  const handler = createTestSynthesisHandler({
+    loadUserAccess: async () => premiumAccess,
+    consumeUsage: async () => {
+      throw new Error("private quota database detail");
+    },
+    synthesize: async () => ({}),
+  });
+
+  await assert.rejects(
+      handler(authenticatedRequest({
+        text: "Protected narration.",
+        voiceId: "provider-voice-1",
+        rate: 1,
+      })),
+      (error) => {
+        assert.equal(error.code, "unavailable");
+        assert.doesNotMatch(error.message, /database detail/);
+        return true;
+      },
+  );
 });
 
 test("valid synthesis request returns bounded protected audio", async () => {
   let receivedInput;
   const audioBase64 = Buffer.from([1, 2, 3]).toString("base64");
-  const handler = createNarrationSynthesisHandler({
+  const handler = createTestSynthesisHandler({
     loadUserAccess: async () => premiumAccess,
     synthesize: async (input) => {
       receivedInput = input;
@@ -184,7 +308,7 @@ test("valid synthesis request returns bounded protected audio", async () => {
 
 test("synthesis preserves text spacing used by document highlighting", async () => {
   let receivedInput;
-  const handler = createNarrationSynthesisHandler({
+  const handler = createTestSynthesisHandler({
     loadUserAccess: async () => premiumAccess,
     synthesize: async (input) => {
       receivedInput = input;
@@ -247,7 +371,7 @@ test("invalid provider duration is rejected at the secure boundary", () => {
 });
 
 test("provider failures are sanitized before reaching Flutter", async () => {
-  const handler = createNarrationSynthesisHandler({
+  const handler = createTestSynthesisHandler({
     loadUserAccess: async () => premiumAccess,
     synthesize: async () => {
       throw new Error("private provider credential detail");
@@ -269,7 +393,7 @@ test("provider failures are sanitized before reaching Flutter", async () => {
 });
 
 test("provider Firebase errors are also sanitized before reaching Flutter", async () => {
-  const handler = createNarrationSynthesisHandler({
+  const handler = createTestSynthesisHandler({
     loadUserAccess: async () => premiumAccess,
     synthesize: async () => {
       throw new HttpsError(

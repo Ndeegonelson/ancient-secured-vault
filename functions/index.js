@@ -6,9 +6,13 @@ const {
   createNarrationCatalogHandler,
   createNarrationSynthesisHandler,
 } = require("./narration_gateway");
+const {
+  createNarrationUsageQuota,
+} = require("./narration_usage_quota");
 
 initializeApp();
 const firestore = getFirestore();
+const narrationUsageQuota = createNarrationUsageQuota({firestore});
 
 setGlobalOptions({maxInstances: 10});
 
@@ -56,6 +60,7 @@ exports.synthesizeCloudNarration = onCall(
     },
     createNarrationSynthesisHandler({
       loadUserAccess,
+      consumeUsage: narrationUsageQuota.consume,
       synthesize: synthesizeCloudNarration,
     }),
 );
