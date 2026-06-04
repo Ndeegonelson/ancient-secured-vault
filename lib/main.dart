@@ -9,6 +9,8 @@ import 'services/reader_tts_service.dart';
 import 'services/reader_narration_progress_repository.dart';
 import 'services/reader_narration_navigator.dart';
 import 'services/reader_narration_preferences_repository.dart';
+import 'services/reader_narration_session_repository.dart';
+import 'services/reader_narration_session_tracker.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
@@ -1505,6 +1507,8 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       late final ReaderTtsService readerTtsService;
       late final ReaderNarrationProgressRepository narrationProgressRepository;
       late final ReaderNarrationPreferencesRepository narrationPreferencesRepository;
+      late final ReaderNarrationSessionRepository narrationSessionRepository;
+      late final ReaderNarrationSessionTracker narrationSessionTracker;
       late final ReaderNarrationNavigator narrationNavigator;
       late final Future<void> narrationPreferencesReady;
       final Map<int, String> narrationPageTextCache = {};
@@ -2235,6 +2239,36 @@ Future<void> saveNarrationPreferences() async {
   }
 }
 
+void observeNarrationSession() {
+  narrationSessionTracker.observe(
+    isPlaying: readerTtsService.isPlaying,
+    pageNumber: readerTtsService.pageNumber,
+    progressPercent: readerTtsService.progressPercent,
+  );
+}
+
+Future<void> saveNarrationSessionSummary({bool finished = false}) async {
+  final userEmail = FirebaseAuth.instance.currentUser?.email;
+  final summary = finished
+      ? narrationSessionTracker.finish()
+      : narrationSessionTracker.snapshot();
+
+  if (userEmail == null || !summary.hasActivity) return;
+
+  try {
+    await narrationSessionRepository.save(
+      userEmail: userEmail,
+      readerSessionId: readerSessionId,
+      documentKey: readerDocumentKey,
+      pdfTitle: widget.title,
+      storagePath: normalizedReaderStoragePath,
+      summary: summary,
+    );
+  } catch (_) {
+    // Narration analytics must never interrupt listening.
+  }
+}
+
 Future<void> saveNarrationCheckpoint(int pageNumber) async {
   final userEmail = FirebaseAuth.instance.currentUser?.email;
   final textLength = readerTtsService.lastText.length;
@@ -2322,6 +2356,7 @@ Future<bool> moveNarrationAcrossPage({
 
 Future<void> continueNarrationAfterPage(int completedPage) async {
   await saveNarrationCheckpoint(completedPage);
+  await saveNarrationSessionSummary();
 
   if (!readerTtsService.canContinueAfterPage(completedPage)) return;
 
@@ -2391,6 +2426,7 @@ Future<void> showSelectedTextNarrationDialog() async {
     await saveNarrationCheckpoint(activeNarrationPage);
   }
   await readerTtsService.stop();
+  await saveNarrationSessionSummary();
 
   await showReaderNarrationDialog(selectedText: selectedText);
 }
@@ -2403,6 +2439,18 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
 
   final narrationPage = currentPdfPage;
   final isSelectedPassage = selectedText != null;
+  var selectedPassageTracked = false;
+  void prepareNarrationMode() {
+    if (isSelectedPassage) {
+      if (!selectedPassageTracked) {
+        narrationSessionTracker.beginSelectedPassage();
+        selectedPassageTracked = true;
+      }
+      return;
+    }
+
+    narrationSessionTracker.beginDocumentNarration();
+  }
   final narrationText = isSelectedPassage
       ? Future<String>.value(selectedText.trim())
       : loadNarrationTextForPage(narrationPage);
@@ -2427,6 +2475,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
         pageNumber: narrationPage,
         narrationText: narrationText,
         savedCheckpoint: savedCheckpoint,
+        sessionTracker: narrationSessionTracker,
         title: isSelectedPassage
             ? 'Selected Passage Narration'
             : 'Document Narration',
@@ -2454,6 +2503,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           );
         },
         onPlay: (text) async {
+          prepareNarrationMode();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           final hasLiveResume =
               readerTtsService.pageNumber == activePage &&
@@ -2488,6 +2538,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           if (!isSelectedPassage) {
             await saveNarrationCheckpoint(activePage);
           }
+          await saveNarrationSessionSummary();
           await logReaderAction(
             action: 'pause_page_narration',
             details: {
@@ -2510,6 +2561,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           }
         },
         onJumpBackward: (text) async {
+          prepareNarrationMode();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           final hasLiveResume =
               readerTtsService.pageNumber == activePage &&
@@ -2568,6 +2620,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           }
         },
         onJumpForward: (text) async {
+          prepareNarrationMode();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           final hasLiveResume =
               readerTtsService.pageNumber == activePage &&
@@ -2629,6 +2682,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             await saveNarrationCheckpoint(activePage);
           }
           await readerTtsService.stop();
+          await saveNarrationSessionSummary();
           await logReaderAction(
             action: 'stop_page_narration',
             details: {
@@ -2643,6 +2697,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
   if (!isSelectedPassage) {
     await saveNarrationCheckpoint(readerTtsService.pageNumber ?? narrationPage);
   }
+  await saveNarrationSessionSummary();
 }
 
 @override
@@ -2653,7 +2708,10 @@ void initState() {
   );
   narrationProgressRepository = ReaderNarrationProgressRepository();
   narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
+  narrationSessionRepository = ReaderNarrationSessionRepository();
+  narrationSessionTracker = ReaderNarrationSessionTracker();
   narrationNavigator = ReaderNarrationNavigator();
+  readerTtsService.addListener(observeNarrationSession);
   narrationPreferencesReady = loadNarrationPreferences();
   readerSessionId =
       'reader-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
@@ -2666,6 +2724,9 @@ void initState() {
 
 @override
 void dispose() {
+  saveNarrationSessionSummary(finished: true);
+  readerTtsService.removeListener(observeNarrationSession);
+
   if (readerSessionStarted) {
     final startedAt = readerSessionStartedAt;
     final durationSeconds = startedAt == null
