@@ -13,6 +13,7 @@ class ReaderNarrationDialog extends StatelessWidget {
     required this.onRateChangeEnd,
     required this.onPlay,
     required this.onPause,
+    required this.onResume,
     required this.onStop,
   });
 
@@ -24,6 +25,7 @@ class ReaderNarrationDialog extends StatelessWidget {
   final Future<void> Function(double rate) onRateChangeEnd;
   final Future<void> Function(String text) onPlay;
   final Future<void> Function() onPause;
+  final Future<void> Function() onResume;
   final Future<void> Function() onStop;
 
   String get stateLabel {
@@ -109,6 +111,26 @@ class ReaderNarrationDialog extends StatelessWidget {
                             style: const TextStyle(color: Colors.greenAccent),
                           ),
                         ],
+                        if (service.lastText.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: LinearProgressIndicator(
+                                  value: service.progress,
+                                  minHeight: 4,
+                                  backgroundColor: Colors.white12,
+                                  color: Colors.greenAccent,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                '${service.progressPercent}%',
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                            ],
+                          ),
+                        ],
                         if (service.errorMessage != null) ...[
                           const SizedBox(height: 8),
                           Text(
@@ -192,9 +214,13 @@ class ReaderNarrationDialog extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             IconButton(
-                              tooltip: 'Play page narration',
+                              tooltip: service.isPaused
+                                  ? 'Resume narration'
+                                  : 'Play page narration',
                               onPressed: hasReadableText
-                                  ? () => onPlay(text)
+                                  ? service.isPaused
+                                        ? onResume
+                                        : () => onPlay(text)
                                   : null,
                               icon: const Icon(Icons.play_arrow),
                               color: Colors.greenAccent,

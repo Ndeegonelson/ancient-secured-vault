@@ -18,7 +18,11 @@ class FakeFlutterTts extends FlutterTts {
   int speakCount = 0;
   int stopCount = 0;
   VoidCallback? startCallback;
+  VoidCallback? pauseCallback;
+  VoidCallback? continueCallback;
+  VoidCallback? completionCallback;
   VoidCallback? cancelCallback;
+  ProgressHandler? progressCallback;
 
   @override
   Future<dynamic> awaitSpeakCompletion(bool awaitCompletion) async => 1;
@@ -65,13 +69,43 @@ class FakeFlutterTts extends FlutterTts {
   }
 
   @override
+  Future<dynamic> pause() async {
+    pauseCallback?.call();
+    return 1;
+  }
+
+  @override
   void setStartHandler(VoidCallback callback) {
     startCallback = callback;
   }
 
   @override
+  void setPauseHandler(VoidCallback callback) {
+    pauseCallback = callback;
+  }
+
+  @override
+  void setContinueHandler(VoidCallback callback) {
+    continueCallback = callback;
+  }
+
+  @override
+  void setCompletionHandler(VoidCallback callback) {
+    completionCallback = callback;
+  }
+
+  @override
   void setCancelHandler(VoidCallback callback) {
     cancelCallback = callback;
+  }
+
+  @override
+  void setProgressHandler(ProgressHandler callback) {
+    progressCallback = callback;
+  }
+
+  void reportProgress(String text, int start, int end, String word) {
+    progressCallback?.call(text, start, end, word);
   }
 }
 
@@ -191,6 +225,49 @@ void main() {
     expect(fakeTts.selectedRate, 0.75);
     expect(fakeTts.speakCount, 2);
     expect(fakeTts.spokenText, 'Protected learning text.');
+
+    service.dispose();
+  });
+
+  test('tracks narration progress from spoken character positions', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.speakPage(text: '1234567890', pageNumber: 7);
+    fakeTts.reportProgress('1234567890', 4, 5, '5');
+
+    expect(service.currentWord, '5');
+    expect(service.progress, 0.5);
+    expect(service.progressPercent, 50);
+
+    service.dispose();
+  });
+
+  test('resumes paused narration without resetting progress', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.speakPage(text: '1234567890', pageNumber: 7);
+    fakeTts.reportProgress('1234567890', 4, 5, '5');
+    await service.pause();
+    final resumed = await service.resume();
+
+    expect(resumed, isTrue);
+    expect(fakeTts.speakCount, 2);
+    expect(service.progressPercent, 50);
+
+    service.dispose();
+  });
+
+  test('stop resets narration progress', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.speakPage(text: '1234567890', pageNumber: 7);
+    fakeTts.reportProgress('1234567890', 4, 5, '5');
+    await service.stop();
+
+    expect(service.progressPercent, 0);
 
     service.dispose();
   });

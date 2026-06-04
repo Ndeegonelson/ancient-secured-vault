@@ -34,6 +34,7 @@ class ReaderTtsService extends ChangeNotifier {
   double _rate = defaultRate;
   String _currentWord = '';
   String _lastText = '';
+  int _currentCharacterEnd = 0;
   int? _pageNumber;
   String? _errorMessage;
   String? _activeLocale;
@@ -47,6 +48,13 @@ class ReaderTtsService extends ChangeNotifier {
   double get rate => _rate;
   String get currentWord => _currentWord;
   String get lastText => _lastText;
+  double get progress {
+    if (_lastText.isEmpty) return 0;
+
+    return (_currentCharacterEnd / _lastText.length).clamp(0, 1).toDouble();
+  }
+
+  int get progressPercent => (progress * 100).round();
   int? get pageNumber => _pageNumber;
   String? get errorMessage => _errorMessage;
   String? get activeLocale => _activeLocale;
@@ -164,6 +172,7 @@ class ReaderTtsService extends ChangeNotifier {
       _lastText = narrationText;
       _pageNumber = pageNumber;
       _currentWord = '';
+      _currentCharacterEnd = 0;
       _errorMessage = null;
 
       final result = await _flutterTts.speak(narrationText);
@@ -183,12 +192,27 @@ class ReaderTtsService extends ChangeNotifier {
     }
   }
 
+  Future<bool> resume() async {
+    if (!isPaused || _lastText.isEmpty) return false;
+
+    try {
+      _restartRequestId++;
+      _errorMessage = null;
+      final result = await _flutterTts.speak(_lastText);
+      return result == 1;
+    } catch (error) {
+      _setError(_friendlyErrorMessage(error));
+      return false;
+    }
+  }
+
   Future<void> stop() async {
     try {
       _restartRequestId++;
       await _flutterTts.stop();
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
+      _currentCharacterEnd = 0;
       _errorMessage = null;
       _notifyListeners();
     } catch (error) {
@@ -206,6 +230,7 @@ class ReaderTtsService extends ChangeNotifier {
     _flutterTts.setCompletionHandler(() {
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
+      _currentCharacterEnd = _lastText.length;
       _notifyListeners();
     });
 
@@ -227,6 +252,7 @@ class ReaderTtsService extends ChangeNotifier {
 
     _flutterTts.setProgressHandler((text, start, end, word) {
       _currentWord = word;
+      _currentCharacterEnd = end.clamp(0, _lastText.length);
       _notifyListeners();
     });
 
@@ -350,6 +376,7 @@ class ReaderTtsService extends ChangeNotifier {
     if (_disposed || requestId != _restartRequestId) return;
 
     _currentWord = '';
+    _currentCharacterEnd = 0;
     _errorMessage = null;
     await _flutterTts.speak(_lastText);
   }

@@ -2229,6 +2229,19 @@ Future<void> showReaderNarrationDialog() async {
             },
           );
         },
+        onResume: () async {
+          final resumed = await readerTtsService.resume();
+
+          if (resumed) {
+            await logReaderAction(
+              action: 'resume_page_narration',
+              details: {
+                'pageNumber': narrationPage,
+                'progressPercent': readerTtsService.progressPercent,
+              },
+            );
+          }
+        },
         onStop: () async {
           await readerTtsService.stop();
           await logReaderAction(
