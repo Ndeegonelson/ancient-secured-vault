@@ -234,4 +234,31 @@ void main() {
 
     expect(() => registry.synthesize(request), throwsA(isA<StateError>()));
   });
+
+  test('non-audio provider content is rejected before playback', () async {
+    final provider = FakeCloudNarrationProvider(
+      key: 'future-provider',
+      displayName: 'Future Provider',
+      status: readyStatus,
+      synthesisResult: ReaderCloudNarrationAudioSegment(
+        audioBytes: Uint8List.fromList([1]),
+        contentType: 'text/plain',
+        startCharacter: 0,
+        endCharacter: 9,
+      ),
+    );
+    final registry = ReaderCloudNarrationRegistry(providers: [provider]);
+    const request = ReaderCloudNarrationSynthesisRequest(
+      text: 'Narration',
+      voice: ReaderNarrationVoice(
+        name: 'Ama',
+        locale: 'en-GH',
+        provider: ReaderNarrationVoiceProvider.cloudAi,
+        providerKey: 'future-provider',
+      ),
+      rate: 0.8,
+    );
+
+    expect(() => registry.synthesize(request), throwsA(isA<StateError>()));
+  });
 }

@@ -83,6 +83,7 @@ class ReaderCloudNarrationAudioSegment {
 
   bool isValidFor(ReaderCloudNarrationSynthesisRequest request) {
     if (isEmpty ||
+        !contentType.toLowerCase().startsWith('audio/') ||
         startCharacter != request.startCharacter ||
         endCharacter <= startCharacter ||
         endCharacter != request.endCharacter) {
