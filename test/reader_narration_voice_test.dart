@@ -20,10 +20,18 @@ void main() {
     const voice = ReaderNarrationVoice(
       name: 'Future African Narrator',
       locale: 'fr-GH',
+      accent: 'Ghanaian',
+      style: 'Educational',
+      providerKey: 'future-provider',
+      isCustom: true,
       provider: ReaderNarrationVoiceProvider.cloudAi,
     );
 
-    expect(voice.id, 'cloudAi|fr-GH|Future African Narrator');
+    expect(voice.id, 'cloudAi|future-provider|fr-GH|Future African Narrator');
+    expect(
+      voice.label,
+      'Future African Narrator | fr-GH | Ghanaian | Educational | Custom',
+    );
   });
 
   test('recognizes rediscovered browser voices as the same dropdown value', () {
