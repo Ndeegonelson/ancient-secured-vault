@@ -16,7 +16,7 @@ enum ReaderNarrationLanguage {
 enum ReaderNarrationState { idle, playing, paused, stopped, error }
 
 class ReaderTtsService extends ChangeNotifier {
-  ReaderTtsService({FlutterTts? flutterTts})
+  ReaderTtsService({FlutterTts? flutterTts, this.onPageCompleted})
     : _flutterTts = flutterTts ?? FlutterTts() {
     _registerHandlers();
   }
@@ -24,30 +24,42 @@ class ReaderTtsService extends ChangeNotifier {
   static const double minimumRate = 0.25;
   static const double maximumRate = 1.0;
   static const double defaultRate = 0.5;
+  static const int maximumPassageLength = 220;
   static const Duration _rateRestartDebounce = Duration(milliseconds: 250);
   static const Duration _stopRestartDelay = Duration(milliseconds: 120);
 
   final FlutterTts _flutterTts;
+  final Future<void> Function(int pageNumber)? onPageCompleted;
 
   ReaderNarrationLanguage _language = ReaderNarrationLanguage.english;
   ReaderNarrationState _state = ReaderNarrationState.idle;
   double _rate = defaultRate;
   String _currentWord = '';
+  String _currentPassage = '';
+  int _currentPassageHighlightStart = 0;
+  int _currentPassageHighlightEnd = 0;
   String _lastText = '';
   int _currentCharacterEnd = 0;
+  int _speechStartCharacter = 0;
   int? _pageNumber;
   String? _errorMessage;
   String? _activeLocale;
   List<String> _availableLanguages = [];
   int _restartRequestId = 0;
+  DateTime? _ignoreInterruptedErrorsUntil;
   bool _initialized = false;
   bool _disposed = false;
+  bool _continuousPlaybackRequested = false;
 
   ReaderNarrationLanguage get language => _language;
   ReaderNarrationState get state => _state;
   double get rate => _rate;
   String get currentWord => _currentWord;
+  String get currentPassage => _currentPassage;
+  int get currentPassageHighlightStart => _currentPassageHighlightStart;
+  int get currentPassageHighlightEnd => _currentPassageHighlightEnd;
   String get lastText => _lastText;
+  int get currentCharacterOffset => _currentCharacterEnd;
   double get progress {
     if (_lastText.isEmpty) return 0;
 
@@ -74,6 +86,16 @@ class ReaderTtsService extends ChangeNotifier {
 
   bool get isPlaying => _state == ReaderNarrationState.playing;
   bool get isPaused => _state == ReaderNarrationState.paused;
+  bool get hasResumableProgress =>
+      _lastText.isNotEmpty &&
+      _currentCharacterEnd > 0 &&
+      _currentCharacterEnd < _lastText.length;
+  bool canContinueAfterPage(int pageNumber) =>
+      _continuousPlaybackRequested && _pageNumber == pageNumber && !_disposed;
+
+  void endContinuousPlayback() {
+    _continuousPlaybackRequested = false;
+  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -149,6 +171,7 @@ class ReaderTtsService extends ChangeNotifier {
   Future<bool> speakPage({
     required String text,
     required int pageNumber,
+    int startCharacter = 0,
   }) async {
     final narrationText = text.trim();
 
@@ -158,6 +181,8 @@ class ReaderTtsService extends ChangeNotifier {
     }
 
     try {
+      final requestId = ++_restartRequestId;
+
       if (_initialized) {
         await _refreshAvailableLanguages();
         await _applyLanguage();
@@ -166,16 +191,30 @@ class ReaderTtsService extends ChangeNotifier {
         await initialize();
       }
 
-      _restartRequestId++;
-      await _flutterTts.stop();
+      if (_disposed || requestId != _restartRequestId) return false;
+
+      await _stopForReplacement();
+
+      if (_disposed || requestId != _restartRequestId) return false;
 
       _lastText = narrationText;
       _pageNumber = pageNumber;
+      _continuousPlaybackRequested = true;
       _currentWord = '';
-      _currentCharacterEnd = 0;
+      _speechStartCharacter = startCharacter >= narrationText.length
+          ? 0
+          : startCharacter.clamp(0, narrationText.length - 1);
+      _currentCharacterEnd = _speechStartCharacter;
+      _updateCurrentPassage(
+        narrationText,
+        _speechStartCharacter,
+        _speechStartCharacter + 1,
+      );
       _errorMessage = null;
 
-      final result = await _flutterTts.speak(narrationText);
+      final result = await _flutterTts.speak(
+        narrationText.substring(_speechStartCharacter),
+      );
       return result == 1;
     } catch (error) {
       _setError(_friendlyErrorMessage(error));
@@ -186,6 +225,7 @@ class ReaderTtsService extends ChangeNotifier {
   Future<void> pause() async {
     try {
       _restartRequestId++;
+      _continuousPlaybackRequested = false;
       await _flutterTts.pause();
     } catch (error) {
       _setError(error.toString());
@@ -197,6 +237,7 @@ class ReaderTtsService extends ChangeNotifier {
 
     try {
       _restartRequestId++;
+      _continuousPlaybackRequested = true;
       _errorMessage = null;
       final result = await _flutterTts.speak(_lastText);
       return result == 1;
@@ -209,10 +250,17 @@ class ReaderTtsService extends ChangeNotifier {
   Future<void> stop() async {
     try {
       _restartRequestId++;
+      _continuousPlaybackRequested = false;
+      _ignoreInterruptedErrorsUntil = DateTime.now().add(
+        const Duration(seconds: 1),
+      );
       await _flutterTts.stop();
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
+      _currentPassage = '';
+      _clearCurrentPassageHighlight();
       _currentCharacterEnd = 0;
+      _speechStartCharacter = 0;
       _errorMessage = null;
       _notifyListeners();
     } catch (error) {
@@ -228,10 +276,16 @@ class ReaderTtsService extends ChangeNotifier {
     });
 
     _flutterTts.setCompletionHandler(() {
+      final completedPage = _pageNumber;
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
+      _clearCurrentPassageHighlight();
       _currentCharacterEnd = _lastText.length;
       _notifyListeners();
+
+      if (completedPage != null && _continuousPlaybackRequested) {
+        onPageCompleted?.call(completedPage);
+      }
     });
 
     _flutterTts.setPauseHandler(() {
@@ -247,17 +301,36 @@ class ReaderTtsService extends ChangeNotifier {
     _flutterTts.setCancelHandler(() {
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
+      _clearCurrentPassageHighlight();
       _notifyListeners();
     });
 
     _flutterTts.setProgressHandler((text, start, end, word) {
       _currentWord = word;
-      _currentCharacterEnd = end.clamp(0, _lastText.length);
+      final absoluteStart = (_speechStartCharacter + start).clamp(
+        0,
+        _lastText.length,
+      );
+      final absoluteEnd = (_speechStartCharacter + end).clamp(
+        0,
+        _lastText.length,
+      );
+      _currentCharacterEnd = absoluteEnd;
+      _updateCurrentPassage(
+        _lastText,
+        absoluteStart,
+        absoluteEnd,
+        highlightWord: word,
+      );
       _notifyListeners();
     });
 
     _flutterTts.setErrorHandler((message) {
-      _setError(message.toString());
+      final errorMessage = message.toString();
+
+      if (_shouldIgnoreInterruptedError(errorMessage)) return;
+
+      _setError(errorMessage);
     });
   }
 
@@ -363,6 +436,7 @@ class ReaderTtsService extends ChangeNotifier {
     if (!isPlaying || _lastText.isEmpty) return;
 
     final requestId = ++_restartRequestId;
+    _continuousPlaybackRequested = true;
 
     if (debounce > Duration.zero) {
       await Future<void>.delayed(debounce);
@@ -370,15 +444,177 @@ class ReaderTtsService extends ChangeNotifier {
 
     if (_disposed || requestId != _restartRequestId) return;
 
-    await _flutterTts.stop();
-    await Future<void>.delayed(_stopRestartDelay);
+    await _stopForReplacement();
 
     if (_disposed || requestId != _restartRequestId) return;
 
+    final restartOffset = _currentCharacterEnd.clamp(0, _lastText.length - 1);
     _currentWord = '';
-    _currentCharacterEnd = 0;
+    _updateCurrentPassage(_lastText, restartOffset, restartOffset + 1);
+    _currentCharacterEnd = restartOffset;
+    _speechStartCharacter = restartOffset;
     _errorMessage = null;
-    await _flutterTts.speak(_lastText);
+    await _flutterTts.speak(_lastText.substring(restartOffset));
+  }
+
+  Future<void> _stopForReplacement() async {
+    _ignoreInterruptedErrorsUntil = DateTime.now().add(
+      const Duration(seconds: 1),
+    );
+    await _flutterTts.stop();
+    await Future<void>.delayed(_stopRestartDelay);
+  }
+
+  bool _shouldIgnoreInterruptedError(String message) {
+    final ignoreUntil = _ignoreInterruptedErrorsUntil;
+    final normalizedMessage = message.trim().toLowerCase();
+    final isExpectedCancellation =
+        normalizedMessage == 'interrupted' ||
+        normalizedMessage == 'canceled' ||
+        normalizedMessage == 'cancelled';
+
+    return isExpectedCancellation &&
+        ignoreUntil != null &&
+        DateTime.now().isBefore(ignoreUntil);
+  }
+
+  void _updateCurrentPassage(
+    String text,
+    int start,
+    int end, {
+    String highlightWord = '',
+  }) {
+    final selection = _passageForRange(text, start, end);
+    _currentPassage = selection.text;
+    _clearCurrentPassageHighlight();
+
+    final word = highlightWord.trim();
+    if (word.isEmpty || selection.text.isEmpty) return;
+
+    final safeStart = start.clamp(selection.sourceStart, selection.sourceEnd);
+    final sourcePrefix = _cleanPassage(
+      text.substring(selection.sourceStart, safeStart),
+    );
+    final expectedStart =
+        sourcePrefix.length + (selection.hasLeadingEllipsis ? 4 : 0);
+    final passage = selection.text.toLowerCase();
+    final target = word.toLowerCase();
+    var bestStart = -1;
+    var bestDistance = selection.text.length + 1;
+    var matchStart = passage.indexOf(target);
+
+    while (matchStart >= 0) {
+      final distance = (matchStart - expectedStart).abs();
+      if (distance < bestDistance) {
+        bestStart = matchStart;
+        bestDistance = distance;
+      }
+      matchStart = passage.indexOf(target, matchStart + 1);
+    }
+
+    if (bestStart < 0) return;
+
+    _currentPassageHighlightStart = bestStart;
+    _currentPassageHighlightEnd = bestStart + word.length;
+  }
+
+  void _clearCurrentPassageHighlight() {
+    _currentPassageHighlightStart = 0;
+    _currentPassageHighlightEnd = 0;
+  }
+
+  _NarrationPassage _passageForRange(String text, int start, int end) {
+    if (text.isEmpty) return const _NarrationPassage.empty();
+
+    final safeStart = start.clamp(0, text.length - 1);
+    final safeEnd = end.clamp(safeStart + 1, text.length);
+    var passageStart = _previousBoundary(text, safeStart, const {
+      '.',
+      '!',
+      '?',
+      '\n',
+    });
+    var passageEnd = _nextBoundary(text, safeEnd, const {'.', '!', '?', '\n'});
+    var passage = _cleanPassage(text.substring(passageStart, passageEnd));
+
+    if (passage.length <= maximumPassageLength) {
+      return _NarrationPassage(
+        text: passage,
+        sourceStart: passageStart,
+        sourceEnd: passageEnd,
+      );
+    }
+
+    passageStart = _previousBoundary(text, safeStart, const {
+      ',',
+      ';',
+      ':',
+      '\n',
+    }, minimum: passageStart);
+    passageEnd = _nextBoundary(text, safeEnd, const {
+      ',',
+      ';',
+      ':',
+      '\n',
+    }, maximum: passageEnd);
+    passage = _cleanPassage(text.substring(passageStart, passageEnd));
+
+    if (passage.length <= maximumPassageLength) {
+      return _NarrationPassage(
+        text: passage,
+        sourceStart: passageStart,
+        sourceEnd: passageEnd,
+      );
+    }
+
+    final windowStart = (safeStart - 85).clamp(0, text.length);
+    final windowEnd = (safeEnd + 125).clamp(0, text.length);
+    final prefix = windowStart > 0 ? '... ' : '';
+    final suffix = windowEnd < text.length ? ' ...' : '';
+
+    return _NarrationPassage(
+      text:
+          '$prefix${_cleanPassage(text.substring(windowStart, windowEnd))}$suffix',
+      sourceStart: windowStart,
+      sourceEnd: windowEnd,
+      hasLeadingEllipsis: prefix.isNotEmpty,
+    );
+  }
+
+  int _previousBoundary(
+    String text,
+    int from,
+    Set<String> boundaries, {
+    int minimum = 0,
+  }) {
+    for (var index = from - 1; index >= minimum; index--) {
+      if (boundaries.contains(text[index])) {
+        return (index + 1).clamp(minimum, text.length);
+      }
+    }
+
+    return minimum;
+  }
+
+  int _nextBoundary(
+    String text,
+    int from,
+    Set<String> boundaries, {
+    int? maximum,
+  }) {
+    final safeMaximum = maximum ?? text.length;
+
+    for (var index = from; index < safeMaximum; index++) {
+      if (boundaries.contains(text[index])) {
+        return (index + 1).clamp(0, safeMaximum);
+      }
+    }
+
+    return safeMaximum;
+  }
+
+  String _cleanPassage(String passage) {
+    return passage.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   String _friendlyErrorMessage(Object error) {
@@ -407,4 +643,24 @@ class ReaderTtsService extends ChangeNotifier {
     _flutterTts.stop();
     super.dispose();
   }
+}
+
+class _NarrationPassage {
+  const _NarrationPassage({
+    required this.text,
+    required this.sourceStart,
+    required this.sourceEnd,
+    this.hasLeadingEllipsis = false,
+  });
+
+  const _NarrationPassage.empty()
+    : text = '',
+      sourceStart = 0,
+      sourceEnd = 0,
+      hasLeadingEllipsis = false;
+
+  final String text;
+  final int sourceStart;
+  final int sourceEnd;
+  final bool hasLeadingEllipsis;
 }

@@ -23,6 +23,7 @@ class FakeFlutterTts extends FlutterTts {
   VoidCallback? completionCallback;
   VoidCallback? cancelCallback;
   ProgressHandler? progressCallback;
+  ErrorHandler? errorCallback;
 
   @override
   Future<dynamic> awaitSpeakCompletion(bool awaitCompletion) async => 1;
@@ -104,8 +105,21 @@ class FakeFlutterTts extends FlutterTts {
     progressCallback = callback;
   }
 
+  @override
+  void setErrorHandler(ErrorHandler callback) {
+    errorCallback = callback;
+  }
+
   void reportProgress(String text, int start, int end, String word) {
     progressCallback?.call(text, start, end, word);
+  }
+
+  void reportError(String message) {
+    errorCallback?.call(message);
+  }
+
+  void completeSpeech() {
+    completionCallback?.call();
   }
 }
 
@@ -237,8 +251,77 @@ void main() {
     fakeTts.reportProgress('1234567890', 4, 5, '5');
 
     expect(service.currentWord, '5');
+    expect(service.currentPassage, '1234567890');
+    expect(service.currentPassageHighlightStart, 4);
+    expect(service.currentPassageHighlightEnd, 5);
     expect(service.progress, 0.5);
     expect(service.progressPercent, 50);
+
+    service.dispose();
+  });
+
+  test('shows the sentence surrounding the currently spoken word', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+    const text =
+        'First sentence. This is the current sentence for reading. Last sentence.';
+    final start = text.indexOf('current');
+
+    await service.speakPage(text: text, pageNumber: 7);
+    fakeTts.reportProgress(text, start, start + 7, 'current');
+
+    expect(service.currentPassage, 'This is the current sentence for reading.');
+    expect(
+      service.currentPassage.substring(
+        service.currentPassageHighlightStart,
+        service.currentPassageHighlightEnd,
+      ),
+      'current',
+    );
+
+    service.dispose();
+  });
+
+  test('highlights the correct occurrence of a repeated word', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+    const text = 'Read this word and then read this word carefully.';
+    final start = text.lastIndexOf('word');
+
+    await service.speakPage(text: text, pageNumber: 7);
+    fakeTts.reportProgress(text, start, start + 4, 'word');
+
+    expect(
+      service.currentPassageHighlightStart,
+      service.currentPassage.lastIndexOf('word'),
+    );
+    expect(
+      service.currentPassage.substring(
+        service.currentPassageHighlightStart,
+        service.currentPassageHighlightEnd,
+      ),
+      'word',
+    );
+
+    service.dispose();
+  });
+
+  test('trims a very long sentence to a readable phrase', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+    final text =
+        '${List.filled(35, 'context').join(' ')} important '
+        '${List.filled(35, 'detail').join(' ')}.';
+    final start = text.indexOf('important');
+
+    await service.speakPage(text: text, pageNumber: 7);
+    fakeTts.reportProgress(text, start, start + 9, 'important');
+
+    expect(service.currentPassage, contains('important'));
+    expect(
+      service.currentPassage.length,
+      lessThanOrEqualTo(ReaderTtsService.maximumPassageLength + 10),
+    );
 
     service.dispose();
   });
@@ -259,6 +342,41 @@ void main() {
     service.dispose();
   });
 
+  test('starts saved narration from its stored character offset', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.speakPage(
+      text: '1234567890',
+      pageNumber: 7,
+      startCharacter: 5,
+    );
+    fakeTts.reportProgress('67890', 0, 1, '6');
+
+    expect(fakeTts.spokenText, '67890');
+    expect(service.currentCharacterOffset, 6);
+    expect(service.progressPercent, 60);
+
+    service.dispose();
+  });
+
+  test('ignores interrupted error during intentional saved resume', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.speakPage(
+      text: '1234567890',
+      pageNumber: 7,
+      startCharacter: 5,
+    );
+    fakeTts.reportError('interrupted');
+
+    expect(service.state, isNot(ReaderNarrationState.error));
+    expect(service.errorMessage, isNull);
+
+    service.dispose();
+  });
+
   test('stop resets narration progress', () async {
     final fakeTts = FakeFlutterTts();
     final service = ReaderTtsService(flutterTts: fakeTts);
@@ -268,6 +386,63 @@ void main() {
     await service.stop();
 
     expect(service.progressPercent, 0);
+
+    service.dispose();
+  });
+
+  test('natural page completion requests continuous narration', () async {
+    final fakeTts = FakeFlutterTts();
+    int? completedPage;
+    final service = ReaderTtsService(
+      flutterTts: fakeTts,
+      onPageCompleted: (pageNumber) async {
+        completedPage = pageNumber;
+      },
+    );
+
+    await service.speakPage(text: '1234567890', pageNumber: 7);
+    fakeTts.completeSpeech();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(service.state, ReaderNarrationState.stopped);
+    expect(service.progressPercent, 100);
+    expect(service.hasResumableProgress, isFalse);
+    expect(completedPage, 7);
+
+    service.dispose();
+  });
+
+  test('user stop prevents continuous narration request', () async {
+    final fakeTts = FakeFlutterTts();
+    int completionCount = 0;
+    final service = ReaderTtsService(
+      flutterTts: fakeTts,
+      onPageCompleted: (_) async {
+        completionCount++;
+      },
+    );
+
+    await service.speakPage(text: '1234567890', pageNumber: 7);
+    await service.stop();
+    fakeTts.completeSpeech();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(completionCount, 0);
+
+    service.dispose();
+  });
+
+  test('pause cancels a pending automatic page transition', () async {
+    final fakeTts = FakeFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.speakPage(text: '1234567890', pageNumber: 7);
+
+    expect(service.canContinueAfterPage(7), isTrue);
+
+    await service.pause();
+
+    expect(service.canContinueAfterPage(7), isFalse);
 
     service.dispose();
   });

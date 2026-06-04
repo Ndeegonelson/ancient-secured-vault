@@ -6,6 +6,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'firebase_options.dart';
 import 'services/reader_tts_service.dart';
+import 'services/reader_narration_progress_repository.dart';
+import 'services/reader_narration_navigator.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:html' as html;
@@ -1499,6 +1501,8 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       DateTime? readerSessionStartedAt;
       late final String readerSessionId;
       late final ReaderTtsService readerTtsService;
+      late final ReaderNarrationProgressRepository narrationProgressRepository;
+      late final ReaderNarrationNavigator narrationNavigator;
       final Map<int, String> narrationPageTextCache = {};
 
 String get shortReaderSessionId {
@@ -1510,6 +1514,11 @@ String get shortReaderSessionId {
 }
 
 String get normalizedReaderStoragePath => widget.storagePath.trim();
+
+String get readerDocumentKey {
+  final storagePath = normalizedReaderStoragePath;
+  return storagePath.isNotEmpty ? storagePath : widget.title;
+}
 
 String get readerSourceLabel => widget.openSource.replaceAll('_', ' ');
 
@@ -2162,11 +2171,155 @@ Future<String> loadNarrationTextForPage(int pageNumber) async {
   }
 }
 
+Future<ReaderNarrationCheckpoint?> loadNarrationCheckpoint(int pageNumber) async {
+  final userEmail = FirebaseAuth.instance.currentUser?.email;
+
+  if (userEmail == null) return null;
+
+  try {
+    return await narrationProgressRepository.load(
+      userEmail: userEmail,
+      documentKey: readerDocumentKey,
+      pageNumber: pageNumber,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<void> saveNarrationCheckpoint(int pageNumber) async {
+  final userEmail = FirebaseAuth.instance.currentUser?.email;
+  final textLength = readerTtsService.lastText.length;
+  final characterOffset = readerTtsService.currentCharacterOffset;
+
+  if (userEmail == null ||
+      readerTtsService.pageNumber != pageNumber ||
+      textLength <= 0 ||
+      characterOffset <= 0) {
+    return;
+  }
+
+  if (characterOffset >= textLength) {
+    try {
+      await narrationProgressRepository.clear(
+        userEmail: userEmail,
+        documentKey: readerDocumentKey,
+        pageNumber: pageNumber,
+      );
+    } catch (_) {
+      // Completed narration stays usable if cloud cleanup is unavailable.
+    }
+    return;
+  }
+
+  final checkpoint = ReaderNarrationCheckpoint(
+    pageNumber: pageNumber,
+    characterOffset: characterOffset,
+    textLength: textLength,
+    languageLocale: readerTtsService.language.locale,
+    rate: readerTtsService.rate,
+  );
+
+  try {
+    await narrationProgressRepository.save(
+      userEmail: userEmail,
+      documentKey: readerDocumentKey,
+      pdfTitle: widget.title,
+      storagePath: normalizedReaderStoragePath,
+      checkpoint: checkpoint,
+    );
+  } catch (_) {
+    // Narration remains usable if cloud progress storage is unavailable.
+  }
+}
+
+Future<bool> moveNarrationAcrossPage({
+  required int fromPage,
+  required ReaderNarrationDirection direction,
+  String source = 'narration_page_navigation',
+  bool Function()? canStart,
+}) async {
+  final pageCount = await loadPdfPageCount();
+  var page = fromPage;
+
+  while (true) {
+    if (canStart != null && !canStart()) return false;
+
+    page += direction == ReaderNarrationDirection.forward ? 1 : -1;
+
+    if (page < 1 || page > pageCount) return false;
+
+    final text = await loadNarrationTextForPage(page);
+    if (canStart != null && !canStart()) return false;
+    if (text.trim().isEmpty) continue;
+
+    final startCharacter = direction == ReaderNarrationDirection.backward
+        ? ReaderNarrationNavigator().target(
+            text: text,
+            currentOffset: text.length,
+            direction: ReaderNarrationDirection.backward,
+          ).offset
+        : 0;
+
+    if (canStart != null && !canStart()) return false;
+
+    openPdfPage(page, source: source);
+    return readerTtsService.speakPage(
+      text: text,
+      pageNumber: page,
+      startCharacter: startCharacter,
+    );
+  }
+}
+
+Future<void> continueNarrationAfterPage(int completedPage) async {
+  await saveNarrationCheckpoint(completedPage);
+
+  if (!readerTtsService.canContinueAfterPage(completedPage)) return;
+
+  try {
+    final continued = await moveNarrationAcrossPage(
+      fromPage: completedPage,
+      direction: ReaderNarrationDirection.forward,
+      source: 'continuous_narration',
+      canStart: () => readerTtsService.canContinueAfterPage(completedPage),
+    );
+
+    if (!continued) {
+      readerTtsService.endContinuousPlayback();
+      await logReaderAction(
+        action: 'complete_document_narration',
+        details: {
+          'pageNumber': completedPage,
+        },
+      );
+      return;
+    }
+
+    await logReaderAction(
+      action: 'continue_document_narration',
+      details: {
+        'fromPage': completedPage,
+        'toPage': readerTtsService.pageNumber,
+      },
+    );
+  } catch (error) {
+    await logReaderAction(
+      action: 'continue_document_narration_failed',
+      details: {
+        'pageNumber': completedPage,
+        'error': error.toString(),
+      },
+    );
+  }
+}
+
 Future<void> showReaderNarrationDialog() async {
   if (!canUseViewerTools('page_narration')) return;
 
   final narrationPage = currentPdfPage;
   final narrationText = loadNarrationTextForPage(narrationPage);
+  final savedCheckpoint = await loadNarrationCheckpoint(narrationPage);
 
   await logReaderAction(
     action: 'open_page_narration',
@@ -2184,36 +2337,49 @@ Future<void> showReaderNarrationDialog() async {
         service: readerTtsService,
         pageNumber: narrationPage,
         narrationText: narrationText,
+        savedCheckpoint: savedCheckpoint,
         onLanguageChanged: (language) async {
           await readerTtsService.setLanguage(language);
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_language',
             details: {
               'language': language.locale,
-              'pageNumber': narrationPage,
+              'pageNumber': activePage,
             },
           );
         },
         onRateChangeEnd: (rate) async {
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_speed',
             details: {
               'rate': rate,
-              'pageNumber': narrationPage,
+              'pageNumber': activePage,
             },
           );
         },
         onPlay: (text) async {
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
+          final hasLiveResume =
+              readerTtsService.pageNumber == activePage &&
+              readerTtsService.hasResumableProgress;
+          final startCharacter = hasLiveResume
+              ? readerTtsService.currentCharacterOffset
+              : activePage == narrationPage
+              ? savedCheckpoint?.characterOffsetForText(text) ?? 0
+              : 0;
           final started = await readerTtsService.speakPage(
             text: text,
-            pageNumber: narrationPage,
+            pageNumber: activePage,
+            startCharacter: startCharacter,
           );
 
           if (started) {
             await logReaderAction(
               action: 'start_page_narration',
               details: {
-                'pageNumber': narrationPage,
+                'pageNumber': activePage,
                 'language': readerTtsService.language.locale,
                 'rate': readerTtsService.rate,
               },
@@ -2222,44 +2388,164 @@ Future<void> showReaderNarrationDialog() async {
         },
         onPause: () async {
           await readerTtsService.pause();
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
+          await saveNarrationCheckpoint(activePage);
           await logReaderAction(
             action: 'pause_page_narration',
             details: {
-              'pageNumber': narrationPage,
+              'pageNumber': activePage,
             },
           );
         },
         onResume: () async {
           final resumed = await readerTtsService.resume();
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
 
           if (resumed) {
             await logReaderAction(
               action: 'resume_page_narration',
               details: {
-                'pageNumber': narrationPage,
+                'pageNumber': activePage,
+                'progressPercent': readerTtsService.progressPercent,
+              },
+            );
+          }
+        },
+        onJumpBackward: (text) async {
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
+          final hasLiveResume =
+              readerTtsService.pageNumber == activePage &&
+              readerTtsService.hasResumableProgress;
+          final currentOffset = hasLiveResume
+              ? readerTtsService.currentCharacterOffset
+              : activePage == narrationPage
+              ? savedCheckpoint?.characterOffsetForText(text) ?? 0
+              : 0;
+          final jump = narrationNavigator.target(
+            text: text,
+            currentOffset: currentOffset,
+            direction: ReaderNarrationDirection.backward,
+          );
+
+          if (jump.kind == ReaderNarrationJumpKind.pageEdge &&
+              jump.offset == 0 &&
+              activePage > 1) {
+            await saveNarrationCheckpoint(activePage);
+            final moved = await moveNarrationAcrossPage(
+              fromPage: activePage,
+              direction: ReaderNarrationDirection.backward,
+            );
+
+            if (moved) {
+              await logReaderAction(
+                action: 'jump_previous_page_narration',
+                details: {
+                  'fromPage': activePage,
+                  'toPage': readerTtsService.pageNumber,
+                },
+              );
+            }
+            return;
+          }
+
+          final started = await readerTtsService.speakPage(
+            text: text,
+            pageNumber: activePage,
+            startCharacter: jump.offset,
+          );
+
+          if (started) {
+            await logReaderAction(
+              action: 'jump_backward_page_narration',
+              details: {
+                'pageNumber': activePage,
+                'jumpKind': jump.kind.name,
+                'repeatCount': jump.repeatCount,
+                'progressPercent': readerTtsService.progressPercent,
+              },
+            );
+          }
+        },
+        onJumpForward: (text) async {
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
+          final hasLiveResume =
+              readerTtsService.pageNumber == activePage &&
+              readerTtsService.hasResumableProgress;
+          final currentOffset = hasLiveResume
+              ? readerTtsService.currentCharacterOffset
+              : activePage == narrationPage
+              ? savedCheckpoint?.characterOffsetForText(text) ?? 0
+              : 0;
+          final jump = narrationNavigator.target(
+            text: text,
+            currentOffset: currentOffset,
+            direction: ReaderNarrationDirection.forward,
+          );
+
+          if (jump.offset >= text.length - 1) {
+            await saveNarrationCheckpoint(activePage);
+            final moved = await moveNarrationAcrossPage(
+              fromPage: activePage,
+              direction: ReaderNarrationDirection.forward,
+            );
+
+            if (moved) {
+              await logReaderAction(
+                action: 'jump_next_page_narration',
+                details: {
+                  'fromPage': activePage,
+                  'toPage': readerTtsService.pageNumber,
+                  'repeatCount': jump.repeatCount,
+                },
+              );
+            }
+            return;
+          }
+
+          final started = await readerTtsService.speakPage(
+            text: text,
+            pageNumber: activePage,
+            startCharacter: jump.offset,
+          );
+
+          if (started) {
+            await logReaderAction(
+              action: 'jump_forward_page_narration',
+              details: {
+                'pageNumber': activePage,
+                'jumpKind': jump.kind.name,
+                'repeatCount': jump.repeatCount,
                 'progressPercent': readerTtsService.progressPercent,
               },
             );
           }
         },
         onStop: () async {
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
+          await saveNarrationCheckpoint(activePage);
           await readerTtsService.stop();
           await logReaderAction(
             action: 'stop_page_narration',
             details: {
-              'pageNumber': narrationPage,
+              'pageNumber': activePage,
             },
           );
         },
       );
     },
   );
+
+  await saveNarrationCheckpoint(readerTtsService.pageNumber ?? narrationPage);
 }
 
 @override
 void initState() {
   super.initState();
-  readerTtsService = ReaderTtsService();
+  readerTtsService = ReaderTtsService(
+    onPageCompleted: continueNarrationAfterPage,
+  );
+  narrationProgressRepository = ReaderNarrationProgressRepository();
+  narrationNavigator = ReaderNarrationNavigator();
   readerSessionId =
       'reader-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
   viewId =
@@ -2317,7 +2603,7 @@ void dispose() {
         iconTheme: const IconThemeData(color: Colors.greenAccent),
         actions: [
         IconButton(
-          tooltip: 'Narrate tracked page',
+          tooltip: 'Narrate document from tracked page',
           icon: const Icon(
             Icons.record_voice_over,
             size: 20,
