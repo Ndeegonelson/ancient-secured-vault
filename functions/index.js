@@ -12,11 +12,16 @@ const {
 const {
   createNarrationProviderRegistry,
 } = require("./narration_provider_registry");
+const {
+  createDemoCloudNarrationProvider,
+} = require("./narration_demo_provider");
 
 initializeApp();
 const firestore = getFirestore();
 const narrationUsageQuota = createNarrationUsageQuota({firestore});
-const narrationProviderRegistry = createNarrationProviderRegistry();
+const narrationProviderRegistry = createNarrationProviderRegistry({
+  providers: [createDemoCloudNarrationProvider()],
+});
 
 setGlobalOptions({maxInstances: 10});
 
