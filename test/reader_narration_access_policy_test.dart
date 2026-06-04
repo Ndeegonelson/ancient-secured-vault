@@ -10,6 +10,7 @@ void main() {
 
     expect(policy.plan, ReaderNarrationPlan.free);
     expect(policy.canChooseVoice, isFalse);
+    expect(policy.canUseCloudNarration, isFalse);
   });
 
   test('active subscribers receive continuous bilingual narration', () {
@@ -20,6 +21,7 @@ void main() {
 
     expect(policy.plan, ReaderNarrationPlan.premium);
     expect(policy.canChooseVoice, isTrue);
+    expect(policy.canUseCloudNarration, isTrue);
   });
 
   test('inactive subscriptions remain on the free narration plan', () {
@@ -40,5 +42,6 @@ void main() {
 
     expect(policy.plan, ReaderNarrationPlan.admin);
     expect(policy.canChooseVoice, isTrue);
+    expect(policy.canUseCloudNarration, isTrue);
   });
 }

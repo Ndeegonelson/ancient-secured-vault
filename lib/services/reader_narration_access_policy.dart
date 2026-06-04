@@ -21,6 +21,7 @@ class ReaderNarrationAccessPolicy {
   final ReaderNarrationPlan plan;
 
   bool get canChooseVoice => plan != ReaderNarrationPlan.free;
+  bool get canUseCloudNarration => canChooseVoice;
 
   String get summary {
     switch (plan) {
@@ -36,5 +37,9 @@ class ReaderNarrationAccessPolicy {
   String get upgradeMessage {
     return 'Premium narration is required to choose from multiple narrator '
         'voices and accents.';
+  }
+
+  String get cloudUpgradeMessage {
+    return 'Premium narration is required for cloud and customized voices.';
   }
 }
