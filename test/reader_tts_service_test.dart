@@ -152,6 +152,36 @@ void main() {
     service.dispose();
   });
 
+  test('restores saved preferences without starting narration', () {
+    final fakeTts = FakeFlutterTts(availableLanguages: const ['en-US']);
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    service.restorePreferences(
+      language: ReaderNarrationLanguage.french,
+      rate: 0.75,
+    );
+
+    expect(service.language, ReaderNarrationLanguage.french);
+    expect(service.rate, 0.75);
+    expect(service.state, ReaderNarrationState.idle);
+    expect(service.errorMessage, isNull);
+    expect(fakeTts.selectedLanguage, isNull);
+    expect(fakeTts.speakCount, 0);
+
+    service.dispose();
+  });
+
+  test('clamps an invalid saved narration speed during restore', () {
+    final service = ReaderTtsService(flutterTts: FakeFlutterTts());
+
+    service.restorePreferences(language: ReaderNarrationLanguage.auto, rate: 5);
+
+    expect(service.language, ReaderNarrationLanguage.auto);
+    expect(service.rate, ReaderTtsService.maximumRate);
+
+    service.dispose();
+  });
+
   test('Auto selects an English voice for English text', () async {
     final fakeTts = FakeFlutterTts(
       availableLanguages: const ['en-US', 'fr-FR'],

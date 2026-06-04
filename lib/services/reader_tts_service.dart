@@ -120,6 +120,17 @@ class ReaderTtsService extends ChangeNotifier {
     _continuousPlaybackRequested = false;
   }
 
+  void restorePreferences({
+    required ReaderNarrationLanguage language,
+    required double rate,
+  }) {
+    _language = language;
+    _resolveEffectiveLanguage(_lastText);
+    _rate = rate.clamp(minimumRate, maximumRate).toDouble();
+    _errorMessage = null;
+    _notifyListeners();
+  }
+
   Future<void> initialize() async {
     if (_initialized) return;
 

@@ -8,6 +8,7 @@ import 'firebase_options.dart';
 import 'services/reader_tts_service.dart';
 import 'services/reader_narration_progress_repository.dart';
 import 'services/reader_narration_navigator.dart';
+import 'services/reader_narration_preferences_repository.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
@@ -1503,7 +1504,9 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       late final String readerSessionId;
       late final ReaderTtsService readerTtsService;
       late final ReaderNarrationProgressRepository narrationProgressRepository;
+      late final ReaderNarrationPreferencesRepository narrationPreferencesRepository;
       late final ReaderNarrationNavigator narrationNavigator;
+      late final Future<void> narrationPreferencesReady;
       final Map<int, String> narrationPageTextCache = {};
 
 String get shortReaderSessionId {
@@ -2188,6 +2191,50 @@ Future<ReaderNarrationCheckpoint?> loadNarrationCheckpoint(int pageNumber) async
   }
 }
 
+Future<void> loadNarrationPreferences() async {
+  final userEmail = FirebaseAuth.instance.currentUser?.email;
+
+  if (userEmail == null) return;
+
+  try {
+    final preferences = await narrationPreferencesRepository.load(
+      userEmail: userEmail,
+    );
+
+    if (preferences == null) return;
+
+    final language = ReaderNarrationLanguage.values.firstWhere(
+      (language) => language.locale == preferences.languageMode,
+      orElse: () => ReaderNarrationLanguage.english,
+    );
+
+    readerTtsService.restorePreferences(
+      language: language,
+      rate: preferences.rate,
+    );
+  } catch (_) {
+    // Narration remains available with defaults if cloud preferences fail.
+  }
+}
+
+Future<void> saveNarrationPreferences() async {
+  final userEmail = FirebaseAuth.instance.currentUser?.email;
+
+  if (userEmail == null) return;
+
+  try {
+    await narrationPreferencesRepository.save(
+      userEmail: userEmail,
+      preferences: ReaderNarrationPreferences(
+        languageMode: readerTtsService.language.locale,
+        rate: readerTtsService.rate,
+      ),
+    );
+  } catch (_) {
+    // A temporary cloud failure must not interrupt active narration.
+  }
+}
+
 Future<void> saveNarrationCheckpoint(int pageNumber) async {
   final userEmail = FirebaseAuth.instance.currentUser?.email;
   final textLength = readerTtsService.lastText.length;
@@ -2351,6 +2398,9 @@ Future<void> showSelectedTextNarrationDialog() async {
 Future<void> showReaderNarrationDialog({String? selectedText}) async {
   if (!canUseViewerTools('page_narration')) return;
 
+  await narrationPreferencesReady;
+  if (!mounted) return;
+
   final narrationPage = currentPdfPage;
   final isSelectedPassage = selectedText != null;
   final narrationText = isSelectedPassage
@@ -2382,6 +2432,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             : 'Document Narration',
         onLanguageChanged: (language) async {
           await readerTtsService.setLanguage(language);
+          await saveNarrationPreferences();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_language',
@@ -2392,6 +2443,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           );
         },
         onRateChangeEnd: (rate) async {
+          await saveNarrationPreferences();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_speed',
@@ -2600,7 +2652,9 @@ void initState() {
     onPageCompleted: continueNarrationAfterPage,
   );
   narrationProgressRepository = ReaderNarrationProgressRepository();
+  narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
   narrationNavigator = ReaderNarrationNavigator();
+  narrationPreferencesReady = loadNarrationPreferences();
   readerSessionId =
       'reader-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
   viewId =
