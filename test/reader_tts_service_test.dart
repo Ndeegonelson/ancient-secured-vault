@@ -524,6 +524,62 @@ void main() {
     service.dispose();
   });
 
+  test(
+    'selected passage completion does not continue to the next page',
+    () async {
+      final fakeTts = FakeFlutterTts();
+      int completionCount = 0;
+      final service = ReaderTtsService(
+        flutterTts: fakeTts,
+        onPageCompleted: (_) async {
+          completionCount++;
+        },
+      );
+
+      await service.speakPage(
+        text: 'Selected passage only.',
+        pageNumber: 7,
+        continueAcrossPages: false,
+      );
+      fakeTts.completeSpeech();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(service.progressPercent, 100);
+      expect(completionCount, 0);
+
+      service.dispose();
+    },
+  );
+
+  test(
+    'selected passage remains isolated after controls restart narration',
+    () async {
+      final fakeTts = FakeFlutterTts();
+      int completionCount = 0;
+      final service = ReaderTtsService(
+        flutterTts: fakeTts,
+        onPageCompleted: (_) async {
+          completionCount++;
+        },
+      );
+
+      await service.speakPage(
+        text: 'Selected passage only.',
+        pageNumber: 7,
+        continueAcrossPages: false,
+      );
+      await service.setRate(0.75);
+      await service.pause();
+      await service.resume();
+      fakeTts.completeSpeech();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(completionCount, 0);
+
+      service.dispose();
+    },
+  );
+
   test('user stop prevents continuous narration request', () async {
     final fakeTts = FakeFlutterTts();
     int completionCount = 0;

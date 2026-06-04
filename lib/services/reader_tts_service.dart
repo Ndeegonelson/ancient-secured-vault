@@ -60,6 +60,7 @@ class ReaderTtsService extends ChangeNotifier {
   DateTime? _ignoreInterruptedErrorsUntil;
   bool _initialized = false;
   bool _disposed = false;
+  bool _continueAcrossPages = true;
   bool _continuousPlaybackRequested = false;
 
   ReaderNarrationLanguage get language => _language;
@@ -204,6 +205,7 @@ class ReaderTtsService extends ChangeNotifier {
     required String text,
     required int pageNumber,
     int startCharacter = 0,
+    bool continueAcrossPages = true,
   }) async {
     final narrationText = text.trim();
 
@@ -232,7 +234,8 @@ class ReaderTtsService extends ChangeNotifier {
 
       _lastText = narrationText;
       _pageNumber = pageNumber;
-      _continuousPlaybackRequested = true;
+      _continueAcrossPages = continueAcrossPages;
+      _continuousPlaybackRequested = continueAcrossPages;
       _currentWord = '';
       _speechStartCharacter = startCharacter >= narrationText.length
           ? 0
@@ -270,7 +273,7 @@ class ReaderTtsService extends ChangeNotifier {
 
     try {
       _restartRequestId++;
-      _continuousPlaybackRequested = true;
+      _continuousPlaybackRequested = _continueAcrossPages;
       _errorMessage = null;
       final result = await _flutterTts.speak(_lastText);
       return result == 1;
@@ -488,7 +491,7 @@ class ReaderTtsService extends ChangeNotifier {
     if (!isPlaying || _lastText.isEmpty) return;
 
     final requestId = ++_restartRequestId;
-    _continuousPlaybackRequested = true;
+    _continuousPlaybackRequested = _continueAcrossPages;
 
     if (debounce > Duration.zero) {
       await Future<void>.delayed(debounce);

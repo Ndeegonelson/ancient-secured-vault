@@ -11,6 +11,7 @@ class ReaderNarrationDialog extends StatelessWidget {
     required this.pageNumber,
     required this.narrationText,
     required this.savedCheckpoint,
+    this.title = 'Document Narration',
     required this.onLanguageChanged,
     required this.onRateChangeEnd,
     required this.onPlay,
@@ -25,6 +26,7 @@ class ReaderNarrationDialog extends StatelessWidget {
   final int pageNumber;
   final Future<String> narrationText;
   final ReaderNarrationCheckpoint? savedCheckpoint;
+  final String title;
   final Future<void> Function(ReaderNarrationLanguage language)
   onLanguageChanged;
   final Future<void> Function(double rate) onRateChangeEnd;
@@ -58,9 +60,9 @@ class ReaderNarrationDialog extends StatelessWidget {
         builder: (context, child) {
           return AlertDialog(
             backgroundColor: const Color(0xFF0F1117),
-            title: const Text(
-              'Document Narration',
-              style: TextStyle(color: Colors.greenAccent),
+            title: Text(
+              title,
+              style: const TextStyle(color: Colors.greenAccent),
             ),
             content: SizedBox(
               width: 460,
@@ -94,7 +96,10 @@ class ReaderNarrationDialog extends StatelessWidget {
                       ? service.lastText
                       : text;
                   final hasReadableText = activeText.isNotEmpty;
-                  final currentPassage = service.currentPassage.trim();
+                  final hasActiveNarration = service.lastText == activeText;
+                  final currentPassage = hasActiveNarration
+                      ? service.currentPassage.trim()
+                      : '';
                   final highlightStart = service.currentPassageHighlightStart
                       .clamp(0, currentPassage.length);
                   final highlightEnd = service.currentPassageHighlightEnd.clamp(
@@ -102,6 +107,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                     currentPassage.length,
                   );
                   final hasLiveResume =
+                      hasActiveNarration &&
                       service.pageNumber == activePageNumber &&
                       service.hasResumableProgress;
                   final resumePercent = hasLiveResume
@@ -181,7 +187,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                           ),
                           const Divider(color: Colors.white12),
                         ],
-                        if (service.lastText.isNotEmpty) ...[
+                        if (hasActiveNarration) ...[
                           const SizedBox(height: 12),
                           Row(
                             children: [
