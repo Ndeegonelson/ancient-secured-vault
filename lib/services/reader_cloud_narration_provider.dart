@@ -85,7 +85,7 @@ class ReaderCloudNarrationAudioSegment {
     if (isEmpty ||
         startCharacter != request.startCharacter ||
         endCharacter <= startCharacter ||
-        endCharacter > request.endCharacter) {
+        endCharacter != request.endCharacter) {
       return false;
     }
 
