@@ -129,6 +129,23 @@ class ReaderCloudNarrationCallableProvider
           ? Duration(milliseconds: durationMilliseconds)
           : null,
       timingCues: _timingCuesFromResponse(response['timingCues']),
+      usage: _usageFromResponse(response['usage']),
+    );
+  }
+
+  ReaderCloudNarrationUsage? _usageFromResponse(dynamic value) {
+    if (value == null) return null;
+    if (value is! Map) {
+      throw StateError('Cloud narration usage data is invalid.');
+    }
+
+    return ReaderCloudNarrationUsage(
+      dateKey: _optionalString(value['dateKey']),
+      plan: _optionalString(value['plan']),
+      usedCharacters: _optionalInt(value['usedCharacters']),
+      usedRequests: _optionalInt(value['usedRequests']),
+      remainingCharacters: _optionalInt(value['remainingCharacters']),
+      remainingRequests: _optionalInt(value['remainingRequests']),
     );
   }
 
@@ -177,6 +194,11 @@ class ReaderCloudNarrationCallableProvider
   String? _optionalString(dynamic value) {
     if (value is! String || value.trim().isEmpty) return null;
     return value.trim();
+  }
+
+  int? _optionalInt(dynamic value) {
+    if (value is! int || value < 0) return null;
+    return value;
   }
 
   int _requiredInt(dynamic value, String label) {

@@ -62,6 +62,24 @@ class ReaderCloudNarrationTimingCue {
   final Duration audioOffset;
 }
 
+class ReaderCloudNarrationUsage {
+  const ReaderCloudNarrationUsage({
+    this.dateKey,
+    this.plan,
+    this.usedCharacters,
+    this.usedRequests,
+    this.remainingCharacters,
+    this.remainingRequests,
+  });
+
+  final String? dateKey;
+  final String? plan;
+  final int? usedCharacters;
+  final int? usedRequests;
+  final int? remainingCharacters;
+  final int? remainingRequests;
+}
+
 class ReaderCloudNarrationAudioSegment {
   const ReaderCloudNarrationAudioSegment({
     required this.audioBytes,
@@ -70,6 +88,7 @@ class ReaderCloudNarrationAudioSegment {
     required this.endCharacter,
     this.duration,
     this.timingCues = const [],
+    this.usage,
   });
 
   final Uint8List audioBytes;
@@ -78,6 +97,7 @@ class ReaderCloudNarrationAudioSegment {
   final int endCharacter;
   final Duration? duration;
   final List<ReaderCloudNarrationTimingCue> timingCues;
+  final ReaderCloudNarrationUsage? usage;
 
   bool get isEmpty => audioBytes.isEmpty;
 

@@ -96,6 +96,15 @@ void main() {
           'startCharacter': 12,
           'endCharacter': 20,
           'durationMilliseconds': 800,
+          'usage': {
+            'dateKey': '2026-06-04',
+            'plan': 'premium',
+            'usedCharacters': 8,
+            'usedRequests': 1,
+            'remainingCharacters': 119992,
+            'remainingRequests': 99,
+            'privateQuotaPath': 'must not reach Flutter',
+          },
           'timingCues': [
             {
               'startCharacter': 12,
@@ -135,6 +144,12 @@ void main() {
     expect(segment.startCharacter, 12);
     expect(segment.endCharacter, 20);
     expect(segment.duration, const Duration(milliseconds: 800));
+    expect(segment.usage?.dateKey, '2026-06-04');
+    expect(segment.usage?.plan, 'premium');
+    expect(segment.usage?.usedCharacters, 8);
+    expect(segment.usage?.usedRequests, 1);
+    expect(segment.usage?.remainingCharacters, 119992);
+    expect(segment.usage?.remainingRequests, 99);
     expect(segment.timingCues.single.startCharacter, 12);
     expect(segment.timingCues.single.audioOffset, Duration.zero);
     expect(segment.isValidFor(request), isTrue);

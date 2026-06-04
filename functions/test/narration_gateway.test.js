@@ -40,6 +40,18 @@ function createTestSynthesisHandler(options) {
   });
 }
 
+function testUsage() {
+  return {
+    dateKey: "2026-06-04",
+    plan: "premium",
+    usedCharacters: 20,
+    usedRequests: 1,
+    remainingCharacters: 119980,
+    remainingRequests: 99,
+    privateQuotaDocumentPath: "must not reach Flutter",
+  };
+}
+
 test("catalog requires an authenticated user", async () => {
   let accessReads = 0;
   const handler = createNarrationCatalogHandler({
@@ -183,6 +195,7 @@ test("synthesis authorizes voice and usage before calling a paid provider", asyn
     },
     consumeUsage: async (usage) => {
       events.push(["usage", usage]);
+      return testUsage();
     },
     synthesize: async (input) => {
       events.push(["provider", input]);
@@ -298,6 +311,7 @@ test("valid synthesis request returns bounded protected audio", async () => {
   const audioBase64 = Buffer.from([1, 2, 3]).toString("base64");
   const handler = createTestSynthesisHandler({
     loadUserAccess: async () => premiumAccess,
+    consumeUsage: async () => testUsage(),
     synthesize: async (input) => {
       receivedInput = input;
       return {
@@ -340,6 +354,14 @@ test("valid synthesis request returns bounded protected audio", async () => {
       endCharacter: 20,
       audioOffsetMilliseconds: 0,
     }],
+    usage: {
+      dateKey: "2026-06-04",
+      plan: "premium",
+      usedCharacters: 20,
+      usedRequests: 1,
+      remainingCharacters: 119980,
+      remainingRequests: 99,
+    },
   });
 });
 

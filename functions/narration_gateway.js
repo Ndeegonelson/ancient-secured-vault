@@ -41,7 +41,7 @@ function createNarrationSynthesisHandler({
     const access = await requireCloudNarrationAccess(request, loadUserAccess);
     const input = validateSynthesisInput(request.data);
     await authorizeVoiceSafely(() => authorizeVoice(input.voiceId));
-    await consumeUsageSafely(() => consumeUsage({
+    const usage = await consumeUsageSafely(() => consumeUsage({
       uid: request.auth.uid,
       access,
       characterCount: input.text.length,
@@ -51,7 +51,10 @@ function createNarrationSynthesisHandler({
         () => synthesize(input),
         "Cloud narration audio is temporarily unavailable.",
     );
-    return validateSynthesisResult(result, input);
+    return {
+      ...validateSynthesisResult(result, input),
+      usage: validateUsageResult(usage),
+    };
   };
 }
 
@@ -228,6 +231,21 @@ function validateSynthesisResult(value, request) {
   return result;
 }
 
+function validateUsageResult(value) {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const usage = {};
+  copyOptionalUsageField(value, usage, "dateKey");
+  copyOptionalUsageField(value, usage, "plan");
+  copyOptionalUsageInteger(value, usage, "usedCharacters");
+  copyOptionalUsageInteger(value, usage, "usedRequests");
+  copyOptionalUsageInteger(value, usage, "remainingCharacters");
+  copyOptionalUsageInteger(value, usage, "remainingRequests");
+  return Object.keys(usage).length === 0 ? undefined : usage;
+}
+
 function validateTimingCues(value, startCharacter, endCharacter) {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > MAX_SYNTHESIS_CHARACTERS) {
@@ -262,6 +280,18 @@ function copyOptionalCatalogField(source, target, field, maximumLength) {
   if (normalized === undefined) return;
   if (normalized.length > maximumLength) throw invalidCatalogError();
   target[field] = normalized;
+}
+
+function copyOptionalUsageField(source, target, field) {
+  const normalized = normalizeOptionalString(source[field]);
+  if (normalized === undefined || normalized.length > 80) return;
+  target[field] = normalized;
+}
+
+function copyOptionalUsageInteger(source, target, field) {
+  if (Number.isSafeInteger(source[field]) && source[field] >= 0) {
+    target[field] = source[field];
+  }
 }
 
 function requireString(
