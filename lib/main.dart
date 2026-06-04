@@ -9,6 +9,7 @@ import 'services/reader_tts_service.dart';
 import 'services/reader_narration_progress_repository.dart';
 import 'services/reader_narration_navigator.dart';
 import 'widgets/reader_narration_dialog.dart';
+import 'widgets/reader_text_selection_dialog.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:html' as html;
 import 'package:http/http.dart' as http;
@@ -2314,12 +2315,50 @@ Future<void> continueNarrationAfterPage(int completedPage) async {
   }
 }
 
-Future<void> showReaderNarrationDialog() async {
+Future<void> showSelectedTextNarrationDialog() async {
+  if (!canUseViewerTools('selected_text_narration')) return;
+
+  final selectionPage = currentPdfPage;
+  final selectedText = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) {
+      return ReaderTextSelectionDialog(
+        pageNumber: selectionPage,
+        pageText: loadNarrationTextForPage(selectionPage),
+      );
+    },
+  );
+
+  if (selectedText == null || selectedText.trim().isEmpty || !mounted) return;
+
+  await logReaderAction(
+    action: 'select_text_narration',
+    details: {
+      'pageNumber': selectionPage,
+      'characterCount': selectedText.length,
+    },
+  );
+
+  final activeNarrationPage = readerTtsService.pageNumber;
+  if (activeNarrationPage != null && readerTtsService.hasResumableProgress) {
+    await saveNarrationCheckpoint(activeNarrationPage);
+  }
+  await readerTtsService.stop();
+
+  await showReaderNarrationDialog(selectedText: selectedText);
+}
+
+Future<void> showReaderNarrationDialog({String? selectedText}) async {
   if (!canUseViewerTools('page_narration')) return;
 
   final narrationPage = currentPdfPage;
-  final narrationText = loadNarrationTextForPage(narrationPage);
-  final savedCheckpoint = await loadNarrationCheckpoint(narrationPage);
+  final isSelectedPassage = selectedText != null;
+  final narrationText = isSelectedPassage
+      ? Future<String>.value(selectedText.trim())
+      : loadNarrationTextForPage(narrationPage);
+  final savedCheckpoint = isSelectedPassage
+      ? null
+      : await loadNarrationCheckpoint(narrationPage);
 
   await logReaderAction(
     action: 'open_page_narration',
@@ -2338,6 +2377,9 @@ Future<void> showReaderNarrationDialog() async {
         pageNumber: narrationPage,
         narrationText: narrationText,
         savedCheckpoint: savedCheckpoint,
+        title: isSelectedPassage
+            ? 'Selected Passage Narration'
+            : 'Document Narration',
         onLanguageChanged: (language) async {
           await readerTtsService.setLanguage(language);
           final activePage = readerTtsService.pageNumber ?? narrationPage;
@@ -2363,6 +2405,7 @@ Future<void> showReaderNarrationDialog() async {
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           final hasLiveResume =
               readerTtsService.pageNumber == activePage &&
+              readerTtsService.lastText == text &&
               readerTtsService.hasResumableProgress;
           final startCharacter = hasLiveResume
               ? readerTtsService.currentCharacterOffset
@@ -2373,6 +2416,7 @@ Future<void> showReaderNarrationDialog() async {
             text: text,
             pageNumber: activePage,
             startCharacter: startCharacter,
+            continueAcrossPages: !isSelectedPassage,
           );
 
           if (started) {
@@ -2389,7 +2433,9 @@ Future<void> showReaderNarrationDialog() async {
         onPause: () async {
           await readerTtsService.pause();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
-          await saveNarrationCheckpoint(activePage);
+          if (!isSelectedPassage) {
+            await saveNarrationCheckpoint(activePage);
+          }
           await logReaderAction(
             action: 'pause_page_narration',
             details: {
@@ -2415,6 +2461,7 @@ Future<void> showReaderNarrationDialog() async {
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           final hasLiveResume =
               readerTtsService.pageNumber == activePage &&
+              readerTtsService.lastText == text &&
               readerTtsService.hasResumableProgress;
           final currentOffset = hasLiveResume
               ? readerTtsService.currentCharacterOffset
@@ -2427,7 +2474,8 @@ Future<void> showReaderNarrationDialog() async {
             direction: ReaderNarrationDirection.backward,
           );
 
-          if (jump.kind == ReaderNarrationJumpKind.pageEdge &&
+          if (!isSelectedPassage &&
+              jump.kind == ReaderNarrationJumpKind.pageEdge &&
               jump.offset == 0 &&
               activePage > 1) {
             await saveNarrationCheckpoint(activePage);
@@ -2452,6 +2500,7 @@ Future<void> showReaderNarrationDialog() async {
             text: text,
             pageNumber: activePage,
             startCharacter: jump.offset,
+            continueAcrossPages: !isSelectedPassage,
           );
 
           if (started) {
@@ -2470,6 +2519,7 @@ Future<void> showReaderNarrationDialog() async {
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           final hasLiveResume =
               readerTtsService.pageNumber == activePage &&
+              readerTtsService.lastText == text &&
               readerTtsService.hasResumableProgress;
           final currentOffset = hasLiveResume
               ? readerTtsService.currentCharacterOffset
@@ -2482,7 +2532,7 @@ Future<void> showReaderNarrationDialog() async {
             direction: ReaderNarrationDirection.forward,
           );
 
-          if (jump.offset >= text.length - 1) {
+          if (!isSelectedPassage && jump.offset >= text.length - 1) {
             await saveNarrationCheckpoint(activePage);
             final moved = await moveNarrationAcrossPage(
               fromPage: activePage,
@@ -2506,6 +2556,7 @@ Future<void> showReaderNarrationDialog() async {
             text: text,
             pageNumber: activePage,
             startCharacter: jump.offset,
+            continueAcrossPages: !isSelectedPassage,
           );
 
           if (started) {
@@ -2522,7 +2573,9 @@ Future<void> showReaderNarrationDialog() async {
         },
         onStop: () async {
           final activePage = readerTtsService.pageNumber ?? narrationPage;
-          await saveNarrationCheckpoint(activePage);
+          if (!isSelectedPassage) {
+            await saveNarrationCheckpoint(activePage);
+          }
           await readerTtsService.stop();
           await logReaderAction(
             action: 'stop_page_narration',
@@ -2535,7 +2588,9 @@ Future<void> showReaderNarrationDialog() async {
     },
   );
 
-  await saveNarrationCheckpoint(readerTtsService.pageNumber ?? narrationPage);
+  if (!isSelectedPassage) {
+    await saveNarrationCheckpoint(readerTtsService.pageNumber ?? narrationPage);
+  }
 }
 
 @override
@@ -2610,6 +2665,15 @@ void dispose() {
             color: Colors.greenAccent,
           ),
           onPressed: showReaderNarrationDialog,
+        ),
+        IconButton(
+          tooltip: 'Narrate selected passage',
+          icon: const Icon(
+            Icons.text_snippet_outlined,
+            size: 20,
+            color: Colors.greenAccent,
+          ),
+          onPressed: showSelectedTextNarrationDialog,
         ),
         IconButton(
           tooltip: showReaderStatusOverlay
