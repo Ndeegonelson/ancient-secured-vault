@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../services/reader_narration_progress_repository.dart';
+import '../services/reader_narration_session_tracker.dart';
 import '../services/reader_tts_service.dart';
 
 class ReaderNarrationDialog extends StatelessWidget {
@@ -11,6 +12,7 @@ class ReaderNarrationDialog extends StatelessWidget {
     required this.pageNumber,
     required this.narrationText,
     required this.savedCheckpoint,
+    required this.sessionTracker,
     this.title = 'Document Narration',
     required this.onLanguageChanged,
     required this.onRateChangeEnd,
@@ -26,6 +28,7 @@ class ReaderNarrationDialog extends StatelessWidget {
   final int pageNumber;
   final Future<String> narrationText;
   final ReaderNarrationCheckpoint? savedCheckpoint;
+  final ReaderNarrationSessionTracker sessionTracker;
   final String title;
   final Future<void> Function(ReaderNarrationLanguage language)
   onLanguageChanged;
@@ -50,6 +53,21 @@ class ReaderNarrationDialog extends StatelessWidget {
       case ReaderNarrationState.idle:
         return 'Ready';
     }
+  }
+
+  String sessionStatus(ReaderNarrationSessionSummary summary) {
+    final seconds = summary.listeningSeconds;
+    final listeningLabel = seconds >= 60
+        ? '${seconds ~/ 60}m ${seconds % 60}s'
+        : '${seconds}s';
+    final pageLabel = summary.pagesNarrated.length == 1 ? 'page' : 'pages';
+    final completedLabel = summary.completedPages.length == 1
+        ? 'page completed'
+        : 'pages completed';
+
+    return '$listeningLabel listening | '
+        '${summary.pagesNarrated.length} $pageLabel narrated | '
+        '${summary.completedPages.length} $completedLabel';
   }
 
   @override
@@ -115,6 +133,14 @@ class ReaderNarrationDialog extends StatelessWidget {
                       : activePageNumber == pageNumber
                       ? savedCheckpoint?.progressPercent
                       : null;
+                  final showSavedProgress =
+                      service.state == ReaderNarrationState.stopped &&
+                      service.progressPercent == 0 &&
+                      resumePercent != null;
+                  final displayProgressPercent = showSavedProgress
+                      ? resumePercent
+                      : service.progressPercent;
+                  final sessionSummary = sessionTracker.snapshot();
 
                   return SingleChildScrollView(
                     child: Column(
@@ -193,7 +219,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: LinearProgressIndicator(
-                                  value: service.progress,
+                                  value: displayProgressPercent / 100,
                                   minHeight: 4,
                                   backgroundColor: Colors.white12,
                                   color: Colors.greenAccent,
@@ -201,10 +227,20 @@ class ReaderNarrationDialog extends StatelessWidget {
                               ),
                               const SizedBox(width: 12),
                               Text(
-                                '${service.progressPercent}%',
+                                '$displayProgressPercent%',
                                 style: const TextStyle(color: Colors.white54),
                               ),
                             ],
+                          ),
+                        ],
+                        if (sessionSummary.hasActivity) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            sessionStatus(sessionSummary),
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                         if (resumePercent != null && resumePercent > 0) ...[
