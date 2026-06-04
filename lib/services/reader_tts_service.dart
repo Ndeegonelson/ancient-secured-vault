@@ -90,6 +90,11 @@ class ReaderTtsService extends ChangeNotifier {
   String? get activeLocale => _activeLocale;
   ReaderNarrationVoice? get activeVoice => _activeVoice;
   ReaderNarrationVoice? get selectedVoice => _selectedVoice;
+  String? get preferredVoiceId => _preferredVoiceId;
+  List<ReaderNarrationVoice> get availableBrowserVoices =>
+      List.unmodifiable(_availableVoices);
+  List<String> get availableBrowserLanguages =>
+      List.unmodifiable(_availableLanguages);
   List<ReaderNarrationVoice> get availableVoicesForActiveLanguage {
     return _availableVoices
         .where(

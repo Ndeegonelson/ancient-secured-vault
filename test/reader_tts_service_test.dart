@@ -188,6 +188,8 @@ void main() {
     await service.initialize();
 
     expect(service.availableVoicesForActiveLanguage, hasLength(2));
+    expect(service.availableBrowserVoices, hasLength(3));
+    expect(service.availableBrowserLanguages, ['en-US', 'en-GB', 'fr-FR']);
 
     const voice = ReaderNarrationVoice(
       name: 'English Two',
@@ -197,6 +199,7 @@ void main() {
     await service.setVoice(voice);
 
     expect(service.selectedVoice?.id, voice.id);
+    expect(service.preferredVoiceId, voice.id);
     expect(service.activeVoice?.id, voice.id);
     expect(fakeTts.selectedVoice, voice.browserVoice);
 
@@ -228,6 +231,32 @@ void main() {
       service.dispose();
     },
   );
+
+  test('browser voice snapshots cannot mutate internal voice state', () async {
+    final fakeTts = FakeFlutterTts(
+      availableVoices: const [
+        {'name': 'English One', 'locale': 'en-US'},
+      ],
+    );
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.initialize();
+
+    expect(
+      () => service.availableBrowserVoices.add(
+        const ReaderNarrationVoice(name: 'Injected', locale: 'en-US'),
+      ),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => service.availableBrowserLanguages.add('fr-FR'),
+      throwsUnsupportedError,
+    );
+    expect(service.availableBrowserVoices, hasLength(1));
+    expect(service.availableBrowserLanguages, ['en-US']);
+
+    service.dispose();
+  });
 
   test('returns a former subscriber to the assigned narrator', () async {
     final fakeTts = FakeFlutterTts(
