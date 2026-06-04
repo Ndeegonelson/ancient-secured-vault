@@ -8,6 +8,7 @@ class ReaderNarrationVoice {
     this.accent,
     this.style,
     this.providerKey,
+    this.cloudVoiceId,
     this.isCustom = false,
     this.provider = ReaderNarrationVoiceProvider.browser,
   });
@@ -20,6 +21,7 @@ class ReaderNarrationVoice {
       accent: data['accent']?.toString(),
       style: data['style']?.toString(),
       providerKey: data['providerKey']?.toString(),
+      cloudVoiceId: data['cloudVoiceId']?.toString() ?? data['id']?.toString(),
       isCustom: data['isCustom'] == true,
     );
   }
@@ -30,15 +32,23 @@ class ReaderNarrationVoice {
   final String? accent;
   final String? style;
   final String? providerKey;
+  final String? cloudVoiceId;
   final bool isCustom;
   final ReaderNarrationVoiceProvider provider;
 
   String get id {
     final normalizedProviderKey = providerKey?.trim();
+    final normalizedCloudVoiceId = cloudVoiceId?.trim();
     final providerPrefix =
         normalizedProviderKey == null || normalizedProviderKey.isEmpty
         ? provider.name
         : '${provider.name}|$normalizedProviderKey';
+
+    if (provider == ReaderNarrationVoiceProvider.cloudAi &&
+        normalizedCloudVoiceId != null &&
+        normalizedCloudVoiceId.isNotEmpty) {
+      return '$providerPrefix|$normalizedCloudVoiceId';
+    }
 
     return '$providerPrefix|$locale|$name';
   }
@@ -76,6 +86,7 @@ class ReaderNarrationVoice {
     String? accent,
     String? style,
     String? providerKey,
+    String? cloudVoiceId,
     bool? isCustom,
     ReaderNarrationVoiceProvider? provider,
   }) {
@@ -86,6 +97,7 @@ class ReaderNarrationVoice {
       accent: accent ?? this.accent,
       style: style ?? this.style,
       providerKey: providerKey ?? this.providerKey,
+      cloudVoiceId: cloudVoiceId ?? this.cloudVoiceId,
       isCustom: isCustom ?? this.isCustom,
       provider: provider ?? this.provider,
     );
