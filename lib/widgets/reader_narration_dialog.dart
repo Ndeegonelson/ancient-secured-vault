@@ -241,6 +241,16 @@ class ReaderNarrationDialog extends StatelessWidget {
                             onLanguageChanged(selection.first);
                           },
                         ),
+                        if (service.automaticLanguageSummary.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            service.automaticLanguageSummary,
+                            style: const TextStyle(
+                              color: Colors.greenAccent,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         Row(
                           children: [

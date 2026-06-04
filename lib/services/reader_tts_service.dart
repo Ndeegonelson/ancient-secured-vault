@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import 'reader_language_detector.dart';
+
 enum ReaderNarrationLanguage {
+  auto('Auto', 'auto'),
   english('English', 'en-US'),
   french('French', 'fr-FR');
 
@@ -16,8 +19,12 @@ enum ReaderNarrationLanguage {
 enum ReaderNarrationState { idle, playing, paused, stopped, error }
 
 class ReaderTtsService extends ChangeNotifier {
-  ReaderTtsService({FlutterTts? flutterTts, this.onPageCompleted})
-    : _flutterTts = flutterTts ?? FlutterTts() {
+  ReaderTtsService({
+    FlutterTts? flutterTts,
+    ReaderLanguageDetector? languageDetector,
+    this.onPageCompleted,
+  }) : _flutterTts = flutterTts ?? FlutterTts(),
+       _languageDetector = languageDetector ?? const ReaderLanguageDetector() {
     _registerHandlers();
   }
 
@@ -29,9 +36,12 @@ class ReaderTtsService extends ChangeNotifier {
   static const Duration _stopRestartDelay = Duration(milliseconds: 120);
 
   final FlutterTts _flutterTts;
+  final ReaderLanguageDetector _languageDetector;
   final Future<void> Function(int pageNumber)? onPageCompleted;
 
   ReaderNarrationLanguage _language = ReaderNarrationLanguage.english;
+  ReaderNarrationLanguage _effectiveLanguage = ReaderNarrationLanguage.english;
+  ReaderTextLanguage _detectedTextLanguage = ReaderTextLanguage.unknown;
   ReaderNarrationState _state = ReaderNarrationState.idle;
   double _rate = defaultRate;
   String _currentWord = '';
@@ -52,6 +62,7 @@ class ReaderTtsService extends ChangeNotifier {
   bool _continuousPlaybackRequested = false;
 
   ReaderNarrationLanguage get language => _language;
+  ReaderNarrationLanguage get effectiveLanguage => _effectiveLanguage;
   ReaderNarrationState get state => _state;
   double get rate => _rate;
   String get currentWord => _currentWord;
@@ -70,6 +81,16 @@ class ReaderTtsService extends ChangeNotifier {
   int? get pageNumber => _pageNumber;
   String? get errorMessage => _errorMessage;
   String? get activeLocale => _activeLocale;
+  String get automaticLanguageSummary {
+    if (_language != ReaderNarrationLanguage.auto) return '';
+
+    if (_detectedTextLanguage == ReaderTextLanguage.unknown) {
+      return 'Auto detection pending | English fallback';
+    }
+
+    return 'Auto detected: ${_effectiveLanguage.label}';
+  }
+
   bool get hasEnglishVoice =>
       _findMatchingLocale(ReaderNarrationLanguage.english) != null;
   bool get hasFrenchVoice =>
@@ -114,6 +135,7 @@ class ReaderTtsService extends ChangeNotifier {
     if (_language == language) return;
 
     _language = language;
+    _resolveEffectiveLanguage(_lastText);
     _errorMessage = null;
 
     try {
@@ -182,6 +204,7 @@ class ReaderTtsService extends ChangeNotifier {
 
     try {
       final requestId = ++_restartRequestId;
+      _resolveEffectiveLanguage(narrationText);
 
       if (_initialized) {
         await _refreshAvailableLanguages();
@@ -335,20 +358,39 @@ class ReaderTtsService extends ChangeNotifier {
   }
 
   Future<void> _applyLanguage() async {
-    final matchingLocale = _findMatchingLocale(_language);
+    final matchingLocale = _findMatchingLocale(_effectiveLanguage);
 
     if (_availableLanguages.isNotEmpty && matchingLocale == null) {
       _activeLocale = null;
-      throw StateError(
-        'No ${_language.label} narration voice is available in this browser.',
-      );
+      final unavailableMessage = _language == ReaderNarrationLanguage.auto
+          ? 'Auto detected ${_effectiveLanguage.label}, but no '
+                '${_effectiveLanguage.label} narration voice is available '
+                'in this browser.'
+          : 'No ${_effectiveLanguage.label} narration voice is available '
+                'in this browser.';
+      throw StateError(unavailableMessage);
     }
 
     // A base locale such as "fr" lets the web engine select any installed
     // regional French voice when its exact locale list is not ready yet.
-    final selectedLocale = matchingLocale ?? _language.baseLocale;
+    final selectedLocale = matchingLocale ?? _effectiveLanguage.baseLocale;
     await _flutterTts.setLanguage(selectedLocale);
     _activeLocale = selectedLocale;
+  }
+
+  void _resolveEffectiveLanguage(String text) {
+    if (_language != ReaderNarrationLanguage.auto) {
+      _effectiveLanguage = _language;
+      _detectedTextLanguage = ReaderTextLanguage.unknown;
+      return;
+    }
+
+    _detectedTextLanguage = _languageDetector.detect(text);
+    _effectiveLanguage = switch (_detectedTextLanguage) {
+      ReaderTextLanguage.french => ReaderNarrationLanguage.french,
+      ReaderTextLanguage.english => ReaderNarrationLanguage.english,
+      ReaderTextLanguage.unknown => ReaderNarrationLanguage.english,
+    };
   }
 
   Future<void> _applyRate() async {

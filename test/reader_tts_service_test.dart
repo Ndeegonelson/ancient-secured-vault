@@ -152,6 +152,91 @@ void main() {
     service.dispose();
   });
 
+  test('Auto selects an English voice for English text', () async {
+    final fakeTts = FakeFlutterTts(
+      availableLanguages: const ['en-US', 'fr-FR'],
+    );
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.setLanguage(ReaderNarrationLanguage.auto);
+    await service.speakPage(
+      text: 'The reader is learning from the document and its history.',
+      pageNumber: 7,
+    );
+
+    expect(service.language, ReaderNarrationLanguage.auto);
+    expect(service.effectiveLanguage, ReaderNarrationLanguage.english);
+    expect(service.automaticLanguageSummary, 'Auto detected: English');
+    expect(fakeTts.selectedLanguage, 'en-US');
+
+    service.dispose();
+  });
+
+  test('Auto selects a French voice for French text', () async {
+    final fakeTts = FakeFlutterTts(
+      availableLanguages: const ['en-US', 'fr-FR'],
+    );
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.setLanguage(ReaderNarrationLanguage.auto);
+    await service.speakPage(
+      text: 'Le document explique comment le système fonctionne pour tous.',
+      pageNumber: 7,
+    );
+
+    expect(service.language, ReaderNarrationLanguage.auto);
+    expect(service.effectiveLanguage, ReaderNarrationLanguage.french);
+    expect(service.automaticLanguageSummary, 'Auto detected: French');
+    expect(fakeTts.selectedLanguage, 'fr-FR');
+
+    service.dispose();
+  });
+
+  test('Auto detects the language again when narration changes page', () async {
+    final fakeTts = FakeFlutterTts(
+      availableLanguages: const ['en-US', 'fr-FR'],
+    );
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.setLanguage(ReaderNarrationLanguage.auto);
+    await service.speakPage(
+      text: 'The reader is learning from the document and its history.',
+      pageNumber: 7,
+    );
+    expect(fakeTts.selectedLanguage, 'en-US');
+
+    await service.speakPage(
+      text: 'Le document explique comment le système fonctionne pour tous.',
+      pageNumber: 8,
+    );
+
+    expect(service.effectiveLanguage, ReaderNarrationLanguage.french);
+    expect(fakeTts.selectedLanguage, 'fr-FR');
+
+    service.dispose();
+  });
+
+  test('Auto clearly reports when its detected voice is unavailable', () async {
+    final fakeTts = FakeFlutterTts(availableLanguages: const ['en-US']);
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.setLanguage(ReaderNarrationLanguage.auto);
+    final started = await service.speakPage(
+      text: 'Le document explique comment le système fonctionne pour tous.',
+      pageNumber: 7,
+    );
+
+    expect(started, isFalse);
+    expect(service.effectiveLanguage, ReaderNarrationLanguage.french);
+    expect(
+      service.errorMessage,
+      'Auto detected French, but no French narration voice is available '
+      'in this browser.',
+    );
+
+    service.dispose();
+  });
+
   test('uses an available regional French voice as a fallback', () async {
     final fakeTts = FakeFlutterTts(
       availableLanguages: const ['en-US', 'fr-CA'],
