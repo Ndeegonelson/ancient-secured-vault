@@ -43,6 +43,7 @@ class ReaderTtsService extends ChangeNotifier {
   ReaderNarrationLanguage _effectiveLanguage = ReaderNarrationLanguage.english;
   ReaderTextLanguage _detectedTextLanguage = ReaderTextLanguage.unknown;
   ReaderNarrationState _state = ReaderNarrationState.idle;
+  ReaderNarrationState _stateBeforeError = ReaderNarrationState.idle;
   double _rate = defaultRate;
   String _currentWord = '';
   String _currentPassage = '';
@@ -134,9 +135,16 @@ class ReaderTtsService extends ChangeNotifier {
   Future<void> setLanguage(ReaderNarrationLanguage language) async {
     if (_language == language) return;
 
+    final stateToRecover = _state == ReaderNarrationState.error
+        ? _stateBeforeError
+        : _state;
+    final shouldRestartNarration =
+        stateToRecover == ReaderNarrationState.playing;
     _language = language;
     _resolveEffectiveLanguage(_lastText);
     _errorMessage = null;
+    _state = stateToRecover;
+    _notifyListeners();
 
     try {
       if (_initialized) {
@@ -147,7 +155,9 @@ class ReaderTtsService extends ChangeNotifier {
       }
 
       _notifyListeners();
-      await _restartActiveNarration();
+      if (shouldRestartNarration) {
+        await _restartActiveNarration();
+      }
     } catch (error) {
       _setError(_friendlyErrorMessage(error));
     }
@@ -668,6 +678,9 @@ class ReaderTtsService extends ChangeNotifier {
   }
 
   void _setError(String message) {
+    if (_state != ReaderNarrationState.error) {
+      _stateBeforeError = _state;
+    }
     _state = ReaderNarrationState.error;
     _errorMessage = message;
     _notifyListeners();

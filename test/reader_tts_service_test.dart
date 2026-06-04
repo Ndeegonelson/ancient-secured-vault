@@ -237,6 +237,33 @@ void main() {
     service.dispose();
   });
 
+  test(
+    'Auto recovers active narration after an unavailable French voice',
+    () async {
+      final fakeTts = FakeFlutterTts(availableLanguages: const ['en-US']);
+      final service = ReaderTtsService(flutterTts: fakeTts);
+
+      await service.speakPage(
+        text: 'The reader is learning from the document and its history.',
+        pageNumber: 7,
+      );
+      fakeTts.reportProgress(service.lastText, 11, 19, 'learning');
+      await service.setLanguage(ReaderNarrationLanguage.french);
+
+      expect(service.state, ReaderNarrationState.error);
+
+      await service.setLanguage(ReaderNarrationLanguage.auto);
+
+      expect(service.language, ReaderNarrationLanguage.auto);
+      expect(service.effectiveLanguage, ReaderNarrationLanguage.english);
+      expect(service.errorMessage, isNull);
+      expect(fakeTts.selectedLanguage, 'en-US');
+      expect(fakeTts.spokenText, service.lastText.substring(19));
+
+      service.dispose();
+    },
+  );
+
   test('uses an available regional French voice as a fallback', () async {
     final fakeTts = FakeFlutterTts(
       availableLanguages: const ['en-US', 'fr-CA'],
