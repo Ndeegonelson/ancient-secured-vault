@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../services/reader_narration_progress_repository.dart';
+import '../services/reader_narration_access_policy.dart';
 import '../services/reader_narration_session_tracker.dart';
+import '../services/reader_narration_voice.dart';
 import '../services/reader_tts_service.dart';
 
 class ReaderNarrationDialog extends StatelessWidget {
@@ -12,9 +14,11 @@ class ReaderNarrationDialog extends StatelessWidget {
     required this.pageNumber,
     required this.narrationText,
     required this.savedCheckpoint,
+    required this.accessPolicy,
     required this.sessionTracker,
     this.title = 'Document Narration',
     required this.onLanguageChanged,
+    required this.onVoiceChanged,
     required this.onRateChangeEnd,
     required this.onPlay,
     required this.onPause,
@@ -28,10 +32,12 @@ class ReaderNarrationDialog extends StatelessWidget {
   final int pageNumber;
   final Future<String> narrationText;
   final ReaderNarrationCheckpoint? savedCheckpoint;
+  final ReaderNarrationAccessPolicy accessPolicy;
   final ReaderNarrationSessionTracker sessionTracker;
   final String title;
   final Future<void> Function(ReaderNarrationLanguage language)
   onLanguageChanged;
+  final Future<void> Function(ReaderNarrationVoice voice) onVoiceChanged;
   final Future<void> Function(double rate) onRateChangeEnd;
   final Future<void> Function(String text) onPlay;
   final Future<void> Function() onPause;
@@ -267,6 +273,14 @@ class ReaderNarrationDialog extends StatelessWidget {
                           'Language',
                           style: TextStyle(color: Colors.white),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          accessPolicy.summary,
+                          style: const TextStyle(
+                            color: Colors.white38,
+                            fontSize: 12,
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         SegmentedButton<ReaderNarrationLanguage>(
                           segments: ReaderNarrationLanguage.values
@@ -301,9 +315,11 @@ class ReaderNarrationDialog extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    service.activeLocale == null
-                                        ? 'Selected voice: unavailable'
-                                        : 'Active browser voice: ${service.activeLocale}',
+                                    service.activeVoice == null
+                                        ? service.activeLocale == null
+                                              ? 'Assigned narrator: unavailable'
+                                              : 'Assigned narrator: ${service.activeLocale}'
+                                        : 'Assigned narrator: ${service.activeVoice!.label}',
                                     style: TextStyle(
                                       color: service.activeLocale == null
                                           ? Colors.orangeAccent
@@ -329,6 +345,77 @@ class ReaderNarrationDialog extends StatelessWidget {
                             ),
                           ],
                         ),
+                        if (accessPolicy.canChooseVoice &&
+                            service.availableVoicesForActiveLanguage.length >
+                                1) ...[
+                          const SizedBox(height: 12),
+                          DropdownButtonFormField<ReaderNarrationVoice>(
+                            key: ValueKey(
+                              '${service.effectiveLanguage.name}|'
+                              '${service.activeVoice?.id}',
+                            ),
+                            initialValue: service.activeVoice,
+                            isExpanded: true,
+                            dropdownColor: const Color(0xFF1A1D25),
+                            iconEnabledColor: Colors.greenAccent,
+                            style: const TextStyle(color: Colors.white70),
+                            decoration: const InputDecoration(
+                              labelText: 'Choose narrator',
+                              labelStyle: TextStyle(color: Colors.white70),
+                              floatingLabelStyle: TextStyle(
+                                color: Colors.greenAccent,
+                              ),
+                              filled: true,
+                              fillColor: Color(0xFF151821),
+                              border: OutlineInputBorder(),
+                              enabledBorder: OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.white24),
+                              ),
+                            ),
+                            items: service.availableVoicesForActiveLanguage
+                                .map(
+                                  (voice) =>
+                                      DropdownMenuItem<ReaderNarrationVoice>(
+                                        value: voice,
+                                        child: Text(
+                                          voice.label,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      ),
+                                )
+                                .toList(),
+                            onChanged: (voice) {
+                              if (voice != null) {
+                                onVoiceChanged(voice);
+                              }
+                            },
+                          ),
+                        ] else if (accessPolicy.canChooseVoice) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            service.availableVoicesForActiveLanguage.isEmpty
+                                ? 'No compatible browser narrator was detected.'
+                                : '1 compatible browser narrator detected. '
+                                      'Additional premium narrators require '
+                                      'a cloud voice provider.',
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ] else ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'The narrator is assigned automatically on the free plan.',
+                            style: TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 20),
                         Text(
                           'Speed: ${service.rate.toStringAsFixed(2)}x',

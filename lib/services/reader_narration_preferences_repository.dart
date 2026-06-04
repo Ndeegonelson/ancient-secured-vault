@@ -6,20 +6,28 @@ class ReaderNarrationPreferences {
   const ReaderNarrationPreferences({
     required this.languageMode,
     required this.rate,
+    this.voiceId,
   });
 
   factory ReaderNarrationPreferences.fromMap(Map<String, dynamic> data) {
     return ReaderNarrationPreferences(
       languageMode: data['languageMode']?.toString() ?? 'en-US',
       rate: _readDouble(data['rate'], fallback: 0.5),
+      voiceId: _readOptionalString(data['voiceId']),
     );
   }
 
   final String languageMode;
   final double rate;
+  final String? voiceId;
 
   static double _readDouble(dynamic value, {required double fallback}) {
     return double.tryParse(value.toString()) ?? fallback;
+  }
+
+  static String? _readOptionalString(dynamic value) {
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty ? null : text;
   }
 }
 
@@ -44,6 +52,7 @@ class ReaderNarrationPreferencesRepository {
       'userEmail': userEmail,
       'languageMode': preferences.languageMode,
       'rate': preferences.rate,
+      'voiceId': preferences.voiceId,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

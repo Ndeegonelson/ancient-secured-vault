@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import 'reader_language_detector.dart';
+import 'reader_narration_voice.dart';
 
 enum ReaderNarrationLanguage {
   auto('Auto', 'auto'),
@@ -55,6 +56,10 @@ class ReaderTtsService extends ChangeNotifier {
   int? _pageNumber;
   String? _errorMessage;
   String? _activeLocale;
+  ReaderNarrationVoice? _activeVoice;
+  ReaderNarrationVoice? _selectedVoice;
+  String? _preferredVoiceId;
+  List<ReaderNarrationVoice> _availableVoices = [];
   List<String> _availableLanguages = [];
   int _restartRequestId = 0;
   DateTime? _ignoreInterruptedErrorsUntil;
@@ -83,6 +88,16 @@ class ReaderTtsService extends ChangeNotifier {
   int? get pageNumber => _pageNumber;
   String? get errorMessage => _errorMessage;
   String? get activeLocale => _activeLocale;
+  ReaderNarrationVoice? get activeVoice => _activeVoice;
+  ReaderNarrationVoice? get selectedVoice => _selectedVoice;
+  List<ReaderNarrationVoice> get availableVoicesForActiveLanguage {
+    return _availableVoices
+        .where(
+          (voice) => voice.supportsBaseLocale(_effectiveLanguage.baseLocale),
+        )
+        .toList(growable: false);
+  }
+
   String get automaticLanguageSummary {
     if (_language != ReaderNarrationLanguage.auto) return '';
 
@@ -102,8 +117,8 @@ class ReaderTtsService extends ChangeNotifier {
       return 'No browser voices detected';
     }
 
-    final englishStatus = hasEnglishVoice ? 'available' : 'not detected';
-    final frenchStatus = hasFrenchVoice ? 'available' : 'not detected';
+    final englishStatus = _voiceCountSummary(ReaderNarrationLanguage.english);
+    final frenchStatus = _voiceCountSummary(ReaderNarrationLanguage.french);
     return 'English $englishStatus | French $frenchStatus';
   }
 
@@ -123,10 +138,12 @@ class ReaderTtsService extends ChangeNotifier {
   void restorePreferences({
     required ReaderNarrationLanguage language,
     required double rate,
+    String? voiceId,
   }) {
     _language = language;
     _resolveEffectiveLanguage(_lastText);
     _rate = rate.clamp(minimumRate, maximumRate).toDouble();
+    _preferredVoiceId = voiceId;
     _errorMessage = null;
     _notifyListeners();
   }
@@ -179,7 +196,7 @@ class ReaderTtsService extends ChangeNotifier {
     _errorMessage = null;
 
     try {
-      await _refreshAvailableLanguages();
+      await _refreshAvailableLanguages(waitForAdditionalVoices: true);
       await _applyLanguage();
       _notifyListeners();
       await _restartActiveNarration();
@@ -187,6 +204,46 @@ class ReaderTtsService extends ChangeNotifier {
     } catch (error) {
       _setError(_friendlyErrorMessage(error));
       return false;
+    }
+  }
+
+  Future<void> setVoice(ReaderNarrationVoice voice) async {
+    final availableVoice = _availableVoices.where(
+      (item) => item.id == voice.id,
+    );
+    if (availableVoice.isEmpty ||
+        !voice.supportsBaseLocale(_effectiveLanguage.baseLocale)) {
+      return;
+    }
+
+    _selectedVoice = availableVoice.first;
+    _preferredVoiceId = _selectedVoice!.id;
+    _errorMessage = null;
+
+    try {
+      await _applyLanguage();
+      _notifyListeners();
+      await _restartActiveNarration();
+    } catch (error) {
+      _setError(_friendlyErrorMessage(error));
+    }
+  }
+
+  Future<void> useAssignedVoice() async {
+    if (_selectedVoice == null && _preferredVoiceId == null) return;
+
+    _selectedVoice = null;
+    _preferredVoiceId = null;
+    _errorMessage = null;
+
+    try {
+      if (_initialized) {
+        await _applyLanguage();
+      }
+      _notifyListeners();
+      await _restartActiveNarration();
+    } catch (error) {
+      _setError(_friendlyErrorMessage(error));
     }
   }
 
@@ -400,6 +457,32 @@ class ReaderTtsService extends ChangeNotifier {
     final selectedLocale = matchingLocale ?? _effectiveLanguage.baseLocale;
     await _flutterTts.setLanguage(selectedLocale);
     _activeLocale = selectedLocale;
+
+    final matchingVoices = availableVoicesForActiveLanguage;
+    final selectedVoice = _selectedVoice;
+    final preferredVoices = matchingVoices.where(
+      (voice) => voice.id == _preferredVoiceId,
+    );
+    final voiceToApply =
+        selectedVoice != null &&
+            matchingVoices.any((voice) => voice.id == selectedVoice.id)
+        ? selectedVoice
+        : preferredVoices.isNotEmpty
+        ? preferredVoices.first
+        : matchingVoices.isEmpty
+        ? null
+        : matchingVoices.first;
+
+    if (voiceToApply != null) {
+      await _flutterTts.setVoice(voiceToApply.browserVoice);
+      _activeVoice = voiceToApply;
+      if (voiceToApply.id == _preferredVoiceId) {
+        _selectedVoice = voiceToApply;
+      }
+      _activeLocale = voiceToApply.locale;
+    } else {
+      _activeVoice = null;
+    }
   }
 
   void _resolveEffectiveLanguage(String text) {
@@ -421,47 +504,70 @@ class ReaderTtsService extends ChangeNotifier {
     await _flutterTts.setSpeechRate(_rate);
   }
 
-  Future<void> _refreshAvailableLanguages() async {
-    for (var attempt = 0; attempt < 3; attempt++) {
-      try {
-        final voiceLanguages = _extractVoiceLanguages(
-          await _flutterTts.getVoices,
-        );
+  Future<void> _refreshAvailableLanguages({
+    bool waitForAdditionalVoices = false,
+  }) async {
+    final maximumAttempts = waitForAdditionalVoices ? 6 : 3;
+    var richestVoiceCatalog = <ReaderNarrationVoice>[];
+    var richestLanguageCatalog = <String>[];
 
-        if (voiceLanguages.isNotEmpty) {
-          _availableLanguages = voiceLanguages;
-          return;
+    for (var attempt = 0; attempt < maximumAttempts; attempt++) {
+      try {
+        final voices = _extractVoices(await _flutterTts.getVoices);
+        final voiceLanguages = voices.map((voice) => voice.locale).toList();
+
+        if (voices.length > richestVoiceCatalog.length) {
+          richestVoiceCatalog = voices;
+        }
+        if (voiceLanguages.length > richestLanguageCatalog.length) {
+          richestLanguageCatalog = voiceLanguages;
         }
 
-        final languageList = _extractLanguageList(
-          await _flutterTts.getLanguages,
-        );
+        if (!waitForAdditionalVoices && voiceLanguages.isNotEmpty) {
+          break;
+        }
 
-        if (languageList.isNotEmpty) {
-          _availableLanguages = languageList;
-          return;
+        if (voiceLanguages.isEmpty) {
+          final languageList = _extractLanguageList(
+            await _flutterTts.getLanguages,
+          );
+
+          if (languageList.length > richestLanguageCatalog.length) {
+            richestLanguageCatalog = languageList;
+          }
+          if (!waitForAdditionalVoices && languageList.isNotEmpty) {
+            break;
+          }
         }
       } catch (_) {
         break;
       }
 
-      if (attempt < 2) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+      if (attempt < maximumAttempts - 1) {
+        await Future<void>.delayed(
+          Duration(milliseconds: waitForAdditionalVoices ? 400 : 100),
+        );
       }
     }
 
-    _availableLanguages = [];
+    _availableVoices = richestVoiceCatalog;
+    _availableLanguages = richestVoiceCatalog.isNotEmpty
+        ? richestVoiceCatalog.map((voice) => voice.locale).toList()
+        : richestLanguageCatalog;
   }
 
-  List<String> _extractVoiceLanguages(dynamic voices) {
+  List<ReaderNarrationVoice> _extractVoices(dynamic voices) {
     if (voices is! List) return [];
 
     return voices
         .whereType<Map>()
-        .map((voice) => voice['locale'])
-        .whereType<String>()
-        .where((locale) => locale.trim().isNotEmpty)
-        .toSet()
+        .map(ReaderNarrationVoice.fromMap)
+        .where((voice) => voice.name.isNotEmpty && voice.locale.isNotEmpty)
+        .fold<Map<String, ReaderNarrationVoice>>({}, (voicesById, voice) {
+          voicesById[voice.id] = voice;
+          return voicesById;
+        })
+        .values
         .toList();
   }
 
@@ -494,6 +600,20 @@ class ReaderTtsService extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  String _voiceCountSummary(ReaderNarrationLanguage language) {
+    final count = _availableVoices
+        .where((voice) => voice.supportsBaseLocale(language.baseLocale))
+        .length;
+
+    if (count == 0) {
+      return _findMatchingLocale(language) == null
+          ? 'not detected'
+          : 'available';
+    }
+
+    return count == 1 ? '1 voice' : '$count voices';
   }
 
   Future<void> _restartActiveNarration({

@@ -1,4 +1,5 @@
 import 'package:ancient_secure_docs/services/reader_tts_service.dart';
+import 'package:ancient_secure_docs/services/reader_narration_voice.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -7,12 +8,18 @@ class FakeFlutterTts extends FlutterTts {
   FakeFlutterTts({
     this.availableLanguages = const ['en-US', 'fr-FR'],
     List<String>? availableVoiceLanguages,
+    this.availableVoices,
+    this.voiceSnapshots,
   }) : availableVoiceLanguages =
            availableVoiceLanguages ?? List.of(availableLanguages);
 
   final List<String> availableLanguages;
   final List<String> availableVoiceLanguages;
+  final List<Map<String, String>>? availableVoices;
+  final List<List<Map<String, String>>>? voiceSnapshots;
+  int voiceRequestCount = 0;
   String? selectedLanguage;
+  Map<String, String>? selectedVoice;
   double? selectedRate;
   String? spokenText;
   int speakCount = 0;
@@ -38,13 +45,29 @@ class FakeFlutterTts extends FlutterTts {
   Future<dynamic> get getLanguages async => availableLanguages;
 
   @override
-  Future<dynamic> get getVoices async => availableVoiceLanguages
-      .map((locale) => {'name': 'Voice $locale', 'locale': locale})
-      .toList();
+  Future<dynamic> get getVoices async {
+    final snapshots = voiceSnapshots;
+    if (snapshots != null && snapshots.isNotEmpty) {
+      final index = voiceRequestCount.clamp(0, snapshots.length - 1);
+      voiceRequestCount++;
+      return snapshots[index];
+    }
+
+    return availableVoices ??
+        availableVoiceLanguages
+            .map((locale) => {'name': 'Voice $locale', 'locale': locale})
+            .toList();
+  }
 
   @override
   Future<dynamic> setLanguage(String language) async {
     selectedLanguage = language;
+    return 1;
+  }
+
+  @override
+  Future<dynamic> setVoice(Map<String, String> voice) async {
+    selectedVoice = voice;
     return 1;
   }
 
@@ -148,6 +171,113 @@ void main() {
     expect(fakeTts.selectedLanguage, 'fr-FR');
     expect(service.rate, ReaderTtsService.maximumRate);
     expect(fakeTts.selectedRate, ReaderTtsService.maximumRate);
+
+    service.dispose();
+  });
+
+  test('exposes and applies a compatible selected narrator voice', () async {
+    final fakeTts = FakeFlutterTts(
+      availableVoices: const [
+        {'name': 'English One', 'locale': 'en-US'},
+        {'name': 'English Two', 'locale': 'en-GB', 'gender': 'Female'},
+        {'name': 'French One', 'locale': 'fr-FR'},
+      ],
+    );
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.initialize();
+
+    expect(service.availableVoicesForActiveLanguage, hasLength(2));
+
+    const voice = ReaderNarrationVoice(
+      name: 'English Two',
+      locale: 'en-GB',
+      gender: 'Female',
+    );
+    await service.setVoice(voice);
+
+    expect(service.selectedVoice?.id, voice.id);
+    expect(service.activeVoice?.id, voice.id);
+    expect(fakeTts.selectedVoice, voice.browserVoice);
+
+    service.dispose();
+  });
+
+  test(
+    'restores a saved narrator voice when voices become available',
+    () async {
+      final fakeTts = FakeFlutterTts(
+        availableVoices: const [
+          {'name': 'English One', 'locale': 'en-US'},
+          {'name': 'English Two', 'locale': 'en-GB'},
+        ],
+      );
+      final service = ReaderTtsService(flutterTts: fakeTts);
+
+      service.restorePreferences(
+        language: ReaderNarrationLanguage.english,
+        rate: 0.75,
+        voiceId: 'browser|en-GB|English Two',
+      );
+      await service.initialize();
+
+      expect(service.selectedVoice?.name, 'English Two');
+      expect(service.activeVoice?.name, 'English Two');
+      expect(fakeTts.selectedVoice, {'name': 'English Two', 'locale': 'en-GB'});
+
+      service.dispose();
+    },
+  );
+
+  test('returns a former subscriber to the assigned narrator', () async {
+    final fakeTts = FakeFlutterTts(
+      availableVoices: const [
+        {'name': 'Assigned Voice', 'locale': 'en-US'},
+        {'name': 'Premium Voice', 'locale': 'en-GB'},
+      ],
+    );
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.initialize();
+    await service.setVoice(
+      const ReaderNarrationVoice(name: 'Premium Voice', locale: 'en-GB'),
+    );
+    await service.useAssignedVoice();
+
+    expect(service.selectedVoice, isNull);
+    expect(service.activeVoice?.name, 'Assigned Voice');
+    expect(fakeTts.selectedVoice, {
+      'name': 'Assigned Voice',
+      'locale': 'en-US',
+    });
+
+    service.dispose();
+  });
+
+  test('manual refresh keeps the richest delayed browser voice list', () async {
+    final fakeTts = FakeFlutterTts(
+      voiceSnapshots: const [
+        [
+          {'name': 'Microsoft David', 'locale': 'en-US'},
+        ],
+        [
+          {'name': 'Microsoft David', 'locale': 'en-US'},
+          {'name': 'Microsoft Zira', 'locale': 'en-US'},
+        ],
+      ],
+    );
+    final service = ReaderTtsService(flutterTts: fakeTts);
+
+    await service.initialize();
+    expect(service.availableVoicesForActiveLanguage, hasLength(1));
+
+    await service.refreshVoices();
+
+    expect(service.availableVoicesForActiveLanguage, hasLength(2));
+    expect(
+      service.detectedVoiceSummary,
+      'English 2 voices | French not detected',
+    );
 
     service.dispose();
   });
@@ -321,7 +451,7 @@ void main() {
     expect(service.hasFrenchVoice, isFalse);
     expect(
       service.detectedVoiceSummary,
-      'English available | French not detected',
+      'English 1 voice | French not detected',
     );
     expect(
       service.errorMessage,

@@ -6,10 +6,12 @@ void main() {
     final preferences = ReaderNarrationPreferences.fromMap({
       'languageMode': 'auto',
       'rate': 0.75,
+      'voiceId': 'browser|en-US|Premium Voice',
     });
 
     expect(preferences.languageMode, 'auto');
     expect(preferences.rate, 0.75);
+    expect(preferences.voiceId, 'browser|en-US|Premium Voice');
   });
 
   test('uses safe defaults for invalid stored narration preferences', () {
@@ -19,5 +21,6 @@ void main() {
 
     expect(preferences.languageMode, 'en-US');
     expect(preferences.rate, 0.5);
+    expect(preferences.voiceId, isNull);
   });
 }

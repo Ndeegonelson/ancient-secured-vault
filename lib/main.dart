@@ -9,6 +9,8 @@ import 'services/reader_tts_service.dart';
 import 'services/reader_narration_progress_repository.dart';
 import 'services/reader_narration_navigator.dart';
 import 'services/reader_narration_preferences_repository.dart';
+import 'services/reader_narration_access_policy.dart';
+import 'services/reader_narration_voice.dart';
 import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
 import 'widgets/reader_narration_dialog.dart';
@@ -1500,6 +1502,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       String currentSearchQuery = '';
       bool isCheckingViewerAccess = true;
       bool canViewDocument = false;
+      UserAccessState readerUserAccess = const UserAccessState();
       bool readerSessionStarted = false;
       bool showReaderStatusOverlay = true;
       DateTime? readerSessionStartedAt;
@@ -1531,6 +1534,13 @@ String get readerDocumentKey {
 String get readerSourceLabel => widget.openSource.replaceAll('_', ' ');
 
 String get readerAccessLabel => widget.accessLevel.trim().toUpperCase();
+
+ReaderNarrationAccessPolicy get narrationAccessPolicy {
+  return ReaderNarrationAccessPolicy.fromUserAccess(
+    isAdmin: readerUserAccess.isAdmin,
+    hasActiveSubscription: readerUserAccess.hasActiveSubscription,
+  );
+}
 
 String twoDigits(int value) => value.toString().padLeft(2, '0');
 
@@ -1631,6 +1641,7 @@ Future<void> checkViewerAccess() async {
   if (!mounted) return;
 
   setState(() {
+    readerUserAccess = access;
     canViewDocument = canOpen;
     isCheckingViewerAccess = false;
   });
@@ -2139,6 +2150,24 @@ Future<List<Map<String, dynamic>>> searchPdfText(String keyword) async {
   }
 }
 
+bool canUsePremiumNarration(String attemptedAction) {
+  if (narrationAccessPolicy.canChooseVoice) return true;
+
+  logReaderAction(
+    action: 'blocked_narration_feature_attempt',
+    details: {
+      'attemptedAction': attemptedAction,
+      'narrationPlan': narrationAccessPolicy.plan.name,
+    },
+  );
+
+  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(narrationAccessPolicy.upgradeMessage)),
+  );
+  return false;
+}
+
 Future<String> loadNarrationTextForPage(int pageNumber) async {
   final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
   final cachedText = narrationPageTextCache[safePageNumber];
@@ -2215,6 +2244,7 @@ Future<void> loadNarrationPreferences() async {
     readerTtsService.restorePreferences(
       language: language,
       rate: preferences.rate,
+      voiceId: preferences.voiceId,
     );
   } catch (_) {
     // Narration remains available with defaults if cloud preferences fail.
@@ -2232,6 +2262,7 @@ Future<void> saveNarrationPreferences() async {
       preferences: ReaderNarrationPreferences(
         languageMode: readerTtsService.language.locale,
         rate: readerTtsService.rate,
+        voiceId: readerTtsService.selectedVoice?.id,
       ),
     );
   } catch (_) {
@@ -2437,8 +2468,13 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
   await narrationPreferencesReady;
   if (!mounted) return;
 
+  if (!narrationAccessPolicy.canChooseVoice) {
+    await readerTtsService.useAssignedVoice();
+  }
+
   final narrationPage = currentPdfPage;
   final isSelectedPassage = selectedText != null;
+  final allowContinuousNarration = !isSelectedPassage;
   var selectedPassageTracked = false;
   void prepareNarrationMode() {
     if (isSelectedPassage) {
@@ -2475,6 +2511,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
         pageNumber: narrationPage,
         narrationText: narrationText,
         savedCheckpoint: savedCheckpoint,
+        accessPolicy: narrationAccessPolicy,
         sessionTracker: narrationSessionTracker,
         title: isSelectedPassage
             ? 'Selected Passage Narration'
@@ -2487,6 +2524,26 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             action: 'change_narration_language',
             details: {
               'language': language.locale,
+              'pageNumber': activePage,
+            },
+          );
+        },
+        onVoiceChanged: (ReaderNarrationVoice voice) async {
+          if (!narrationAccessPolicy.canChooseVoice) {
+            canUsePremiumNarration('change_narration_voice');
+            return;
+          }
+
+          await readerTtsService.setVoice(voice);
+          await saveNarrationPreferences();
+          final activePage = readerTtsService.pageNumber ?? narrationPage;
+          await logReaderAction(
+            action: 'change_narration_voice',
+            details: {
+              'voiceId': voice.id,
+              'voiceName': voice.name,
+              'voiceLocale': voice.locale,
+              'voiceProvider': voice.provider.name,
               'pageNumber': activePage,
             },
           );
@@ -2518,7 +2575,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             text: text,
             pageNumber: activePage,
             startCharacter: startCharacter,
-            continueAcrossPages: !isSelectedPassage,
+            continueAcrossPages: allowContinuousNarration,
           );
 
           if (started) {
@@ -2604,7 +2661,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             text: text,
             pageNumber: activePage,
             startCharacter: jump.offset,
-            continueAcrossPages: !isSelectedPassage,
+            continueAcrossPages: allowContinuousNarration,
           );
 
           if (started) {
@@ -2661,7 +2718,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             text: text,
             pageNumber: activePage,
             startCharacter: jump.offset,
-            continueAcrossPages: !isSelectedPassage,
+            continueAcrossPages: allowContinuousNarration,
           );
 
           if (started) {
