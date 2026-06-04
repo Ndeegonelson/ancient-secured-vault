@@ -47,6 +47,7 @@ void main() {
         projectId: 'ancient--docs',
         region: 'europe-west1',
         authTokenProvider: () async => null,
+        requiresAppCheckToken: false,
         httpClient: MockClient((request) async {
           capturedUri = request.url;
           return http.Response(
@@ -70,10 +71,41 @@ void main() {
     },
   );
 
+  test(
+    'stops before network when required app check token is missing',
+    () async {
+      var networkCalls = 0;
+      final client = ReaderCloudNarrationHttpCallableClient(
+        projectId: 'ancient--docs',
+        authTokenProvider: () async => 'user-token',
+        appCheckTokenProvider: () async => null,
+        httpClient: MockClient((request) async {
+          networkCalls++;
+          return http.Response('{}', 200);
+        }),
+      );
+
+      await expectLater(
+        client.call('cloudNarrationCatalog', const {}),
+        throwsA(
+          isA<ReaderCloudNarrationCallableException>()
+              .having(
+                (error) => error.message,
+                'message',
+                'Secure cloud narration is waiting for App Check setup.',
+              )
+              .having((error) => error.code, 'code', 'failed-precondition'),
+        ),
+      );
+      expect(networkCalls, 0);
+    },
+  );
+
   test('throws readable error for Firebase callable errors', () async {
     final client = ReaderCloudNarrationHttpCallableClient(
       projectId: 'ancient--docs',
       authTokenProvider: () async => null,
+      requiresAppCheckToken: false,
       httpClient: MockClient((request) async {
         return http.Response(
           jsonEncode({
@@ -105,6 +137,7 @@ void main() {
     final client = ReaderCloudNarrationHttpCallableClient(
       projectId: 'ancient--docs',
       authTokenProvider: () async => null,
+      requiresAppCheckToken: false,
       httpClient: MockClient((request) async {
         return http.Response('not-json', 200);
       }),

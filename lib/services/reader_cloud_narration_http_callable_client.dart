@@ -27,6 +27,7 @@ class ReaderCloudNarrationHttpCallableClient
     required this.projectId,
     required this.authTokenProvider,
     this.appCheckTokenProvider,
+    this.requiresAppCheckToken = true,
     this.region = 'us-central1',
     this.httpClient,
     this.originOverride,
@@ -36,6 +37,7 @@ class ReaderCloudNarrationHttpCallableClient
     required FirebaseOptions options,
     FirebaseAuth? auth,
     ReaderCloudNarrationTokenProvider? appCheckTokenProvider,
+    bool requiresAppCheckToken = true,
     String region = 'us-central1',
     http.Client? httpClient,
     Uri? originOverride,
@@ -48,6 +50,7 @@ class ReaderCloudNarrationHttpCallableClient
       originOverride: originOverride,
       authTokenProvider: () async => firebaseAuth.currentUser?.getIdToken(),
       appCheckTokenProvider: appCheckTokenProvider,
+      requiresAppCheckToken: requiresAppCheckToken,
     );
   }
 
@@ -57,6 +60,7 @@ class ReaderCloudNarrationHttpCallableClient
   final Uri? originOverride;
   final ReaderCloudNarrationTokenProvider authTokenProvider;
   final ReaderCloudNarrationTokenProvider? appCheckTokenProvider;
+  final bool requiresAppCheckToken;
 
   @override
   Future<Map<String, dynamic>> call(
@@ -108,6 +112,11 @@ class ReaderCloudNarrationHttpCallableClient
     final appCheckToken = await appCheckTokenProvider?.call();
     if (appCheckToken != null && appCheckToken.trim().isNotEmpty) {
       headers['X-Firebase-AppCheck'] = appCheckToken.trim();
+    } else if (requiresAppCheckToken) {
+      throw const ReaderCloudNarrationCallableException(
+        'Secure cloud narration is waiting for App Check setup.',
+        code: 'failed-precondition',
+      );
     }
 
     return headers;
