@@ -6,6 +6,51 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('readiness is ready when auth and app check tokens exist', () async {
+    final client = ReaderCloudNarrationHttpCallableClient(
+      projectId: 'ancient--docs',
+      authTokenProvider: () async => 'user-token',
+      appCheckTokenProvider: () async => 'app-check-token',
+    );
+
+    final readiness = await client.checkReadiness();
+
+    expect(readiness.isReady, isTrue);
+    expect(readiness.message, 'Secure cloud narration is ready.');
+  });
+
+  test('readiness asks user to sign in when auth token is missing', () async {
+    final client = ReaderCloudNarrationHttpCallableClient(
+      projectId: 'ancient--docs',
+      authTokenProvider: () async => null,
+      appCheckTokenProvider: () async => 'app-check-token',
+    );
+
+    final readiness = await client.checkReadiness();
+
+    expect(readiness.isReady, isFalse);
+    expect(readiness.message, 'Sign in before using cloud narration.');
+  });
+
+  test(
+    'readiness reports missing app check setup before catalog loading',
+    () async {
+      final client = ReaderCloudNarrationHttpCallableClient(
+        projectId: 'ancient--docs',
+        authTokenProvider: () async => 'user-token',
+        appCheckTokenProvider: () async => null,
+      );
+
+      final readiness = await client.checkReadiness();
+
+      expect(readiness.isReady, isFalse);
+      expect(
+        readiness.message,
+        'Secure cloud narration is waiting for App Check setup.',
+      );
+    },
+  );
+
   test('posts callable request with auth and app check headers', () async {
     late http.Request capturedRequest;
     final client = ReaderCloudNarrationHttpCallableClient(

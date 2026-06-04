@@ -27,6 +27,21 @@ class TestCallableClient implements ReaderCloudNarrationCallableClient {
   }
 }
 
+class TestReadinessCallableClient extends TestCallableClient
+    implements ReaderCloudNarrationCallableReadinessClient {
+  TestReadinessCallableClient({
+    required super.responses,
+    required this.readiness,
+  });
+
+  final ReaderCloudNarrationCallableReadiness readiness;
+
+  @override
+  Future<ReaderCloudNarrationCallableReadiness> checkReadiness() async {
+    return readiness;
+  }
+}
+
 void main() {
   test(
     'loads backend-approved cloud voices without exposing provider internals',
@@ -85,6 +100,36 @@ void main() {
 
     expect(voices, isEmpty);
   });
+
+  test(
+    'reports unavailable before loading catalog when security is not ready',
+    () async {
+      final client = TestReadinessCallableClient(
+        responses: {
+          'cloudNarrationCatalog': {'status': 'ready', 'voices': const []},
+        },
+        readiness: const ReaderCloudNarrationCallableReadiness.unavailable(
+          message: 'Secure cloud narration is waiting for App Check setup.',
+        ),
+      );
+      final provider = ReaderCloudNarrationCallableProvider(client: client);
+      final registry = ReaderCloudNarrationRegistry(providers: [provider]);
+
+      final catalog = await registry.loadCatalog();
+      final status = catalog.providerStatuses[provider.key];
+
+      expect(
+        status?.state,
+        ReaderCloudNarrationProviderState.temporarilyUnavailable,
+      );
+      expect(
+        status?.message,
+        'Secure cloud narration is waiting for App Check setup.',
+      );
+      expect(catalog.voices, isEmpty);
+      expect(client.calls, isEmpty);
+    },
+  );
 
   test('sends only approved backend voice id for synthesis', () async {
     final audioBytes = [82, 73, 70, 70];

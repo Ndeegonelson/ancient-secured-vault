@@ -22,7 +22,9 @@ class ReaderCloudNarrationCallableException implements Exception {
 }
 
 class ReaderCloudNarrationHttpCallableClient
-    implements ReaderCloudNarrationCallableClient {
+    implements
+        ReaderCloudNarrationCallableClient,
+        ReaderCloudNarrationCallableReadinessClient {
   const ReaderCloudNarrationHttpCallableClient({
     required this.projectId,
     required this.authTokenProvider,
@@ -61,6 +63,33 @@ class ReaderCloudNarrationHttpCallableClient
   final ReaderCloudNarrationTokenProvider authTokenProvider;
   final ReaderCloudNarrationTokenProvider? appCheckTokenProvider;
   final bool requiresAppCheckToken;
+
+  @override
+  Future<ReaderCloudNarrationCallableReadiness> checkReadiness() async {
+    try {
+      final authToken = await authTokenProvider();
+      if (authToken == null || authToken.trim().isEmpty) {
+        return const ReaderCloudNarrationCallableReadiness.unavailable(
+          message: 'Sign in before using cloud narration.',
+        );
+      }
+
+      if (requiresAppCheckToken) {
+        final appCheckToken = await appCheckTokenProvider?.call();
+        if (appCheckToken == null || appCheckToken.trim().isEmpty) {
+          return const ReaderCloudNarrationCallableReadiness.unavailable(
+            message: 'Secure cloud narration is waiting for App Check setup.',
+          );
+        }
+      }
+
+      return const ReaderCloudNarrationCallableReadiness.ready();
+    } catch (_) {
+      return const ReaderCloudNarrationCallableReadiness.unavailable(
+        message: 'Cloud narration security status could not be verified.',
+      );
+    }
+  }
 
   @override
   Future<Map<String, dynamic>> call(

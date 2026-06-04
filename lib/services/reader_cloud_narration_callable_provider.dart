@@ -11,6 +11,23 @@ abstract interface class ReaderCloudNarrationCallableClient {
   );
 }
 
+class ReaderCloudNarrationCallableReadiness {
+  const ReaderCloudNarrationCallableReadiness.ready({
+    this.message = 'Secure cloud narration is ready.',
+  }) : isReady = true;
+
+  const ReaderCloudNarrationCallableReadiness.unavailable({
+    required this.message,
+  }) : isReady = false;
+
+  final bool isReady;
+  final String message;
+}
+
+abstract interface class ReaderCloudNarrationCallableReadinessClient {
+  Future<ReaderCloudNarrationCallableReadiness> checkReadiness();
+}
+
 class ReaderCloudNarrationCallableProvider
     implements ReaderCloudNarrationProvider {
   const ReaderCloudNarrationCallableProvider({
@@ -40,6 +57,18 @@ class ReaderCloudNarrationCallableProvider
 
   @override
   Future<ReaderCloudNarrationProviderStatus> checkStatus() async {
+    if (client is ReaderCloudNarrationCallableReadinessClient) {
+      final readinessClient =
+          client as ReaderCloudNarrationCallableReadinessClient;
+      final readiness = await readinessClient.checkReadiness();
+      if (!readiness.isReady) {
+        return ReaderCloudNarrationProviderStatus(
+          state: ReaderCloudNarrationProviderState.temporarilyUnavailable,
+          message: readiness.message,
+        );
+      }
+    }
+
     return ReaderCloudNarrationProviderStatus(
       state: ReaderCloudNarrationProviderState.ready,
       message: '$providerName is ready.',
