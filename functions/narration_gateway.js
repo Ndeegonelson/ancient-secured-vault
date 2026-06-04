@@ -28,16 +28,19 @@ function createNarrationCatalogHandler({loadUserAccess, loadCatalog}) {
 
 function createNarrationSynthesisHandler({
   loadUserAccess,
+  authorizeVoice,
   consumeUsage,
   synthesize,
 }) {
   requireDependency(loadUserAccess, "loadUserAccess");
+  requireDependency(authorizeVoice, "authorizeVoice");
   requireDependency(consumeUsage, "consumeUsage");
   requireDependency(synthesize, "synthesize");
 
   return async (request) => {
     const access = await requireCloudNarrationAccess(request, loadUserAccess);
     const input = validateSynthesisInput(request.data);
+    await authorizeVoiceSafely(() => authorizeVoice(input.voiceId));
     await consumeUsageSafely(() => consumeUsage({
       uid: request.auth.uid,
       access,
@@ -356,6 +359,22 @@ async function consumeUsageSafely(operation) {
     throw new HttpsError(
         "unavailable",
         "Cloud narration allowance could not be verified.",
+    );
+  }
+}
+
+async function authorizeVoiceSafely(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof HttpsError &&
+        (error.code === "failed-precondition" ||
+         error.code === "invalid-argument")) {
+      throw error;
+    }
+    throw new HttpsError(
+        "unavailable",
+        "The selected cloud narrator could not be verified.",
     );
   }
 }

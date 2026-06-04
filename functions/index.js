@@ -1,5 +1,5 @@
 const {setGlobalOptions} = require("firebase-functions");
-const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onCall} = require("firebase-functions/v2/https");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
 const {
@@ -9,10 +9,14 @@ const {
 const {
   createNarrationUsageQuota,
 } = require("./narration_usage_quota");
+const {
+  createNarrationProviderRegistry,
+} = require("./narration_provider_registry");
 
 initializeApp();
 const firestore = getFirestore();
 const narrationUsageQuota = createNarrationUsageQuota({firestore});
+const narrationProviderRegistry = createNarrationProviderRegistry();
 
 setGlobalOptions({maxInstances: 10});
 
@@ -28,17 +32,6 @@ async function loadUserAccess({uid, email}) {
   return null;
 }
 
-async function loadCloudNarrationCatalog() {
-  return [];
-}
-
-async function synthesizeCloudNarration() {
-  throw new HttpsError(
-      "failed-precondition",
-      "A protected cloud narration provider has not been configured yet.",
-  );
-}
-
 exports.cloudNarrationCatalog = onCall(
     {
       enforceAppCheck: true,
@@ -47,7 +40,7 @@ exports.cloudNarrationCatalog = onCall(
     },
     createNarrationCatalogHandler({
       loadUserAccess,
-      loadCatalog: loadCloudNarrationCatalog,
+      loadCatalog: narrationProviderRegistry.loadCatalog,
     }),
 );
 
@@ -60,7 +53,8 @@ exports.synthesizeCloudNarration = onCall(
     },
     createNarrationSynthesisHandler({
       loadUserAccess,
+      authorizeVoice: narrationProviderRegistry.authorizeVoice,
       consumeUsage: narrationUsageQuota.consume,
-      synthesize: synthesizeCloudNarration,
+      synthesize: narrationProviderRegistry.synthesize,
     }),
 );

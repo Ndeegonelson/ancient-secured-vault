@@ -34,6 +34,7 @@ function expectHttpsCode(code) {
 
 function createTestSynthesisHandler(options) {
   return createNarrationSynthesisHandler({
+    authorizeVoice: async () => {},
     consumeUsage: async () => {},
     ...options,
   });
@@ -173,10 +174,13 @@ test("free users cannot consume quota or call the paid provider", async () => {
   assert.equal(synthesisCalls, 0);
 });
 
-test("synthesis consumes server usage before calling a paid provider", async () => {
+test("synthesis authorizes voice and usage before calling a paid provider", async () => {
   const events = [];
   const handler = createTestSynthesisHandler({
     loadUserAccess: async () => premiumAccess,
+    authorizeVoice: async (voiceId) => {
+      events.push(["voice", voiceId]);
+    },
     consumeUsage: async (usage) => {
       events.push(["usage", usage]);
     },
@@ -197,13 +201,46 @@ test("synthesis consumes server usage before calling a paid provider", async () 
     rate: 1,
   }));
 
-  assert.equal(events[0][0], "usage");
-  assert.deepEqual(events[0][1], {
+  assert.deepEqual(events[0], ["voice", "provider-voice-1"]);
+  assert.equal(events[1][0], "usage");
+  assert.deepEqual(events[1][1], {
     uid: "reader-123",
     access: premiumAccess,
     characterCount: 20,
   });
-  assert.equal(events[1][0], "provider");
+  assert.equal(events[2][0], "provider");
+});
+
+test("unknown narrator is rejected before quota and provider access", async () => {
+  let usageCalls = 0;
+  let synthesisCalls = 0;
+  const handler = createTestSynthesisHandler({
+    loadUserAccess: async () => premiumAccess,
+    authorizeVoice: async () => {
+      throw new HttpsError(
+          "failed-precondition",
+          "The selected cloud narrator is not currently available.",
+      );
+    },
+    consumeUsage: async () => {
+      usageCalls++;
+    },
+    synthesize: async () => {
+      synthesisCalls++;
+      return {};
+    },
+  });
+
+  await assert.rejects(
+      handler(authenticatedRequest({
+        text: "Protected narration.",
+        voiceId: "unknown-provider:unknown-voice",
+        rate: 1,
+      })),
+      expectHttpsCode("failed-precondition"),
+  );
+  assert.equal(usageCalls, 0);
+  assert.equal(synthesisCalls, 0);
 });
 
 test("exhausted allowance blocks the paid provider call", async () => {
