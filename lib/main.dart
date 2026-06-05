@@ -15,6 +15,7 @@ import 'services/reader_narration_voice.dart';
 import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
 import 'services/reader_narration_playback_coordinator.dart';
+import 'services/reader_narration_voice_catalog_presenter.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
@@ -1516,6 +1517,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       late final ReaderNarrationSessionRepository narrationSessionRepository;
       late final ReaderNarrationSessionTracker narrationSessionTracker;
       late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
+      late final ReaderNarrationVoiceCatalogPresenter narrationVoicePresenter;
       late final ReaderNarrationNavigator narrationNavigator;
       late final Future<void> narrationPreferencesReady;
       final Map<int, String> narrationPageTextCache = {};
@@ -1551,6 +1553,15 @@ ReaderNarrationAccessPolicy get narrationAccessPolicy {
   return ReaderNarrationAccessPolicy.fromUserAccess(
     isAdmin: readerUserAccess.isAdmin,
     hasActiveSubscription: readerUserAccess.hasActiveSubscription,
+  );
+}
+
+ReaderNarrationVoiceCatalogViewModel narrationVoiceCatalogView() {
+  final snapshot = narrationPlaybackCoordinator.snapshot();
+  return narrationVoicePresenter.present(
+    catalog: snapshot.catalog,
+    activeVoice: readerTtsService.activeVoice,
+    activeLocale: readerTtsService.activeLocale,
   );
 }
 
@@ -2498,6 +2509,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
         narrationText: narrationText,
         savedCheckpoint: savedCheckpoint,
         accessPolicy: narrationAccessPolicy,
+        voiceCatalog: narrationVoiceCatalogView,
         sessionTracker: narrationSessionTracker,
         title: isSelectedPassage
             ? 'Selected Passage Narration'
@@ -2757,6 +2769,7 @@ void initState() {
     ttsService: readerTtsService,
     accessPolicyProvider: () => narrationAccessPolicy,
   );
+  narrationVoicePresenter = const ReaderNarrationVoiceCatalogPresenter();
   narrationNavigator = ReaderNarrationNavigator();
   readerTtsService.addListener(observeNarrationSession);
   narrationPreferencesReady = loadNarrationPreferences();
