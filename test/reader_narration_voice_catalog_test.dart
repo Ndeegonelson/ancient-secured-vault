@@ -2,7 +2,69 @@ import 'package:ancient_secure_docs/services/reader_cloud_narration_provider.dar
 import 'package:ancient_secure_docs/services/reader_narration_access_policy.dart';
 import 'package:ancient_secure_docs/services/reader_narration_voice.dart';
 import 'package:ancient_secure_docs/services/reader_narration_voice_catalog.dart';
+import 'package:ancient_secure_docs/services/reader_tts_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+
+class CatalogTestFlutterTts extends FlutterTts {
+  CatalogTestFlutterTts({
+    this.availableLanguages = const ['en-US', 'fr-FR'],
+    this.availableVoices = const [
+      {'name': 'Microsoft David', 'locale': 'en-US'},
+      {'name': 'Microsoft Zira', 'locale': 'en-US'},
+      {'name': 'Microsoft Hortense', 'locale': 'fr-FR'},
+    ],
+  });
+
+  final List<String> availableLanguages;
+  final List<Map<String, String>> availableVoices;
+
+  @override
+  Future<dynamic> awaitSpeakCompletion(bool awaitCompletion) async => 1;
+
+  @override
+  Future<dynamic> setVolume(double volume) async => 1;
+
+  @override
+  Future<dynamic> setPitch(double pitch) async => 1;
+
+  @override
+  Future<dynamic> get getLanguages async => availableLanguages;
+
+  @override
+  Future<dynamic> get getVoices async => availableVoices;
+
+  @override
+  Future<dynamic> setLanguage(String language) async => 1;
+
+  @override
+  Future<dynamic> setVoice(Map<String, String> voice) async => 1;
+
+  @override
+  Future<dynamic> setSpeechRate(double rate) async => 1;
+
+  @override
+  void setStartHandler(VoidCallback callback) {}
+
+  @override
+  void setPauseHandler(VoidCallback callback) {}
+
+  @override
+  void setContinueHandler(VoidCallback callback) {}
+
+  @override
+  void setCompletionHandler(VoidCallback callback) {}
+
+  @override
+  void setCancelHandler(VoidCallback callback) {}
+
+  @override
+  void setProgressHandler(ProgressHandler callback) {}
+
+  @override
+  void setErrorHandler(ErrorHandler callback) {}
+}
 
 const browserEnglishDavid = ReaderNarrationVoice(
   name: 'Microsoft David',
@@ -70,6 +132,28 @@ void main() {
       catalog.cloudAvailabilityMessage,
       'Premium narration is required for cloud and customized voices.',
     );
+  });
+
+  test('builds catalog from live TTS service voice snapshot', () async {
+    final ttsService = ReaderTtsService(flutterTts: CatalogTestFlutterTts());
+    ttsService.restorePreferences(
+      language: ReaderNarrationLanguage.english,
+      rate: ReaderTtsService.defaultRate,
+      voiceId: browserEnglishZira.id,
+    );
+    await ttsService.initialize();
+
+    final catalog = builder.buildFromServices(
+      accessPolicy: policy(hasActiveSubscription: true),
+      ttsService: ttsService,
+    );
+
+    expect(catalog.locale, 'en-US');
+    expect(catalog.browserVoices, [browserEnglishDavid, browserEnglishZira]);
+    expect(catalog.defaultVoice, browserEnglishZira);
+    expect(catalog.selectableVoices, [browserEnglishDavid, browserEnglishZira]);
+
+    ttsService.dispose();
   });
 
   test('premium users can choose browser and approved cloud voices', () {

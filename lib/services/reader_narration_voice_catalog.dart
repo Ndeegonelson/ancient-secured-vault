@@ -1,6 +1,8 @@
 import 'reader_cloud_narration_provider.dart';
+import 'reader_cloud_narration_session_coordinator.dart';
 import 'reader_narration_access_policy.dart';
 import 'reader_narration_voice.dart';
+import 'reader_tts_service.dart';
 
 class ReaderNarrationVoiceCatalog {
   const ReaderNarrationVoiceCatalog({
@@ -53,6 +55,21 @@ class ReaderNarrationVoiceCatalog {
 
 class ReaderNarrationVoiceCatalogBuilder {
   const ReaderNarrationVoiceCatalogBuilder();
+
+  ReaderNarrationVoiceCatalog buildFromServices({
+    required ReaderNarrationAccessPolicy accessPolicy,
+    required ReaderTtsService ttsService,
+    ReaderCloudNarrationSessionCoordinator? cloudSession,
+  }) {
+    return build(
+      accessPolicy: accessPolicy,
+      locale: ttsService.effectiveLanguage.locale,
+      browserVoices: ttsService.availableBrowserVoices,
+      cloudVoices: cloudSession?.availableVoices ?? const [],
+      providerStatuses: cloudSession?.providerStatuses ?? const {},
+      preferredVoiceId: ttsService.preferredVoiceId,
+    );
+  }
 
   ReaderNarrationVoiceCatalog build({
     required ReaderNarrationAccessPolicy accessPolicy,
