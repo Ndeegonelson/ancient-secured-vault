@@ -7,7 +7,10 @@ import 'package:ancient_secure_docs/services/reader_narration_voice.dart';
 import 'package:ancient_secure_docs/services/reader_narration_voice_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-class RouterTestBrowserDelegate implements ReaderBrowserNarrationDelegate {
+class RouterTestBrowserDelegate
+    implements
+        ReaderBrowserNarrationDelegate,
+        ReaderNarrationPlaybackStatusSource {
   ReaderNarrationVoice? selectedVoice;
   int starts = 0;
   int pauses = 0;
@@ -15,6 +18,22 @@ class RouterTestBrowserDelegate implements ReaderBrowserNarrationDelegate {
   int stops = 0;
   bool startResult = true;
   bool resumeResult = true;
+  int progressPercent = 0;
+  int characterStart = 0;
+  int characterEnd = 0;
+  String? statusError;
+
+  @override
+  int get playbackProgressPercent => progressPercent;
+
+  @override
+  int get playbackCharacterStart => characterStart;
+
+  @override
+  int get playbackCharacterEnd => characterEnd;
+
+  @override
+  String? get playbackErrorMessage => statusError;
 
   @override
   Future<void> setVoice(ReaderNarrationVoice voice) async {
@@ -49,7 +68,10 @@ class RouterTestBrowserDelegate implements ReaderBrowserNarrationDelegate {
   }
 }
 
-class RouterTestCloudDelegate implements ReaderCloudNarrationDelegate {
+class RouterTestCloudDelegate
+    implements
+        ReaderCloudNarrationDelegate,
+        ReaderNarrationPlaybackStatusSource {
   ReaderNarrationVoice? selectedVoice;
   int starts = 0;
   int pauses = 0;
@@ -57,6 +79,22 @@ class RouterTestCloudDelegate implements ReaderCloudNarrationDelegate {
   int stops = 0;
   bool selectResult = true;
   bool startResult = true;
+  int progressPercent = 0;
+  int characterStart = 0;
+  int characterEnd = 0;
+  String? statusError;
+
+  @override
+  int get playbackProgressPercent => progressPercent;
+
+  @override
+  int get playbackCharacterStart => characterStart;
+
+  @override
+  int get playbackCharacterEnd => characterEnd;
+
+  @override
+  String? get playbackErrorMessage => statusError;
 
   @override
   Future<bool> selectCloudVoice(ReaderNarrationVoice voice) async {
@@ -161,7 +199,10 @@ ReaderNarrationPlaybackStartRequest requestFor(
 
 void main() {
   test('routes browser playback through browser delegate', () async {
-    final browser = RouterTestBrowserDelegate();
+    final browser = RouterTestBrowserDelegate()
+      ..progressPercent = 35
+      ..characterStart = 10
+      ..characterEnd = 20;
     final cloud = RouterTestCloudDelegate();
     final router = ReaderNarrationPlaybackRouter(
       browserDelegate: browser,
@@ -176,6 +217,9 @@ void main() {
     expect(router.activeEngine, ReaderNarrationPlaybackEngine.browser);
     expect(router.state, ReaderNarrationRouterState.playing);
     expect(router.isPlaying, isTrue);
+    expect(router.status.progressPercent, 35);
+    expect(router.status.currentCharacterStart, 10);
+    expect(router.status.currentCharacterEnd, 20);
     expect(browser.selectedVoice, browserVoice);
     expect(browser.starts, 1);
     expect(cloud.stops, 1);
@@ -184,7 +228,10 @@ void main() {
 
   test('routes cloud playback through cloud delegate', () async {
     final browser = RouterTestBrowserDelegate();
-    final cloud = RouterTestCloudDelegate();
+    final cloud = RouterTestCloudDelegate()
+      ..progressPercent = 72
+      ..characterStart = 40
+      ..characterEnd = 55;
     final router = ReaderNarrationPlaybackRouter(
       browserDelegate: browser,
       cloudDelegate: cloud,
@@ -198,6 +245,9 @@ void main() {
     expect(router.activeEngine, ReaderNarrationPlaybackEngine.cloud);
     expect(router.state, ReaderNarrationRouterState.playing);
     expect(router.isUsingCloud, isTrue);
+    expect(router.status.progressPercent, 72);
+    expect(router.status.currentCharacterStart, 40);
+    expect(router.status.currentCharacterEnd, 55);
     expect(browser.stops, 1);
     expect(browser.starts, 0);
     expect(cloud.selectedVoice, cloudVoice);
@@ -215,6 +265,10 @@ void main() {
     expect(started, isFalse);
     expect(router.activeEngine, isNull);
     expect(router.state, ReaderNarrationRouterState.error);
+    expect(
+      router.status.errorMessage,
+      'Secure cloud narration is not connected yet.',
+    );
     expect(router.errorMessage, 'Secure cloud narration is not connected yet.');
     expect(browser.starts, 0);
   });
@@ -229,6 +283,7 @@ void main() {
 
     expect(started, isFalse);
     expect(router.state, ReaderNarrationRouterState.error);
+    expect(router.status.errorMessage, 'No narrator.');
     expect(router.errorMessage, 'No narrator.');
     expect(browser.starts, 0);
   });

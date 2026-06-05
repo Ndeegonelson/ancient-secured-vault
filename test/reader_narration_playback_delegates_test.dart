@@ -20,6 +20,7 @@ class DelegateTestFlutterTts extends FlutterTts {
   Map<String, String>? selectedVoice;
   VoidCallback? startCallback;
   VoidCallback? pauseCallback;
+  ProgressHandler? progressCallback;
 
   @override
   Future<dynamic> awaitSpeakCompletion(bool awaitCompletion) async => 1;
@@ -90,10 +91,16 @@ class DelegateTestFlutterTts extends FlutterTts {
   void setCancelHandler(VoidCallback callback) {}
 
   @override
-  void setProgressHandler(ProgressHandler callback) {}
+  void setProgressHandler(ProgressHandler callback) {
+    progressCallback = callback;
+  }
 
   @override
   void setErrorHandler(ErrorHandler callback) {}
+
+  void reportProgress(String text, int start, int end, String word) {
+    progressCallback?.call(text, start, end, word);
+  }
 }
 
 class DelegateTestCloudProvider implements ReaderCloudNarrationProvider {
@@ -218,12 +225,16 @@ void main() {
       startCharacter: 10,
       continueAcrossPages: false,
     );
+    fakeTts.reportProgress('learning text.', 0, 8, 'learning');
     await delegate.pauseBrowserNarration();
     await delegate.stopBrowserNarration();
 
     expect(started, isTrue);
     expect(fakeTts.selectedVoice, browserVoice.browserVoice);
     expect(fakeTts.spokenText, 'learning text.');
+    expect(delegate.playbackProgressPercent, 75);
+    expect(delegate.playbackCharacterStart, 18);
+    expect(delegate.playbackCharacterEnd, 18);
     expect(fakeTts.pauseCount, 1);
     expect(fakeTts.stopCount, greaterThanOrEqualTo(1));
 

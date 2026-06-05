@@ -4,10 +4,24 @@ import 'reader_narration_voice.dart';
 import 'reader_tts_service.dart';
 
 class ReaderTtsBrowserNarrationDelegate
-    implements ReaderBrowserNarrationDelegate {
+    implements
+        ReaderBrowserNarrationDelegate,
+        ReaderNarrationPlaybackStatusSource {
   const ReaderTtsBrowserNarrationDelegate(this.service);
 
   final ReaderTtsService service;
+
+  @override
+  int get playbackProgressPercent => service.progressPercent;
+
+  @override
+  int get playbackCharacterStart => service.currentCharacterOffset;
+
+  @override
+  int get playbackCharacterEnd => service.currentCharacterOffset;
+
+  @override
+  String? get playbackErrorMessage => service.errorMessage;
 
   @override
   Future<void> setVoice(ReaderNarrationVoice voice) {
@@ -46,10 +60,24 @@ class ReaderTtsBrowserNarrationDelegate
 }
 
 class ReaderCloudSessionNarrationDelegate
-    implements ReaderCloudNarrationDelegate {
+    implements
+        ReaderCloudNarrationDelegate,
+        ReaderNarrationPlaybackStatusSource {
   const ReaderCloudSessionNarrationDelegate(this.session);
 
   final ReaderCloudNarrationSessionCoordinator session;
+
+  @override
+  int get playbackProgressPercent => session.progressPercent;
+
+  @override
+  int get playbackCharacterStart => session.currentCharacterStart;
+
+  @override
+  int get playbackCharacterEnd => session.currentCharacterEnd;
+
+  @override
+  String? get playbackErrorMessage => session.errorMessage;
 
   @override
   Future<bool> selectCloudVoice(ReaderNarrationVoice voice) {

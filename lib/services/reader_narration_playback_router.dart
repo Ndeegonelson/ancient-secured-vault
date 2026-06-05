@@ -4,6 +4,31 @@ import 'reader_narration_voice.dart';
 
 enum ReaderNarrationRouterState { idle, playing, paused, stopped, error }
 
+class ReaderNarrationPlaybackStatus {
+  const ReaderNarrationPlaybackStatus({
+    required this.state,
+    required this.engine,
+    required this.progressPercent,
+    required this.currentCharacterStart,
+    required this.currentCharacterEnd,
+    this.errorMessage,
+  });
+
+  final ReaderNarrationRouterState state;
+  final ReaderNarrationPlaybackEngine? engine;
+  final int progressPercent;
+  final int currentCharacterStart;
+  final int currentCharacterEnd;
+  final String? errorMessage;
+}
+
+abstract interface class ReaderNarrationPlaybackStatusSource {
+  int get playbackProgressPercent;
+  int get playbackCharacterStart;
+  int get playbackCharacterEnd;
+  String? get playbackErrorMessage;
+}
+
 abstract interface class ReaderBrowserNarrationDelegate {
   Future<void> setVoice(ReaderNarrationVoice voice);
 
@@ -73,6 +98,32 @@ class ReaderNarrationPlaybackRouter {
   bool get isUsingCloud => _activeEngine == ReaderNarrationPlaybackEngine.cloud;
   bool get isPlaying => _state == ReaderNarrationRouterState.playing;
   bool get isPaused => _state == ReaderNarrationRouterState.paused;
+  ReaderNarrationPlaybackStatus get status {
+    final source = _activeStatusSource;
+    return ReaderNarrationPlaybackStatus(
+      state: _state,
+      engine: _activeEngine,
+      progressPercent: source?.playbackProgressPercent ?? 0,
+      currentCharacterStart: source?.playbackCharacterStart ?? 0,
+      currentCharacterEnd: source?.playbackCharacterEnd ?? 0,
+      errorMessage: _errorMessage ?? source?.playbackErrorMessage,
+    );
+  }
+
+  ReaderNarrationPlaybackStatusSource? get _activeStatusSource {
+    final activeEngine = _activeEngine;
+    return switch (activeEngine) {
+      ReaderNarrationPlaybackEngine.browser =>
+        browserDelegate is ReaderNarrationPlaybackStatusSource
+            ? browserDelegate as ReaderNarrationPlaybackStatusSource
+            : null,
+      ReaderNarrationPlaybackEngine.cloud =>
+        cloudDelegate is ReaderNarrationPlaybackStatusSource
+            ? cloudDelegate as ReaderNarrationPlaybackStatusSource
+            : null,
+      null => null,
+    };
+  }
 
   Future<bool> start(ReaderNarrationPlaybackStartRequest request) async {
     _errorMessage = null;
