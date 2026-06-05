@@ -212,6 +212,8 @@ ReaderNarrationAccessPolicy premiumPolicy() {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('browser delegate forwards commands to ReaderTtsService', () async {
     final fakeTts = DelegateTestFlutterTts();
     final service = ReaderTtsService(flutterTts: fakeTts);

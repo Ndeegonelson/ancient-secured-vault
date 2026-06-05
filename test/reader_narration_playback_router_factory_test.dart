@@ -224,6 +224,8 @@ ReaderNarrationPlaybackStartRequest requestFor(ReaderNarrationVoice voice) {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test(
     'creates a browser-only router when no cloud session is supplied',
     () async {

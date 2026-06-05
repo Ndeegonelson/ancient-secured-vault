@@ -112,6 +112,8 @@ Future<ReaderTtsService> initializedTtsService({
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   const builder = ReaderNarrationPlaybackSnapshotBuilder();
 
   test('free snapshot routes to the assigned browser narrator', () async {

@@ -10,6 +10,7 @@ import 'services/reader_narration_progress_repository.dart';
 import 'services/reader_narration_progress_controller.dart';
 import 'services/reader_narration_navigator.dart';
 import 'services/reader_narration_preferences_repository.dart';
+import 'services/reader_narration_preferences_controller.dart';
 import 'services/reader_narration_access_policy.dart';
 import 'services/reader_narration_voice.dart';
 import 'services/reader_narration_session_repository.dart';
@@ -1514,6 +1515,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       late final ReaderNarrationProgressRepository narrationProgressRepository;
       late final ReaderNarrationProgressController narrationProgressController;
       late final ReaderNarrationPreferencesRepository narrationPreferencesRepository;
+      late final ReaderNarrationPreferencesController narrationPreferencesController;
       late final ReaderNarrationSessionRepository narrationSessionRepository;
       late final ReaderNarrationSessionTracker narrationSessionTracker;
       late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
@@ -1543,6 +1545,11 @@ ReaderNarrationProgressContext get narrationProgressContext =>
       documentKey: readerDocumentKey,
       pdfTitle: widget.title,
       storagePath: normalizedReaderStoragePath,
+    );
+
+ReaderNarrationPreferencesContext get narrationPreferencesContext =>
+    ReaderNarrationPreferencesContext(
+      userEmail: FirebaseAuth.instance.currentUser?.email,
     );
 
 String get readerSourceLabel => widget.openSource.replaceAll('_', ' ');
@@ -2239,50 +2246,16 @@ Future<ReaderNarrationCheckpoint?> loadNarrationCheckpoint(int pageNumber) async
 }
 
 Future<void> loadNarrationPreferences() async {
-  final userEmail = FirebaseAuth.instance.currentUser?.email;
-
-  if (userEmail == null) return;
-
-  try {
-    final preferences = await narrationPreferencesRepository.load(
-      userEmail: userEmail,
-    );
-
-    if (preferences == null) return;
-
-    final language = ReaderNarrationLanguage.values.firstWhere(
-      (language) => language.locale == preferences.languageMode,
-      orElse: () => ReaderNarrationLanguage.english,
-    );
-
-    readerTtsService.restorePreferences(
-      language: language,
-      rate: preferences.rate,
-      voiceId: preferences.voiceId,
-    );
-  } catch (_) {
-    // Narration remains available with defaults if cloud preferences fail.
-  }
+  await narrationPreferencesController.load(
+    context: narrationPreferencesContext,
+  );
 }
 
 Future<void> saveNarrationPreferences({String? selectedVoiceId}) async {
-  final userEmail = FirebaseAuth.instance.currentUser?.email;
-
-  if (userEmail == null) return;
-
-  try {
-    await narrationPreferencesRepository.save(
-      userEmail: userEmail,
-      preferences: ReaderNarrationPreferences(
-        languageMode: readerTtsService.language.locale,
-        rate: readerTtsService.rate,
-        voiceId:
-            selectedVoiceId ?? narrationPlaybackCoordinator.selectedVoice?.id,
-      ),
-    );
-  } catch (_) {
-    // A temporary cloud failure must not interrupt active narration.
-  }
+  await narrationPreferencesController.saveCurrent(
+    context: narrationPreferencesContext,
+    selectedVoiceId: selectedVoiceId,
+  );
 }
 
 void observeNarrationSession() {
@@ -2516,8 +2489,10 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             ? 'Selected Passage Narration'
             : 'Document Narration',
         onLanguageChanged: (language) async {
-          await readerTtsService.setLanguage(language);
-          await saveNarrationPreferences();
+          await narrationPreferencesController.changeLanguage(
+            context: narrationPreferencesContext,
+            language: language,
+          );
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_language',
@@ -2533,12 +2508,12 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             return;
           }
 
-          final selected = await narrationPlaybackCoordinator.selectVoice(
-            voice,
+          final selected = await narrationPreferencesController.changeVoice(
+            context: narrationPreferencesContext,
+            voice: voice,
           );
           if (!selected) return;
 
-          await saveNarrationPreferences(selectedVoiceId: voice.id);
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_voice',
@@ -2552,7 +2527,10 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           );
         },
         onRateChangeEnd: (rate) async {
-          await saveNarrationPreferences();
+          await narrationPreferencesController.changeRate(
+            context: narrationPreferencesContext,
+            rate: rate,
+          );
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_speed',
@@ -2773,6 +2751,11 @@ void initState() {
   narrationPlaybackCoordinator = ReaderNarrationPlaybackCoordinator(
     ttsService: readerTtsService,
     accessPolicyProvider: () => narrationAccessPolicy,
+  );
+  narrationPreferencesController = ReaderNarrationPreferencesController(
+    store: narrationPreferencesRepository,
+    ttsService: readerTtsService,
+    playbackCoordinator: narrationPlaybackCoordinator,
   );
   narrationVoicePresenter = const ReaderNarrationVoiceCatalogPresenter();
   narrationNavigator = ReaderNarrationNavigator();

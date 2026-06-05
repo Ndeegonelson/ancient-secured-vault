@@ -147,6 +147,8 @@ class FakeFlutterTts extends FlutterTts {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('initializes with English and the default narration rate', () async {
     final fakeTts = FakeFlutterTts();
     final service = ReaderTtsService(flutterTts: fakeTts);

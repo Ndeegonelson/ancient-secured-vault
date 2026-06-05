@@ -31,12 +31,23 @@ class ReaderNarrationPreferences {
   }
 }
 
-class ReaderNarrationPreferencesRepository {
+abstract interface class ReaderNarrationPreferencesStore {
+  Future<ReaderNarrationPreferences?> load({required String userEmail});
+
+  Future<void> save({
+    required String userEmail,
+    required ReaderNarrationPreferences preferences,
+  });
+}
+
+class ReaderNarrationPreferencesRepository
+    implements ReaderNarrationPreferencesStore {
   ReaderNarrationPreferencesRepository({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
 
+  @override
   Future<ReaderNarrationPreferences?> load({required String userEmail}) async {
     final snapshot = await _document(userEmail).get();
     final data = snapshot.data();
@@ -44,6 +55,7 @@ class ReaderNarrationPreferencesRepository {
     return data == null ? null : ReaderNarrationPreferences.fromMap(data);
   }
 
+  @override
   Future<void> save({
     required String userEmail,
     required ReaderNarrationPreferences preferences,

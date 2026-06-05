@@ -113,6 +113,8 @@ ReaderNarrationAccessPolicy policy({
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   const builder = ReaderNarrationVoiceCatalogBuilder();
 
   test('free users receive one assigned browser voice only', () {

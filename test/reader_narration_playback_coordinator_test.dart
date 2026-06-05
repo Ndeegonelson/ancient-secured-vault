@@ -158,6 +158,8 @@ ReaderNarrationAccessPolicy policy({bool premium = true}) {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('builds playback snapshots from the current access policy', () async {
     var premium = false;
     final fakeTts = CoordinatorTestFlutterTts();
@@ -305,7 +307,10 @@ void main() {
     final snapshot = coordinator.snapshot(selectedVoice: coordinatorCloudVoice);
 
     expect(snapshot.plan.engine, ReaderNarrationPlaybackEngine.browser);
-    expect(snapshot.statusMessage, 'Browser narration selected.');
+    expect(
+      snapshot.statusMessage,
+      'Cloud narrators have not been checked yet.',
+    );
 
     service.dispose();
   });
