@@ -50,12 +50,36 @@ class ReaderNarrationCheckpoint {
   }
 }
 
-class ReaderNarrationProgressRepository {
+abstract interface class ReaderNarrationProgressStore {
+  Future<ReaderNarrationCheckpoint?> load({
+    required String userEmail,
+    required String documentKey,
+    required int pageNumber,
+  });
+
+  Future<void> save({
+    required String userEmail,
+    required String documentKey,
+    required String pdfTitle,
+    required String storagePath,
+    required ReaderNarrationCheckpoint checkpoint,
+  });
+
+  Future<void> clear({
+    required String userEmail,
+    required String documentKey,
+    required int pageNumber,
+  });
+}
+
+class ReaderNarrationProgressRepository
+    implements ReaderNarrationProgressStore {
   ReaderNarrationProgressRepository({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
 
+  @override
   Future<ReaderNarrationCheckpoint?> load({
     required String userEmail,
     required String documentKey,
@@ -74,6 +98,7 @@ class ReaderNarrationProgressRepository {
     return checkpoint.isResumable ? checkpoint : null;
   }
 
+  @override
   Future<void> save({
     required String userEmail,
     required String documentKey,
@@ -102,6 +127,7 @@ class ReaderNarrationProgressRepository {
     }, SetOptions(merge: true));
   }
 
+  @override
   Future<void> clear({
     required String userEmail,
     required String documentKey,
