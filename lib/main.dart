@@ -14,6 +14,7 @@ import 'services/reader_narration_access_policy.dart';
 import 'services/reader_narration_voice.dart';
 import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
+import 'services/reader_narration_playback_coordinator.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
@@ -1514,6 +1515,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       late final ReaderNarrationPreferencesRepository narrationPreferencesRepository;
       late final ReaderNarrationSessionRepository narrationSessionRepository;
       late final ReaderNarrationSessionTracker narrationSessionTracker;
+      late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
       late final ReaderNarrationNavigator narrationNavigator;
       late final Future<void> narrationPreferencesReady;
       final Map<int, String> narrationPageTextCache = {};
@@ -2360,9 +2362,10 @@ Future<bool> moveNarrationAcrossPage({
     if (canStart != null && !canStart()) return false;
 
     openPdfPage(page, source: source);
-    return readerTtsService.speakPage(
+    return narrationPlaybackCoordinator.start(
       text: text,
       pageNumber: page,
+      rate: readerTtsService.rate,
       startCharacter: startCharacter,
     );
   }
@@ -2439,7 +2442,7 @@ Future<void> showSelectedTextNarrationDialog() async {
   if (activeNarrationPage != null && readerTtsService.hasResumableProgress) {
     await saveNarrationCheckpoint(activeNarrationPage);
   }
-  await readerTtsService.stop();
+  await narrationPlaybackCoordinator.stop();
   await saveNarrationSessionSummary();
 
   await showReaderNarrationDialog(selectedText: selectedText);
@@ -2552,9 +2555,10 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
                 ? savedCheckpoint
                 : null,
           );
-          final started = await readerTtsService.speakPage(
+          final started = await narrationPlaybackCoordinator.start(
             text: text,
             pageNumber: activePage,
+            rate: readerTtsService.rate,
             startCharacter: startCharacter,
             continueAcrossPages: allowContinuousNarration,
           );
@@ -2571,7 +2575,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           }
         },
         onPause: () async {
-          await readerTtsService.pause();
+          await narrationPlaybackCoordinator.pause();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           if (!isSelectedPassage) {
             await saveNarrationCheckpoint(activePage);
@@ -2585,7 +2589,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           );
         },
         onResume: () async {
-          final resumed = await readerTtsService.resume();
+          final resumed = await narrationPlaybackCoordinator.resume();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
 
           if (resumed) {
@@ -2636,9 +2640,10 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             return;
           }
 
-          final started = await readerTtsService.speakPage(
+          final started = await narrationPlaybackCoordinator.start(
             text: text,
             pageNumber: activePage,
+            rate: readerTtsService.rate,
             startCharacter: jump.offset,
             continueAcrossPages: allowContinuousNarration,
           );
@@ -2691,9 +2696,10 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             return;
           }
 
-          final started = await readerTtsService.speakPage(
+          final started = await narrationPlaybackCoordinator.start(
             text: text,
             pageNumber: activePage,
+            rate: readerTtsService.rate,
             startCharacter: jump.offset,
             continueAcrossPages: allowContinuousNarration,
           );
@@ -2715,7 +2721,7 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
           if (!isSelectedPassage) {
             await saveNarrationCheckpoint(activePage);
           }
-          await readerTtsService.stop();
+          await narrationPlaybackCoordinator.stop();
           await saveNarrationSessionSummary();
           await logReaderAction(
             action: 'stop_page_narration',
@@ -2747,6 +2753,10 @@ void initState() {
   narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
   narrationSessionRepository = ReaderNarrationSessionRepository();
   narrationSessionTracker = ReaderNarrationSessionTracker();
+  narrationPlaybackCoordinator = ReaderNarrationPlaybackCoordinator(
+    ttsService: readerTtsService,
+    accessPolicyProvider: () => narrationAccessPolicy,
+  );
   narrationNavigator = ReaderNarrationNavigator();
   readerTtsService.addListener(observeNarrationSession);
   narrationPreferencesReady = loadNarrationPreferences();

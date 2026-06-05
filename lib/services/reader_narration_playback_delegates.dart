@@ -25,6 +25,11 @@ class ReaderTtsBrowserNarrationDelegate
 
   @override
   Future<void> setVoice(ReaderNarrationVoice voice) {
+    if (service.activeVoice?.id == voice.id ||
+        service.selectedVoice?.id == voice.id) {
+      return Future<void>.value();
+    }
+
     return service.setVoice(voice);
   }
 
