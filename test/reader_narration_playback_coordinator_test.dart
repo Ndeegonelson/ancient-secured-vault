@@ -142,6 +142,14 @@ class CoordinatorTestBrowserDelegate
   }
 }
 
+const coordinatorCloudVoice = ReaderNarrationVoice(
+  name: 'African English Guide',
+  locale: 'en-GH',
+  cloudVoiceId: 'demo-provider:african-english',
+  provider: ReaderNarrationVoiceProvider.cloudAi,
+  providerKey: 'firebase-functions',
+);
+
 ReaderNarrationAccessPolicy policy({bool premium = true}) {
   return ReaderNarrationAccessPolicy.fromUserAccess(
     isAdmin: false,
@@ -169,6 +177,47 @@ void main() {
     expect(freeSnapshot.selectableVoices, hasLength(1));
     expect(premiumSnapshot.catalog.canChooseVoice, isTrue);
     expect(premiumSnapshot.selectableVoices, hasLength(2));
+
+    service.dispose();
+  });
+
+  test('selects a browser narrator through the active router', () async {
+    final fakeTts = CoordinatorTestFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+    await service.initialize();
+    final browser = CoordinatorTestBrowserDelegate();
+    final router = ReaderNarrationPlaybackRouter(browserDelegate: browser);
+    final coordinator = ReaderNarrationPlaybackCoordinator(
+      ttsService: service,
+      accessPolicyProvider: () => policy(),
+      router: router,
+    );
+
+    final selectedVoice = service.availableBrowserVoices.last;
+    final selected = await coordinator.selectVoice(selectedVoice);
+
+    expect(selected, isTrue);
+    expect(browser.selectedVoice, selectedVoice);
+
+    service.dispose();
+  });
+
+  test('rejects unavailable cloud narrator selection', () async {
+    final fakeTts = CoordinatorTestFlutterTts();
+    final service = ReaderTtsService(flutterTts: fakeTts);
+    await service.initialize();
+    final browser = CoordinatorTestBrowserDelegate();
+    final router = ReaderNarrationPlaybackRouter(browserDelegate: browser);
+    final coordinator = ReaderNarrationPlaybackCoordinator(
+      ttsService: service,
+      accessPolicyProvider: () => policy(),
+      router: router,
+    );
+
+    final selected = await coordinator.selectVoice(coordinatorCloudVoice);
+
+    expect(selected, isFalse);
+    expect(browser.selectedVoice, isNull);
 
     service.dispose();
   });
@@ -245,13 +294,6 @@ void main() {
   );
 
   test('falls back when a selected cloud voice is unavailable', () async {
-    const cloudVoice = ReaderNarrationVoice(
-      name: 'African English Guide',
-      locale: 'en-GH',
-      cloudVoiceId: 'demo-provider:african-english',
-      provider: ReaderNarrationVoiceProvider.cloudAi,
-      providerKey: 'firebase-functions',
-    );
     final fakeTts = CoordinatorTestFlutterTts();
     final service = ReaderTtsService(flutterTts: fakeTts);
     await service.initialize();
@@ -260,7 +302,7 @@ void main() {
       accessPolicyProvider: () => policy(),
     );
 
-    final snapshot = coordinator.snapshot(selectedVoice: cloudVoice);
+    final snapshot = coordinator.snapshot(selectedVoice: coordinatorCloudVoice);
 
     expect(snapshot.plan.engine, ReaderNarrationPlaybackEngine.browser);
     expect(snapshot.statusMessage, 'Browser narration selected.');

@@ -1,5 +1,6 @@
 import 'reader_cloud_narration_session_coordinator.dart';
 import 'reader_narration_access_policy.dart';
+import 'reader_narration_playback_plan.dart';
 import 'reader_narration_playback_router.dart';
 import 'reader_narration_playback_router_factory.dart';
 import 'reader_narration_playback_snapshot.dart';
@@ -36,6 +37,8 @@ class ReaderNarrationPlaybackCoordinator {
   bool get isPlaying => router.isPlaying;
   bool get isPaused => router.isPaused;
   bool get isUsingCloud => router.isUsingCloud;
+  ReaderNarrationVoice? get selectedVoice =>
+      cloudSession?.selectedVoice ?? ttsService.selectedVoice;
 
   ReaderNarrationPlaybackSnapshot snapshot({
     ReaderNarrationVoice? selectedVoice,
@@ -66,6 +69,30 @@ class ReaderNarrationPlaybackCoordinator {
         continueAcrossPages: continueAcrossPages,
       ),
     );
+  }
+
+  Future<bool> selectVoice(ReaderNarrationVoice voice) async {
+    final currentSnapshot = snapshot(selectedVoice: voice);
+    final isSelectable = currentSnapshot.selectableVoices.any(
+      (item) => item.id == voice.id,
+    );
+    final plannedVoice = currentSnapshot.selectedVoice;
+
+    if (!isSelectable || !currentSnapshot.canStart || plannedVoice == null) {
+      return false;
+    }
+
+    if (currentSnapshot.plan.engine == ReaderNarrationPlaybackEngine.cloud) {
+      final cloudDelegate = router.cloudDelegate;
+      if (cloudDelegate == null) return false;
+
+      await router.browserDelegate.stopBrowserNarration();
+      return cloudDelegate.selectCloudVoice(plannedVoice);
+    }
+
+    await router.cloudDelegate?.stopCloudNarration();
+    await router.browserDelegate.setVoice(plannedVoice);
+    return true;
   }
 
   Future<void> pause() => router.pause();

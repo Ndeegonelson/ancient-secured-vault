@@ -2265,7 +2265,7 @@ Future<void> loadNarrationPreferences() async {
   }
 }
 
-Future<void> saveNarrationPreferences() async {
+Future<void> saveNarrationPreferences({String? selectedVoiceId}) async {
   final userEmail = FirebaseAuth.instance.currentUser?.email;
 
   if (userEmail == null) return;
@@ -2276,7 +2276,8 @@ Future<void> saveNarrationPreferences() async {
       preferences: ReaderNarrationPreferences(
         languageMode: readerTtsService.language.locale,
         rate: readerTtsService.rate,
-        voiceId: readerTtsService.selectedVoice?.id,
+        voiceId:
+            selectedVoiceId ?? narrationPlaybackCoordinator.selectedVoice?.id,
       ),
     );
   } catch (_) {
@@ -2532,8 +2533,12 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
             return;
           }
 
-          await readerTtsService.setVoice(voice);
-          await saveNarrationPreferences();
+          final selected = await narrationPlaybackCoordinator.selectVoice(
+            voice,
+          );
+          if (!selected) return;
+
+          await saveNarrationPreferences(selectedVoiceId: voice.id);
           final activePage = readerTtsService.pageNumber ?? narrationPage;
           await logReaderAction(
             action: 'change_narration_voice',
