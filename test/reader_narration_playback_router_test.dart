@@ -290,4 +290,20 @@ void main() {
       'The selected cloud narrator is not currently available.',
     );
   });
+
+  test('stopAll releases both browser and cloud engines', () async {
+    final browser = RouterTestBrowserDelegate();
+    final cloud = RouterTestCloudDelegate();
+    final router = ReaderNarrationPlaybackRouter(
+      browserDelegate: browser,
+      cloudDelegate: cloud,
+    );
+
+    await router.start(requestFor(snapshotFor(voice: cloudVoice)));
+    await router.stopAll();
+
+    expect(router.activeEngine, isNull);
+    expect(browser.stops, 2);
+    expect(cloud.stops, 1);
+  });
 }

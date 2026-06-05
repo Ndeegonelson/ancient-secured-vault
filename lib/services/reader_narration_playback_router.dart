@@ -165,4 +165,10 @@ class ReaderNarrationPlaybackRouter {
         return;
     }
   }
+
+  Future<void> stopAll() async {
+    _activeEngine = null;
+    await cloudDelegate?.stopCloudNarration();
+    await browserDelegate.stopBrowserNarration();
+  }
 }
