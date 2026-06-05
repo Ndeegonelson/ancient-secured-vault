@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'firebase_options.dart';
 import 'services/reader_tts_service.dart';
 import 'services/reader_narration_progress_repository.dart';
+import 'services/reader_narration_progress_controller.dart';
 import 'services/reader_narration_navigator.dart';
 import 'services/reader_narration_preferences_repository.dart';
 import 'services/reader_narration_access_policy.dart';
@@ -1509,6 +1510,7 @@ final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
       late final String readerSessionId;
       late final ReaderTtsService readerTtsService;
       late final ReaderNarrationProgressRepository narrationProgressRepository;
+      late final ReaderNarrationProgressController narrationProgressController;
       late final ReaderNarrationPreferencesRepository narrationPreferencesRepository;
       late final ReaderNarrationSessionRepository narrationSessionRepository;
       late final ReaderNarrationSessionTracker narrationSessionTracker;
@@ -1530,6 +1532,14 @@ String get readerDocumentKey {
   final storagePath = normalizedReaderStoragePath;
   return storagePath.isNotEmpty ? storagePath : widget.title;
 }
+
+ReaderNarrationProgressContext get narrationProgressContext =>
+    ReaderNarrationProgressContext(
+      userEmail: FirebaseAuth.instance.currentUser?.email,
+      documentKey: readerDocumentKey,
+      pdfTitle: widget.title,
+      storagePath: normalizedReaderStoragePath,
+    );
 
 String get readerSourceLabel => widget.openSource.replaceAll('_', ' ');
 
@@ -2209,19 +2219,10 @@ Future<String> loadNarrationTextForPage(int pageNumber) async {
 }
 
 Future<ReaderNarrationCheckpoint?> loadNarrationCheckpoint(int pageNumber) async {
-  final userEmail = FirebaseAuth.instance.currentUser?.email;
-
-  if (userEmail == null) return null;
-
-  try {
-    return await narrationProgressRepository.load(
-      userEmail: userEmail,
-      documentKey: readerDocumentKey,
-      pageNumber: pageNumber,
-    );
-  } catch (_) {
-    return null;
-  }
+  return narrationProgressController.load(
+    context: narrationProgressContext,
+    pageNumber: pageNumber,
+  );
 }
 
 Future<void> loadNarrationPreferences() async {
@@ -2301,49 +2302,31 @@ Future<void> saveNarrationSessionSummary({bool finished = false}) async {
 }
 
 Future<void> saveNarrationCheckpoint(int pageNumber) async {
-  final userEmail = FirebaseAuth.instance.currentUser?.email;
-  final textLength = readerTtsService.lastText.length;
-  final characterOffset = readerTtsService.currentCharacterOffset;
-
-  if (userEmail == null ||
-      readerTtsService.pageNumber != pageNumber ||
-      textLength <= 0 ||
-      characterOffset <= 0) {
-    return;
-  }
-
-  if (characterOffset >= textLength) {
-    try {
-      await narrationProgressRepository.clear(
-        userEmail: userEmail,
-        documentKey: readerDocumentKey,
-        pageNumber: pageNumber,
-      );
-    } catch (_) {
-      // Completed narration stays usable if cloud cleanup is unavailable.
-    }
-    return;
-  }
-
-  final checkpoint = ReaderNarrationCheckpoint(
+  await narrationProgressController.saveCurrent(
+    context: narrationProgressContext,
     pageNumber: pageNumber,
-    characterOffset: characterOffset,
-    textLength: textLength,
+    activePageNumber: readerTtsService.pageNumber,
+    characterOffset: readerTtsService.currentCharacterOffset,
+    textLength: readerTtsService.lastText.length,
     languageLocale: readerTtsService.language.locale,
     rate: readerTtsService.rate,
   );
+}
 
-  try {
-    await narrationProgressRepository.save(
-      userEmail: userEmail,
-      documentKey: readerDocumentKey,
-      pdfTitle: widget.title,
-      storagePath: normalizedReaderStoragePath,
-      checkpoint: checkpoint,
-    );
-  } catch (_) {
-    // Narration remains usable if cloud progress storage is unavailable.
-  }
+int narrationStartCharacterFor({
+  required String text,
+  required int targetPageNumber,
+  ReaderNarrationCheckpoint? savedCheckpoint,
+}) {
+  return narrationProgressController.startCharacterFor(
+    text: text,
+    targetPageNumber: targetPageNumber,
+    livePageNumber: readerTtsService.pageNumber,
+    liveText: readerTtsService.lastText,
+    liveCharacterOffset: readerTtsService.currentCharacterOffset,
+    hasLiveResume: readerTtsService.hasResumableProgress,
+    savedCheckpoint: savedCheckpoint,
+  );
 }
 
 Future<bool> moveNarrationAcrossPage({
@@ -2562,15 +2545,13 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
         onPlay: (text) async {
           prepareNarrationMode();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
-          final hasLiveResume =
-              readerTtsService.pageNumber == activePage &&
-              readerTtsService.lastText == text &&
-              readerTtsService.hasResumableProgress;
-          final startCharacter = hasLiveResume
-              ? readerTtsService.currentCharacterOffset
-              : activePage == narrationPage
-              ? savedCheckpoint?.characterOffsetForText(text) ?? 0
-              : 0;
+          final startCharacter = narrationStartCharacterFor(
+            text: text,
+            targetPageNumber: activePage,
+            savedCheckpoint: activePage == narrationPage
+                ? savedCheckpoint
+                : null,
+          );
           final started = await readerTtsService.speakPage(
             text: text,
             pageNumber: activePage,
@@ -2620,15 +2601,13 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
         onJumpBackward: (text) async {
           prepareNarrationMode();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
-          final hasLiveResume =
-              readerTtsService.pageNumber == activePage &&
-              readerTtsService.lastText == text &&
-              readerTtsService.hasResumableProgress;
-          final currentOffset = hasLiveResume
-              ? readerTtsService.currentCharacterOffset
-              : activePage == narrationPage
-              ? savedCheckpoint?.characterOffsetForText(text) ?? 0
-              : 0;
+          final currentOffset = narrationStartCharacterFor(
+            text: text,
+            targetPageNumber: activePage,
+            savedCheckpoint: activePage == narrationPage
+                ? savedCheckpoint
+                : null,
+          );
           final jump = narrationNavigator.target(
             text: text,
             currentOffset: currentOffset,
@@ -2679,15 +2658,13 @@ Future<void> showReaderNarrationDialog({String? selectedText}) async {
         onJumpForward: (text) async {
           prepareNarrationMode();
           final activePage = readerTtsService.pageNumber ?? narrationPage;
-          final hasLiveResume =
-              readerTtsService.pageNumber == activePage &&
-              readerTtsService.lastText == text &&
-              readerTtsService.hasResumableProgress;
-          final currentOffset = hasLiveResume
-              ? readerTtsService.currentCharacterOffset
-              : activePage == narrationPage
-              ? savedCheckpoint?.characterOffsetForText(text) ?? 0
-              : 0;
+          final currentOffset = narrationStartCharacterFor(
+            text: text,
+            targetPageNumber: activePage,
+            savedCheckpoint: activePage == narrationPage
+                ? savedCheckpoint
+                : null,
+          );
           final jump = narrationNavigator.target(
             text: text,
             currentOffset: currentOffset,
@@ -2764,6 +2741,9 @@ void initState() {
     onPageCompleted: continueNarrationAfterPage,
   );
   narrationProgressRepository = ReaderNarrationProgressRepository();
+  narrationProgressController = ReaderNarrationProgressController(
+    store: narrationProgressRepository,
+  );
   narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
   narrationSessionRepository = ReaderNarrationSessionRepository();
   narrationSessionTracker = ReaderNarrationSessionTracker();
