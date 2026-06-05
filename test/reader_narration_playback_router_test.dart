@@ -174,6 +174,8 @@ void main() {
 
     expect(started, isTrue);
     expect(router.activeEngine, ReaderNarrationPlaybackEngine.browser);
+    expect(router.state, ReaderNarrationRouterState.playing);
+    expect(router.isPlaying, isTrue);
     expect(browser.selectedVoice, browserVoice);
     expect(browser.starts, 1);
     expect(cloud.stops, 1);
@@ -194,6 +196,7 @@ void main() {
 
     expect(started, isTrue);
     expect(router.activeEngine, ReaderNarrationPlaybackEngine.cloud);
+    expect(router.state, ReaderNarrationRouterState.playing);
     expect(router.isUsingCloud, isTrue);
     expect(browser.stops, 1);
     expect(browser.starts, 0);
@@ -211,6 +214,7 @@ void main() {
 
     expect(started, isFalse);
     expect(router.activeEngine, isNull);
+    expect(router.state, ReaderNarrationRouterState.error);
     expect(router.errorMessage, 'Secure cloud narration is not connected yet.');
     expect(browser.starts, 0);
   });
@@ -224,6 +228,7 @@ void main() {
     );
 
     expect(started, isFalse);
+    expect(router.state, ReaderNarrationRouterState.error);
     expect(router.errorMessage, 'No narrator.');
     expect(browser.starts, 0);
   });
@@ -242,11 +247,28 @@ void main() {
     await router.stop();
 
     expect(resumed, isTrue);
+    expect(router.state, ReaderNarrationRouterState.stopped);
     expect(browser.pauses, 1);
     expect(browser.resumes, 1);
     expect(browser.stops, 1);
     expect(cloud.pauses, 0);
     expect(router.activeEngine, isNull);
+  });
+
+  test('pause and resume update browser router state', () async {
+    final browser = RouterTestBrowserDelegate();
+    final router = ReaderNarrationPlaybackRouter(browserDelegate: browser);
+
+    await router.start(requestFor(snapshotFor(voice: browserVoice)));
+    await router.pause();
+
+    expect(router.state, ReaderNarrationRouterState.paused);
+    expect(router.isPaused, isTrue);
+
+    final resumed = await router.resume();
+
+    expect(resumed, isTrue);
+    expect(router.state, ReaderNarrationRouterState.playing);
   });
 
   test('pause resume and stop follow the active cloud engine', () async {
@@ -263,6 +285,7 @@ void main() {
     await router.stop();
 
     expect(resumed, isTrue);
+    expect(router.state, ReaderNarrationRouterState.stopped);
     expect(cloud.pauses, 1);
     expect(cloud.resumes, 1);
     expect(cloud.stops, 1);
@@ -285,6 +308,7 @@ void main() {
     expect(started, isFalse);
     expect(cloud.starts, 0);
     expect(router.activeEngine, isNull);
+    expect(router.state, ReaderNarrationRouterState.error);
     expect(
       router.errorMessage,
       'The selected cloud narrator is not currently available.',
@@ -303,6 +327,7 @@ void main() {
     await router.stopAll();
 
     expect(router.activeEngine, isNull);
+    expect(router.state, ReaderNarrationRouterState.stopped);
     expect(browser.stops, 2);
     expect(cloud.stops, 1);
   });
