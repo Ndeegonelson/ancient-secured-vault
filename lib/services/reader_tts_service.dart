@@ -834,7 +834,7 @@ class ReaderTtsService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _flutterTts.stop();
+    _flutterTts.stop().catchError((_) {});
     super.dispose();
   }
 }

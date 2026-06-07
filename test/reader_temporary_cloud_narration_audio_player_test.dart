@@ -210,6 +210,7 @@ void main() {
 
       player.setPositionHandler((position) => reportedPosition = position);
       player.setErrorHandler((message) => reportedError = message);
+      await player.load(segment(1));
       platform.reportPosition(const Duration(milliseconds: 750));
       platform.reportError('Audio error');
 

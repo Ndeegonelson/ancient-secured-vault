@@ -228,8 +228,6 @@ void main() {
       continueAcrossPages: false,
     );
     fakeTts.reportProgress('learning text.', 0, 8, 'learning');
-    await delegate.pauseBrowserNarration();
-    await delegate.stopBrowserNarration();
 
     expect(started, isTrue);
     expect(fakeTts.selectedVoice, browserVoice.browserVoice);
@@ -237,6 +235,10 @@ void main() {
     expect(delegate.playbackProgressPercent, 75);
     expect(delegate.playbackCharacterStart, 18);
     expect(delegate.playbackCharacterEnd, 18);
+
+    await delegate.pauseBrowserNarration();
+    await delegate.stopBrowserNarration();
+
     expect(fakeTts.pauseCount, 1);
     expect(fakeTts.stopCount, greaterThanOrEqualTo(1));
 

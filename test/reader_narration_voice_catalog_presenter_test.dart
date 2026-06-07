@@ -89,7 +89,11 @@ void main() {
       viewModel.assignedNarratorLabel,
       'Assigned narrator: Microsoft Zira | en-US | Female',
     );
-    expect(viewModel.availabilitySummary, '2 browser voices | no cloud voices');
+    expect(
+      viewModel.availabilitySummary,
+      '2 browser voices | no cloud voices | '
+      'Cloud narrators have not been checked yet.',
+    );
     expect(viewModel.selectedVoice, browserZira);
     expect(viewModel.selectableVoices, [browserDavid, browserZira]);
     expect(viewModel.shouldShowVoiceSelector, isTrue);
