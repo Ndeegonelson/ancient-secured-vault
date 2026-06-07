@@ -99,16 +99,26 @@ class ReaderCloudNarrationHttpCallableClient
     final client = httpClient ?? http.Client();
     final shouldCloseClient = httpClient == null;
     try {
-      final response = await client.post(
-        _callableUri(functionName),
-        headers: await _headers(),
-        body: jsonEncode({'data': data}),
-      );
+      final response = await client
+          .post(
+            _callableUri('${functionName}Http'),
+            headers: await _headers(),
+            body: jsonEncode({'data': data}),
+          )
+          .timeout(_timeoutFor(functionName));
 
       return _decodeResponse(response);
     } finally {
       if (shouldCloseClient) client.close();
     }
+  }
+
+  Duration _timeoutFor(String functionName) {
+    if (functionName == 'synthesizeCloudNarration') {
+      return const Duration(seconds: 120);
+    }
+
+    return const Duration(seconds: 45);
   }
 
   Uri _callableUri(String functionName) {
@@ -172,6 +182,12 @@ class ReaderCloudNarrationHttpCallableClient
     final result = decodedBody['result'];
     if (result is Map<String, dynamic>) return result;
     if (result is Map) return Map<String, dynamic>.from(result);
+
+    if (decodedBody.containsKey('status') ||
+        decodedBody.containsKey('voices') ||
+        decodedBody.containsKey('audioBase64')) {
+      return decodedBody;
+    }
 
     throw const ReaderCloudNarrationCallableException(
       'Cloud narration response is invalid.',

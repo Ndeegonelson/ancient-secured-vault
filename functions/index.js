@@ -15,12 +15,17 @@ const {
 const {
   createDemoCloudNarrationProvider,
 } = require("./narration_demo_provider");
+const {
+  createGoogleCloudTextToSpeechProvider,
+} = require("./narration_google_tts_provider");
 
 initializeApp();
 const firestore = getFirestore();
 const narrationUsageQuota = createNarrationUsageQuota({firestore});
 const narrationProviderRegistry = createNarrationProviderRegistry({
-  providers: [createDemoCloudNarrationProvider()],
+  providers: [
+    createGoogleCloudTextToSpeechProvider(),
+  ],
 });
 
 setGlobalOptions({maxInstances: 10});
@@ -39,7 +44,8 @@ async function loadUserAccess({uid, email}) {
 
 exports.cloudNarrationCatalog = onCall(
     {
-      enforceAppCheck: true,
+      cors: true,
+      enforceAppCheck: false,
       maxInstances: 5,
       timeoutSeconds: 30,
     },
@@ -51,8 +57,9 @@ exports.cloudNarrationCatalog = onCall(
 
 exports.synthesizeCloudNarration = onCall(
     {
-      enforceAppCheck: true,
-      consumeAppCheckToken: true,
+      cors: true,
+      enforceAppCheck: false,
+      consumeAppCheckToken: false,
       maxInstances: 5,
       timeoutSeconds: 120,
     },
@@ -63,3 +70,82 @@ exports.synthesizeCloudNarration = onCall(
       synthesize: narrationProviderRegistry.synthesize,
     }),
 );
+
+const narrationHttpOptions = {
+  cors: true,
+  maxInstances: 5,
+  timeoutSeconds: 120,
+};
+
+exports.cloudNarrationCatalogHttp = require("firebase-functions/v2/https")
+    .onRequest(narrationHttpOptions, async (request, response) => {
+      try {
+        await requireNarrationHttpAccess(request);
+        const voices = await narrationProviderRegistry.loadCatalog();
+        response.json({
+          status: voices.length === 0 ? "notConfigured" : "ready",
+          voices,
+        });
+      } catch (error) {
+        sendNarrationHttpError(response, error);
+      }
+    });
+
+exports.synthesizeCloudNarrationHttp = require("firebase-functions/v2/https")
+    .onRequest(narrationHttpOptions, async (request, response) => {
+      try {
+        await requireNarrationHttpAccess(request);
+        const input = request.body && request.body.data ?
+          request.body.data :
+          request.body;
+        const result = await narrationProviderRegistry.synthesize(input);
+        response.json(result);
+      } catch (error) {
+        sendNarrationHttpError(response, error);
+      }
+    });
+
+async function requireNarrationHttpAccess(request) {
+  if (request.method === "OPTIONS") return;
+  if (request.method !== "POST") {
+    throw narrationHttpError(405, "Cloud narration requires POST.");
+  }
+
+  const authorization = request.get("authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    throw narrationHttpError(401, "Sign in before using cloud narration.");
+  }
+
+  const decodedToken = await require("firebase-admin/auth")
+      .getAuth()
+      .verifyIdToken(match[1]);
+  const access = await loadUserAccess({
+    uid: decodedToken.uid,
+    email: decodedToken.email,
+  });
+
+  if (!access ||
+      (access.role !== "admin" && access.subscriptionStatus !== "active")) {
+    throw narrationHttpError(
+        403,
+        "Premium narration is required for cloud and customized voices.",
+    );
+  }
+}
+
+function narrationHttpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function sendNarrationHttpError(response, error) {
+  response.status(error && error.status ? error.status : 500).json({
+    error: {
+      message: error && error.message ?
+        error.message :
+        "Cloud narration is temporarily unavailable.",
+    },
+  });
+}

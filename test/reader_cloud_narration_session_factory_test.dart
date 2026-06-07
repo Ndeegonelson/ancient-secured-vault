@@ -102,7 +102,7 @@ void main() {
             'audioBase64': base64Encode([1, 2, 3]),
             'contentType': 'audio/wav',
             'startCharacter': 0,
-            'endCharacter': 20,
+            'endCharacter': 48,
             'durationMilliseconds': 1000,
           },
         },

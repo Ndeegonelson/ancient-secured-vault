@@ -3,6 +3,8 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../services/reader_narration_progress_repository.dart';
 import '../services/reader_narration_access_policy.dart';
+import '../services/reader_narration_playback_coordinator.dart';
+import '../services/reader_narration_playback_router.dart';
 import '../services/reader_narration_session_tracker.dart';
 import '../services/reader_narration_voice.dart';
 import '../services/reader_narration_voice_catalog_presenter.dart';
@@ -12,6 +14,7 @@ class ReaderNarrationDialog extends StatelessWidget {
   const ReaderNarrationDialog({
     super.key,
     required this.service,
+    required this.playbackCoordinator,
     required this.pageNumber,
     required this.narrationText,
     required this.savedCheckpoint,
@@ -31,6 +34,7 @@ class ReaderNarrationDialog extends StatelessWidget {
   });
 
   final ReaderTtsService service;
+  final ReaderNarrationPlaybackCoordinator playbackCoordinator;
   final int pageNumber;
   final Future<String> narrationText;
   final ReaderNarrationCheckpoint? savedCheckpoint;
@@ -49,17 +53,25 @@ class ReaderNarrationDialog extends StatelessWidget {
   final Future<void> Function(String text) onJumpForward;
   final Future<void> Function() onStop;
 
+  List<Listenable> get _narrationAnimations {
+    final cloudSession = playbackCoordinator.cloudSession;
+    return [
+      service,
+      if (cloudSession is Listenable) cloudSession as Listenable,
+    ];
+  }
+
   String get stateLabel {
-    switch (service.state) {
-      case ReaderNarrationState.playing:
+    switch (playbackCoordinator.state) {
+      case ReaderNarrationRouterState.playing:
         return 'Playing';
-      case ReaderNarrationState.paused:
+      case ReaderNarrationRouterState.paused:
         return 'Paused';
-      case ReaderNarrationState.stopped:
+      case ReaderNarrationRouterState.stopped:
         return 'Stopped';
-      case ReaderNarrationState.error:
+      case ReaderNarrationRouterState.error:
         return 'Needs attention';
-      case ReaderNarrationState.idle:
+      case ReaderNarrationRouterState.idle:
         return 'Ready';
     }
   }
@@ -79,11 +91,35 @@ class ReaderNarrationDialog extends StatelessWidget {
         '${summary.completedPages.length} $completedLabel';
   }
 
+  _NarrationPassageView _passageForRange(String text, int start, int end) {
+    if (text.isEmpty) return const _NarrationPassageView.empty();
+
+    final safeStart = start.clamp(0, text.length - 1);
+    final safeEnd = end.clamp(safeStart + 1, text.length);
+    final windowStart = (safeStart - 85).clamp(0, text.length);
+    final windowEnd = (safeEnd + 125).clamp(0, text.length);
+    final prefix = windowStart > 0 ? '... ' : '';
+    final suffix = windowEnd < text.length ? ' ...' : '';
+    final passage = _cleanPassage(text.substring(windowStart, windowEnd));
+    final prefixLength = prefix.length;
+    final sourcePrefix = _cleanPassage(text.substring(windowStart, safeStart));
+
+    return _NarrationPassageView(
+      text: '$prefix$passage$suffix',
+      highlightStart: prefixLength + sourcePrefix.length,
+      highlightEnd: prefixLength + sourcePrefix.length + (safeEnd - safeStart),
+    );
+  }
+
+  String _cleanPassage(String passage) {
+    return passage.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     return PointerInterceptor(
       child: AnimatedBuilder(
-        animation: service,
+        animation: Listenable.merge(_narrationAnimations),
         builder: (context, child) {
           return AlertDialog(
             backgroundColor: const Color(0xFF0F1117),
@@ -115,6 +151,8 @@ class ReaderNarrationDialog extends StatelessWidget {
                   }
 
                   final text = snapshot.data!.trim();
+                  final playbackStatus = playbackCoordinator.status;
+                  final isCloudNarration = playbackCoordinator.isUsingCloud;
                   final activePageNumber = service.pageNumber ?? pageNumber;
                   final activeText =
                       service.pageNumber != null &&
@@ -123,34 +161,55 @@ class ReaderNarrationDialog extends StatelessWidget {
                       ? service.lastText
                       : text;
                   final hasReadableText = activeText.isNotEmpty;
-                  final hasActiveNarration = service.lastText == activeText;
-                  final currentPassage = hasActiveNarration
-                      ? service.currentPassage.trim()
-                      : '';
-                  final highlightStart = service.currentPassageHighlightStart
-                      .clamp(0, currentPassage.length);
-                  final highlightEnd = service.currentPassageHighlightEnd.clamp(
+                  final hasActiveNarration =
+                      service.lastText == activeText || isCloudNarration;
+                  final passageView = isCloudNarration
+                      ? _passageForRange(
+                          activeText,
+                          playbackStatus.currentCharacterStart,
+                          playbackStatus.currentCharacterEnd,
+                        )
+                      : _NarrationPassageView(
+                          text: hasActiveNarration
+                              ? service.currentPassage.trim()
+                              : '',
+                          highlightStart: service.currentPassageHighlightStart,
+                          highlightEnd: service.currentPassageHighlightEnd,
+                        );
+                  final currentPassage = passageView.text;
+                  final highlightStart = passageView.highlightStart.clamp(
+                    0,
+                    currentPassage.length,
+                  );
+                  final highlightEnd = passageView.highlightEnd.clamp(
                     highlightStart,
                     currentPassage.length,
                   );
-                  final hasLiveResume =
-                      hasActiveNarration &&
-                      service.pageNumber == activePageNumber &&
-                      service.hasResumableProgress;
+                  final liveProgressPercent = isCloudNarration
+                      ? playbackStatus.progressPercent
+                      : service.progressPercent;
+                  final hasLiveResume = isCloudNarration
+                      ? liveProgressPercent > 0 && liveProgressPercent < 100
+                      : hasActiveNarration &&
+                            service.pageNumber == activePageNumber &&
+                            service.hasResumableProgress;
                   final resumePercent = hasLiveResume
-                      ? service.progressPercent
+                      ? liveProgressPercent
                       : activePageNumber == pageNumber
                       ? savedCheckpoint?.progressPercent
                       : null;
                   final showSavedProgress =
-                      service.state == ReaderNarrationState.stopped &&
-                      service.progressPercent == 0 &&
+                      playbackCoordinator.state ==
+                          ReaderNarrationRouterState.stopped &&
+                      liveProgressPercent == 0 &&
                       resumePercent != null;
                   final displayProgressPercent = showSavedProgress
                       ? resumePercent
-                      : service.progressPercent;
+                      : liveProgressPercent;
                   final sessionSummary = sessionTracker.snapshot();
                   final voiceCatalogView = voiceCatalog();
+                  final errorMessage =
+                      playbackStatus.errorMessage ?? service.errorMessage;
 
                   return SingleChildScrollView(
                     child: Column(
@@ -257,7 +316,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                           const SizedBox(height: 12),
                           TextButton.icon(
                             onPressed: hasReadableText
-                                ? service.isPaused
+                                ? playbackCoordinator.isPaused
                                       ? onResume
                                       : () => onPlay(activeText)
                                 : null,
@@ -265,10 +324,10 @@ class ReaderNarrationDialog extends StatelessWidget {
                             label: Text('Resume narration ($resumePercent%)'),
                           ),
                         ],
-                        if (service.errorMessage != null) ...[
+                        if (errorMessage != null) ...[
                           const SizedBox(height: 8),
                           Text(
-                            service.errorMessage!,
+                            errorMessage,
                             style: const TextStyle(color: Colors.redAccent),
                           ),
                         ],
@@ -387,13 +446,14 @@ class ReaderNarrationDialog extends StatelessWidget {
                                       ),
                                 )
                                 .toList(),
-                            onChanged: (voice) {
+                            onChanged: (voice) async {
                               if (voice != null) {
-                                onVoiceChanged(voice);
+                                await onVoiceChanged(voice);
                               }
                             },
                           ),
-                        ] else if (voiceCatalogView.helperMessage != null) ...[
+                        ],
+                        if (voiceCatalogView.helperMessage != null) ...[
                           const SizedBox(height: 8),
                           Text(
                             voiceCatalogView.helperMessage!,
@@ -431,11 +491,13 @@ class ReaderNarrationDialog extends StatelessWidget {
                               color: Colors.white70,
                             ),
                             IconButton(
-                              tooltip: service.isPaused || resumePercent != null
+                              tooltip:
+                                  playbackCoordinator.isPaused ||
+                                      resumePercent != null
                                   ? 'Resume narration'
                                   : 'Play page narration',
                               onPressed: hasReadableText
-                                  ? service.isPaused
+                                  ? playbackCoordinator.isPaused
                                         ? onResume
                                         : () => onPlay(activeText)
                                   : null,
@@ -444,14 +506,17 @@ class ReaderNarrationDialog extends StatelessWidget {
                             ),
                             IconButton(
                               tooltip: 'Pause narration',
-                              onPressed: service.isPlaying ? onPause : null,
+                              onPressed: playbackCoordinator.isPlaying
+                                  ? onPause
+                                  : null,
                               icon: const Icon(Icons.pause),
                               color: Colors.orangeAccent,
                             ),
                             IconButton(
                               tooltip: 'Stop narration',
                               onPressed:
-                                  service.state == ReaderNarrationState.idle
+                                  playbackCoordinator.state ==
+                                      ReaderNarrationRouterState.idle
                                   ? null
                                   : onStop,
                               icon: const Icon(Icons.stop),
@@ -488,4 +553,21 @@ class ReaderNarrationDialog extends StatelessWidget {
       ),
     );
   }
+}
+
+class _NarrationPassageView {
+  const _NarrationPassageView({
+    required this.text,
+    required this.highlightStart,
+    required this.highlightEnd,
+  });
+
+  const _NarrationPassageView.empty()
+    : text = '',
+      highlightStart = 0,
+      highlightEnd = 0;
+
+  final String text;
+  final int highlightStart;
+  final int highlightEnd;
 }

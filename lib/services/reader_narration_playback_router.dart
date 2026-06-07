@@ -46,7 +46,8 @@ abstract interface class ReaderBrowserNarrationDelegate {
   Future<void> stopBrowserNarration();
 }
 
-abstract interface class ReaderCloudNarrationDelegate {
+abstract interface class ReaderCloudNarrationDelegate
+    implements ReaderNarrationPlaybackStatusSource {
   Future<bool> selectCloudVoice(ReaderNarrationVoice voice);
 
   Future<bool> startCloudNarration({
@@ -164,11 +165,14 @@ class ReaderNarrationPlaybackRouter {
         startCharacter: request.startCharacter,
       );
       _activeEngine = started ? ReaderNarrationPlaybackEngine.cloud : null;
-      _state = started
-          ? ReaderNarrationRouterState.playing
-          : ReaderNarrationRouterState.error;
-      if (!started) {
-        _errorMessage = 'Secure cloud narration could not start.';
+      if (started) {
+        _errorMessage = null;
+        _state = ReaderNarrationRouterState.playing;
+      } else {
+        _errorMessage =
+            cloudDelegate.playbackErrorMessage ??
+            'Secure cloud narration could not start.';
+        _state = ReaderNarrationRouterState.error;
       }
       return started;
     }

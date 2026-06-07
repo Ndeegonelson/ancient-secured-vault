@@ -95,7 +95,12 @@ async function buildCatalog(providers) {
         });
         publicVoices.push(voice.publicVoice);
       }
-    } catch (_) {
+    } catch (error) {
+      console.error("Cloud narration provider failed to load voices.", {
+        providerKey: provider.key,
+        errorMessage: error && error.message,
+        errorCode: error && error.code,
+      });
       // A provider failure must not remove healthy providers from the catalog.
     }
   }
@@ -172,6 +177,7 @@ function optionalVoiceMetadata(voice) {
   copyOptionalString(voice, metadata, "gender", 40);
   copyOptionalString(voice, metadata, "accent", 80);
   copyOptionalString(voice, metadata, "style", 80);
+  copyOptionalString(voice, metadata, "googleVoiceName", 120);
   return metadata;
 }
 

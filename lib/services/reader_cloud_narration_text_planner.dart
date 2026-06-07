@@ -36,7 +36,7 @@ class ReaderCloudNarrationTextSegment {
 }
 
 class ReaderCloudNarrationTextPlanner {
-  const ReaderCloudNarrationTextPlanner({this.maximumSegmentCharacters = 2400})
+  const ReaderCloudNarrationTextPlanner({this.maximumSegmentCharacters = 300})
     : assert(maximumSegmentCharacters > 0);
 
   final int maximumSegmentCharacters;

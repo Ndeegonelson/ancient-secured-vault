@@ -37,10 +37,10 @@ class ReaderCloudNarrationRegistry {
           );
           voicesById[normalizedVoice.id] = normalizedVoice;
         }
-      } catch (_) {
+      } catch (error) {
         statuses[provider.key] = ReaderCloudNarrationProviderStatus(
           state: ReaderCloudNarrationProviderState.temporarilyUnavailable,
-          message: '${provider.displayName} is temporarily unavailable.',
+          message: '${provider.displayName} is temporarily unavailable: $error',
         );
       }
     }

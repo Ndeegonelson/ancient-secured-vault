@@ -76,7 +76,7 @@ void main() {
     expect(result, {'status': 'ready', 'voices': []});
     expect(
       capturedRequest.url,
-      Uri.parse('https://functions.test/cloudNarrationCatalog'),
+      Uri.parse('https://functions.test/cloudNarrationCatalogHttp'),
     );
     expect(capturedRequest.headers['Authorization'], 'Bearer user-token');
     expect(capturedRequest.headers['X-Firebase-AppCheck'], 'app-check-token');
@@ -110,7 +110,7 @@ void main() {
         capturedUri,
         Uri.parse(
           'https://europe-west1-ancient--docs.cloudfunctions.net/'
-          'synthesizeCloudNarration',
+          'synthesizeCloudNarrationHttp',
         ),
       );
     },

@@ -238,6 +238,7 @@ void main() {
     final controller = createController(player);
 
     await controller.start(text: text, voice: voice, rate: 0.8);
+    await Future<void>.delayed(Duration.zero);
     player.completeSegment();
     await Future<void>.delayed(Duration.zero);
 
