@@ -68,9 +68,10 @@ function createGoogleCloudTextToSpeechProvider({
 
     async synthesize(request) {
       const voice = validateRequest(request, voiceById);
+      const markedText = createMarkedSsml(request.text);
       const [response] = await withTimeout(
           getClient().synthesizeSpeech({
-            input: {text: request.text},
+            input: {ssml: markedText.ssml},
             voice: {
               languageCode: voice.locale,
               name: voice.googleVoiceName,
@@ -79,6 +80,7 @@ function createGoogleCloudTextToSpeechProvider({
               audioEncoding: DEFAULT_AUDIO_ENCODING,
               speakingRate: normalizeSpeakingRate(request.rate),
             },
+            enableTimePointing: ["SSML_MARK"],
           }),
           GOOGLE_TTS_TIMEOUT_MILLISECONDS,
           "Google Cloud Text-to-Speech did not respond in time.",
@@ -100,10 +102,12 @@ function createGoogleCloudTextToSpeechProvider({
         startCharacter: request.startCharacter,
         endCharacter: request.startCharacter + request.text.length,
         durationMilliseconds,
-        timingCues: createEstimatedTimingCues({
+        timingCues: createTimingCues({
           text: request.text,
           startCharacter: request.startCharacter,
           durationMilliseconds,
+          marks: markedText.marks,
+          timepoints: response.timepoints,
         }),
       };
     },
@@ -152,6 +156,110 @@ function estimateDurationMilliseconds(text, rate) {
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   const wordsPerMinute = 155 * normalizeSpeakingRate(rate);
   return Math.max(1000, Math.ceil((words / wordsPerMinute) * 60 * 1000));
+}
+
+function createMarkedSsml(text) {
+  const marks = [];
+  let ssml = "<speak>";
+  let cursor = 0;
+
+  for (const match of createTimingTokenMatches(text)) {
+    const token = match[0];
+    const tokenStart = match.index;
+    const tokenEnd = tokenStart + token.length;
+    const markName = `w${marks.length}`;
+
+    ssml += escapeSsml(text.slice(cursor, tokenStart));
+    ssml += `<mark name="${markName}"/>`;
+    ssml += escapeSsml(token);
+    marks.push({
+      markName,
+      startCharacter: tokenStart,
+      endCharacter: tokenEnd,
+    });
+    cursor = tokenEnd;
+  }
+
+  ssml += escapeSsml(text.slice(cursor));
+  ssml += "</speak>";
+
+  return {ssml, marks};
+}
+
+function createTimingTokenMatches(text) {
+  const matches = [];
+
+  for (const match of text.matchAll(/\S+/g)) {
+    const token = match[0];
+    const tokenStart = match.index;
+
+    if (!shouldSplitTimingToken(token)) {
+      matches.push(match);
+      continue;
+    }
+
+    for (const part of token.matchAll(
+        /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)?/gu,
+    )) {
+      matches.push({
+        0: part[0],
+        index: tokenStart + part.index,
+      });
+    }
+  }
+
+  return matches;
+}
+
+function shouldSplitTimingToken(token) {
+  return token.length > 18 || /(?:https?:\/\/|www\.|@|[./?#=&_-])/.test(token);
+}
+
+function escapeSsml(value) {
+  return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+}
+
+function createTimingCues({
+  text,
+  startCharacter,
+  durationMilliseconds,
+  marks,
+  timepoints,
+}) {
+  const timedCues = createTimepointTimingCues({
+    startCharacter,
+    marks,
+    timepoints,
+  });
+  if (timedCues.length > 0) return timedCues;
+
+  return createEstimatedTimingCues({text, startCharacter, durationMilliseconds});
+}
+
+function createTimepointTimingCues({startCharacter, marks, timepoints}) {
+  if (!Array.isArray(timepoints) || timepoints.length === 0) return [];
+
+  const marksByName = new Map(marks.map((mark) => [mark.markName, mark]));
+  return timepoints
+      .map((timepoint) => {
+        const mark = marksByName.get(timepoint.markName);
+        if (!mark || !Number.isFinite(timepoint.timeSeconds)) return null;
+
+        return {
+          startCharacter: startCharacter + mark.startCharacter,
+          endCharacter: startCharacter + mark.endCharacter,
+          audioOffsetMilliseconds: Math.max(
+              0,
+              Math.floor(timepoint.timeSeconds * 1000),
+          ),
+        };
+      })
+      .filter(Boolean);
 }
 
 function createEstimatedTimingCues({text, startCharacter, durationMilliseconds}) {

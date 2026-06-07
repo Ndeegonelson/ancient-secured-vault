@@ -7,6 +7,8 @@ import 'reader_cloud_narration_preparation_queue.dart';
 import 'reader_cloud_narration_provider.dart';
 import 'reader_narration_voice.dart';
 
+const Duration _cloudHighlightLead = Duration(milliseconds: 1200);
+
 enum ReaderCloudNarrationPlaybackState {
   idle,
   preparing,
@@ -196,7 +198,7 @@ class ReaderCloudNarrationPlaybackController extends ChangeNotifier {
     }
 
     final audioSegment = preparedSegment.audioSegment;
-    final cue = _cueAt(audioSegment.timingCues, position);
+    final cue = _cueAt(audioSegment.timingCues, position + _cloudHighlightLead);
 
     if (cue != null) {
       _currentCharacterStart = cue.startCharacter;
