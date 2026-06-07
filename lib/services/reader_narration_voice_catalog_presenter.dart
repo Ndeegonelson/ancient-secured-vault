@@ -36,11 +36,14 @@ class ReaderNarrationVoiceCatalogPresenter {
         catalog.defaultVoice ??
         catalog.assignedVoice;
     final displayedLocale = activeLocale?.trim();
+    final narratorLabelPrefix = catalog.accessPolicy.canChooseVoice
+        ? 'Selected narrator'
+        : 'Assigned narrator';
     final assignedNarratorLabel = displayedVoice == null
         ? displayedLocale == null || displayedLocale.isEmpty
-              ? 'Assigned narrator: unavailable'
-              : 'Assigned narrator: $displayedLocale'
-        : 'Assigned narrator: ${displayedVoice.label}';
+              ? '$narratorLabelPrefix: unavailable'
+              : '$narratorLabelPrefix: $displayedLocale'
+        : '$narratorLabelPrefix: ${catalog.accessPolicy.canChooseVoice ? _voiceLabel(displayedVoice) : displayedVoice.label}';
 
     final availabilitySummary = _availabilitySummary(catalog);
     final shouldShowVoiceSelector =
@@ -77,16 +80,16 @@ class ReaderNarrationVoiceCatalogPresenter {
   String _availabilitySummary(ReaderNarrationVoiceCatalog catalog) {
     final browserSummary = _countLabel(
       catalog.browserVoices.length,
-      singular: 'browser voice',
-      plural: 'browser voices',
+      singular: 'synced browser voice',
+      plural: 'synced browser voices',
     );
     final cloudSummary = catalog.accessPolicy.canUseCloudNarration
         ? _countLabel(
             catalog.cloudVoices.length,
-            singular: 'cloud voice',
-            plural: 'cloud voices',
+            singular: 'natural cloud voice',
+            plural: 'natural cloud voices',
           )
-        : 'cloud voices locked';
+        : 'natural cloud voices locked';
 
     if (catalog.accessPolicy.canUseCloudNarration && !catalog.hasCloudVoices) {
       return '$browserSummary | $cloudSummary | '
@@ -94,6 +97,13 @@ class ReaderNarrationVoiceCatalogPresenter {
     }
 
     return '$browserSummary | $cloudSummary';
+  }
+
+  String _voiceLabel(ReaderNarrationVoice voice) {
+    final suffix = voice.provider == ReaderNarrationVoiceProvider.cloudAi
+        ? 'Cloud'
+        : 'Read-along';
+    return '${voice.label} | $suffix';
   }
 
   String _countLabel(
@@ -126,6 +136,7 @@ class ReaderNarrationVoiceCatalogPresenter {
       return catalog.cloudAvailabilityMessage;
     }
 
-    return null;
+    return 'Browser voices are best for word-by-word read-along. '
+        'Cloud voices provide premium natural narration.';
   }
 }

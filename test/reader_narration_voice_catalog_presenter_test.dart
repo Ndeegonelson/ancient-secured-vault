@@ -63,7 +63,7 @@ void main() {
     expect(viewModel.assignedNarratorAvailable, isTrue);
     expect(
       viewModel.availabilitySummary,
-      '1 browser voice | cloud voices locked',
+      '1 synced browser voice | natural cloud voices locked',
     );
     expect(viewModel.selectableVoices, [browserDavid]);
     expect(viewModel.canChooseVoice, isFalse);
@@ -87,11 +87,11 @@ void main() {
 
     expect(
       viewModel.assignedNarratorLabel,
-      'Assigned narrator: Microsoft Zira | en-US | Female',
+      'Selected narrator: Microsoft Zira | en-US | Female | Read-along',
     );
     expect(
       viewModel.availabilitySummary,
-      '2 browser voices | no cloud voices | '
+      '2 synced browser voices | no natural cloud voices | '
       'Cloud narrators have not been checked yet.',
     );
     expect(viewModel.selectedVoice, browserZira);
@@ -116,13 +116,20 @@ void main() {
 
     expect(
       viewModel.assignedNarratorLabel,
-      'Assigned narrator: African English Guide | en-GH | African',
+      'Selected narrator: African English Guide | en-GH | African | Cloud',
     );
-    expect(viewModel.availabilitySummary, '1 browser voice | 1 cloud voice');
+    expect(
+      viewModel.availabilitySummary,
+      '1 synced browser voice | 1 natural cloud voice',
+    );
     expect(viewModel.selectedVoice, cloudAfricanGuide);
     expect(viewModel.selectableVoices, [browserDavid, cloudAfricanGuide]);
     expect(viewModel.shouldShowVoiceSelector, isTrue);
-    expect(viewModel.helperMessage, isNull);
+    expect(
+      viewModel.helperMessage,
+      'Browser voices are best for word-by-word read-along. '
+      'Cloud voices provide premium natural narration.',
+    );
   });
 
   test('uses active locale when no narrator voice is available', () {
@@ -131,7 +138,7 @@ void main() {
       activeLocale: 'fr-FR',
     );
 
-    expect(viewModel.assignedNarratorLabel, 'Assigned narrator: fr-FR');
+    expect(viewModel.assignedNarratorLabel, 'Selected narrator: fr-FR');
     expect(viewModel.assignedNarratorAvailable, isTrue);
     expect(viewModel.selectableVoices, isEmpty);
     expect(

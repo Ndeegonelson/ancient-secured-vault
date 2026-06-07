@@ -115,6 +115,13 @@ class ReaderNarrationDialog extends StatelessWidget {
     return passage.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
+  String _voiceChoiceLabel(ReaderNarrationVoice voice) {
+    final role = voice.provider == ReaderNarrationVoiceProvider.cloudAi
+        ? 'Cloud'
+        : 'Read-along';
+    return '${voice.label} | $role';
+  }
+
   @override
   Widget build(BuildContext context) {
     return PointerInterceptor(
@@ -417,7 +424,10 @@ class ReaderNarrationDialog extends StatelessWidget {
                             isExpanded: true,
                             dropdownColor: const Color(0xFF1A1D25),
                             iconEnabledColor: Colors.greenAccent,
-                            style: const TextStyle(color: Colors.white70),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
                             decoration: const InputDecoration(
                               labelText: 'Choose narrator',
                               labelStyle: TextStyle(color: Colors.white70),
@@ -437,7 +447,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                                       DropdownMenuItem<ReaderNarrationVoice>(
                                         value: voice,
                                         child: Text(
-                                          voice.label,
+                                          _voiceChoiceLabel(voice),
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
                                             color: Colors.white70,
