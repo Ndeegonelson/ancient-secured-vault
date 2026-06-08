@@ -3491,16 +3491,23 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               required String emptySubtitle,
               required String Function(List<T> items) filledSubtitleBuilder,
               required int tabIndex,
+              List<T> Function(List<T> items)? filterBuilder,
             }) {
               return StreamBuilder<List<T>>(
                 stream: stream,
                 builder: (context, snapshot) {
-                  final items = snapshot.data;
+                  final allItems = snapshot.data;
+                  final items = allItems == null
+                      ? null
+                      : filterBuilder?.call(allItems) ?? allItems;
                   final count = items?.length;
-                  final subtitle = items == null
+                  final hasSearch = workspaceSearchQuery.trim().isNotEmpty;
+                  final subtitle = allItems == null
                       ? 'Checking saved items...'
-                      : items.isEmpty
+                      : allItems.isEmpty
                       ? emptySubtitle
+                      : hasSearch && items!.isEmpty
+                      ? 'No matching items in this section.'
                       : filledSubtitleBuilder(items);
 
                   return workspaceSummaryCard(
@@ -3597,6 +3604,20 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                       fontSize: 12,
                                     ),
                                   ),
+                                  if (workspaceSearchQuery
+                                      .trim()
+                                      .isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Showing matches for "${workspaceSearchQuery.trim()}"',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.greenAccent,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -3631,6 +3652,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                     emptySubtitle: 'No saved positions yet',
                                     filledSubtitleBuilder: (positions) =>
                                         'Latest: page ${positions.first.pageNumber}',
+                                    filterBuilder: (positions) => positions
+                                        .where(
+                                          (position) => positionMatchesSearch(
+                                            position,
+                                            workspaceSearchQuery,
+                                          ),
+                                        )
+                                        .toList(),
                                     tabIndex: 1,
                                   ),
                             ),
@@ -3647,6 +3676,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 emptySubtitle: 'No bookmarks yet',
                                 filledSubtitleBuilder: (bookmarks) =>
                                     'Latest: ${workspacePreview(bookmarks.first.displayLabel)}',
+                                filterBuilder: (bookmarks) =>
+                                    ReaderBookmark.search(
+                                      bookmarks,
+                                      workspaceSearchQuery,
+                                    ),
                                 tabIndex: 2,
                               ),
                             ),
@@ -3663,6 +3697,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 emptySubtitle: 'No highlights yet',
                                 filledSubtitleBuilder: (highlights) =>
                                     'Latest: ${workspacePreview(highlights.first.selectedText)}',
+                                filterBuilder: (highlights) =>
+                                    ReaderHighlight.search(
+                                      highlights,
+                                      workspaceSearchQuery,
+                                    ),
                                 tabIndex: 3,
                               ),
                             ),
@@ -3678,6 +3717,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 emptySubtitle: 'No notes yet',
                                 filledSubtitleBuilder: (notes) =>
                                     'Latest: ${workspacePreview(notes.first.note)}',
+                                filterBuilder: (notes) => ReaderNote.search(
+                                  notes,
+                                  workspaceSearchQuery,
+                                ),
                                 tabIndex: 4,
                               ),
                             ),
