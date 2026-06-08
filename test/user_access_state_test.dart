@@ -10,6 +10,8 @@ void main() {
     expect(access.accessLevel, 'free');
     expect(access.canAccessMainVault, isFalse);
     expect(access.canManageVault, isFalse);
+    expect(access.planLabel, 'Free');
+    expect(access.priority, 1);
     expect(access.canOpenPdfWithAccessLevel('free'), isTrue);
     expect(access.canOpenPdfWithAccessLevel('premium'), isFalse);
   });
@@ -26,6 +28,8 @@ void main() {
     expect(access.accessLevel, 'premium');
     expect(access.canAccessMainVault, isTrue);
     expect(access.canManageVault, isFalse);
+    expect(access.planLabel, 'Premium');
+    expect(access.priority, 2);
     expect(access.canOpenPdfWithAccessLevel('premium'), isTrue);
   });
 
@@ -40,6 +44,8 @@ void main() {
     expect(access.hasActiveSubscription, isFalse);
     expect(access.canAccessMainVault, isTrue);
     expect(access.canManageVault, isTrue);
+    expect(access.planLabel, 'Admin');
+    expect(access.priority, 3);
     expect(access.canOpenPdfWithAccessLevel('premium'), isTrue);
   });
 

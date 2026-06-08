@@ -21,6 +21,18 @@ class UserAccessState {
 
   bool get canManageVault => isAdmin;
 
+  int get priority {
+    if (isAdmin) return 3;
+    if (hasActiveSubscription) return 2;
+    return 1;
+  }
+
+  String get planLabel {
+    if (isAdmin) return 'Admin';
+    if (hasActiveSubscription) return 'Premium';
+    return 'Free';
+  }
+
   bool canOpenPdfWithAccessLevel(String documentAccessLevel) {
     final normalizedAccessLevel = documentAccessLevel.trim().toLowerCase();
 
