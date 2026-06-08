@@ -3381,6 +3381,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
     final workspaceSearchController = TextEditingController();
     var workspaceSearchQuery = '';
+    var workspaceHighlightColorFilter = 'All';
     var workspaceNoteCategoryFilter = 'All';
 
     bool positionMatchesSearch(ReaderSavedPosition position, String query) {
@@ -3398,6 +3399,23 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
       return matchingNotes
           .where((note) => note.displayCategory == workspaceNoteCategoryFilter)
+          .toList();
+    }
+
+    List<ReaderHighlight> filterWorkspaceHighlights(
+      Iterable<ReaderHighlight> highlights,
+    ) {
+      final matchingHighlights = ReaderHighlight.search(
+        highlights,
+        workspaceSearchQuery,
+      );
+      if (workspaceHighlightColorFilter == 'All') return matchingHighlights;
+
+      final filterColor = normalizeReaderHighlightColor(
+        workspaceHighlightColorFilter,
+      );
+      return matchingHighlights
+          .where((highlight) => highlight.color == filterColor)
           .toList();
     }
 
@@ -3450,6 +3468,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               workspaceSearchController.clear();
               setDialogState(() {
                 workspaceSearchQuery = '';
+                workspaceHighlightColorFilter = 'All';
                 workspaceNoteCategoryFilter = 'All';
               });
             }
@@ -3652,6 +3671,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                     ),
                                   ),
                                   if (workspaceSearchQuery.trim().isNotEmpty ||
+                                      workspaceHighlightColorFilter != 'All' ||
                                       workspaceNoteCategoryFilter != 'All') ...[
                                     const SizedBox(height: 4),
                                     Row(
@@ -3663,6 +3683,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                   .trim()
                                                   .isNotEmpty)
                                                 'Showing matches for "${workspaceSearchQuery.trim()}"',
+                                              if (workspaceHighlightColorFilter !=
+                                                  'All')
+                                                'Highlight color: $workspaceHighlightColorFilter',
                                               if (workspaceNoteCategoryFilter !=
                                                   'All')
                                                 'Note category: $workspaceNoteCategoryFilter',
@@ -3767,11 +3790,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 emptySubtitle: 'No highlights yet',
                                 filledSubtitleBuilder: (highlights) =>
                                     'Latest: ${workspacePreview(highlights.first.selectedText)}',
-                                filterBuilder: (highlights) =>
-                                    ReaderHighlight.search(
-                                      highlights,
-                                      workspaceSearchQuery,
-                                    ),
+                                filterBuilder: filterWorkspaceHighlights,
                                 tabIndex: 3,
                               ),
                             ),
@@ -3976,10 +3995,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   }
 
                   final allHighlights = snapshot.data!;
-                  final highlights = ReaderHighlight.search(
-                    allHighlights,
-                    workspaceSearchQuery,
-                  );
+                  final highlights = filterWorkspaceHighlights(allHighlights);
 
                   if (allHighlights.isEmpty) {
                     return emptyWorkspaceMessage(
@@ -3987,77 +4003,128 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                     );
                   }
 
-                  if (highlights.isEmpty) {
-                    return emptyWorkspaceMessage(
-                      'No highlights match this search.',
-                      onClearSearch: clearWorkspaceSearch,
-                    );
-                  }
-
-                  return ListView.builder(
-                    primary: false,
-                    itemCount: highlights.length,
-                    itemBuilder: (context, index) {
-                      final highlight = highlights[index];
-                      final page = highlight.pageNumber;
-
-                      return workspaceClickableCard(
-                        child: ListTile(
-                          hoverColor: Colors.greenAccent.withValues(
-                            alpha: 0.08,
-                          ),
-                          leading: Container(
-                            width: 14,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: readerHighlightColor(highlight.color),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                          title: Text(
-                            highlight.selectedText,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 4),
-                              Text(
-                                'Page $page | ${highlight.displayColor}',
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              Text(
-                                formatReaderHighlightTime(highlight),
-                                style: const TextStyle(color: Colors.white54),
-                              ),
-                              if (highlight.hasNote) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  highlight.note,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Colors.white70),
-                                ),
-                              ],
-                            ],
-                          ),
-                          trailing: const Icon(
-                            Icons.open_in_new,
-                            color: Colors.greenAccent,
-                            size: 18,
-                          ),
-                          onTap: () {
-                            Navigator.of(dialogContext).pop();
-                            openPdfPage(
-                              page,
-                              source: 'reader_workspace_highlight',
-                            );
-                          },
+                  return Column(
+                    children: [
+                      DropdownButtonFormField<String>(
+                        initialValue: workspaceHighlightColorFilter,
+                        dropdownColor: const Color(0xFF1A1D26),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Highlight color',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          border: OutlineInputBorder(),
                         ),
-                      );
-                    },
+                        items:
+                            [
+                                  'All',
+                                  ...readerHighlightColors.keys.map(
+                                    readerHighlightColorLabel,
+                                  ),
+                                ]
+                                .map(
+                                  (color) => DropdownMenuItem<String>(
+                                    value: color,
+                                    child: Text(color),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (color) {
+                          if (color == null) return;
+                          setDialogState(() {
+                            workspaceHighlightColorFilter = color;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: highlights.isEmpty
+                            ? emptyWorkspaceMessage(
+                                'No highlights match these filters.',
+                                onClearSearch: clearWorkspaceNoteFilters,
+                                clearLabel: 'Clear highlight filters',
+                              )
+                            : ListView.builder(
+                                primary: false,
+                                itemCount: highlights.length,
+                                itemBuilder: (context, index) {
+                                  final highlight = highlights[index];
+                                  final page = highlight.pageNumber;
+
+                                  return workspaceClickableCard(
+                                    child: ListTile(
+                                      hoverColor: Colors.greenAccent.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                      leading: Container(
+                                        width: 14,
+                                        height: 48,
+                                        decoration: BoxDecoration(
+                                          color: readerHighlightColor(
+                                            highlight.color,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                      ),
+                                      title: Text(
+                                        highlight.selectedText,
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      subtitle: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Page $page | ${highlight.displayColor}',
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                          Text(
+                                            formatReaderHighlightTime(
+                                              highlight,
+                                            ),
+                                            style: const TextStyle(
+                                              color: Colors.white54,
+                                            ),
+                                          ),
+                                          if (highlight.hasNote) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              highlight.note,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white70,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      trailing: const Icon(
+                                        Icons.open_in_new,
+                                        color: Colors.greenAccent,
+                                        size: 18,
+                                      ),
+                                      onTap: () {
+                                        Navigator.of(dialogContext).pop();
+                                        openPdfPage(
+                                          page,
+                                          source: 'reader_workspace_highlight',
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
                   );
                 },
               );
@@ -4282,10 +4349,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               icon: Icons.border_color,
                               label: 'Highlights',
                               countBuilder: (highlights) =>
-                                  ReaderHighlight.search(
-                                    highlights,
-                                    workspaceSearchQuery,
-                                  ).length,
+                                  filterWorkspaceHighlights(highlights).length,
                             ),
                             workspaceCountTab<ReaderNote>(
                               stream: readerNoteRepository.watchForDocument(
