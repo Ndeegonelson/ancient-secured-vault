@@ -21,6 +21,7 @@ import 'services/reader_bookmark_repository.dart';
 import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
+import 'services/reader_workspace_filters.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
@@ -3384,39 +3385,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     var workspaceHighlightColorFilter = 'All';
     var workspaceNoteCategoryFilter = 'All';
 
-    bool positionMatchesSearch(ReaderSavedPosition position, String query) {
-      final normalizedQuery = query.trim().toLowerCase();
-      if (normalizedQuery.isEmpty) return true;
-
-      final page = position.pageNumber;
-      return 'page $page'.contains(normalizedQuery) ||
-          page.toString().contains(normalizedQuery);
-    }
-
     List<ReaderNote> filterWorkspaceNotes(Iterable<ReaderNote> notes) {
-      final matchingNotes = ReaderNote.search(notes, workspaceSearchQuery);
-      if (workspaceNoteCategoryFilter == 'All') return matchingNotes;
-
-      return matchingNotes
-          .where((note) => note.displayCategory == workspaceNoteCategoryFilter)
-          .toList();
+      return ReaderWorkspaceFilters.filterNotes(
+        notes: notes,
+        query: workspaceSearchQuery,
+        categoryFilter: workspaceNoteCategoryFilter,
+      );
     }
 
     List<ReaderHighlight> filterWorkspaceHighlights(
       Iterable<ReaderHighlight> highlights,
     ) {
-      final matchingHighlights = ReaderHighlight.search(
-        highlights,
-        workspaceSearchQuery,
+      return ReaderWorkspaceFilters.filterHighlights(
+        highlights: highlights,
+        query: workspaceSearchQuery,
+        colorFilter: workspaceHighlightColorFilter,
       );
-      if (workspaceHighlightColorFilter == 'All') return matchingHighlights;
-
-      final filterColor = normalizeReaderHighlightColor(
-        workspaceHighlightColorFilter,
-      );
-      return matchingHighlights
-          .where((highlight) => highlight.color == filterColor)
-          .toList();
     }
 
     Widget emptyWorkspaceMessage(
@@ -3745,14 +3729,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                     emptySubtitle: 'No saved positions yet',
                                     filledSubtitleBuilder: (positions) =>
                                         'Latest: page ${positions.first.pageNumber}',
-                                    filterBuilder: (positions) => positions
-                                        .where(
-                                          (position) => positionMatchesSearch(
-                                            position,
-                                            workspaceSearchQuery,
-                                          ),
-                                        )
-                                        .toList(),
+                                    filterBuilder: (positions) =>
+                                        ReaderWorkspaceFilters.filterPositions(
+                                          positions,
+                                          workspaceSearchQuery,
+                                        ),
                                     tabIndex: 1,
                                   ),
                             ),
@@ -3831,14 +3812,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   }
 
                   final allPositions = snapshot.data!;
-                  final positions = allPositions
-                      .where(
-                        (position) => positionMatchesSearch(
-                          position,
-                          workspaceSearchQuery,
-                        ),
-                      )
-                      .toList();
+                  final positions = ReaderWorkspaceFilters.filterPositions(
+                    allPositions,
+                    workspaceSearchQuery,
+                  );
 
                   if (allPositions.isEmpty) {
                     return emptyWorkspaceMessage(
@@ -4318,14 +4295,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               ),
                               icon: Icons.history,
                               label: 'Positions',
-                              countBuilder: (positions) => positions
-                                  .where(
-                                    (position) => positionMatchesSearch(
-                                      position,
-                                      workspaceSearchQuery,
-                                    ),
-                                  )
-                                  .length,
+                              countBuilder: (positions) =>
+                                  ReaderWorkspaceFilters.filterPositions(
+                                    positions,
+                                    workspaceSearchQuery,
+                                  ).length,
                             ),
                             workspaceCountTab<ReaderBookmark>(
                               stream: readerBookmarkRepository.watchForDocument(
