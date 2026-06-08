@@ -32,7 +32,7 @@ class ReaderNote {
       color: data['color']?.toString() ?? 'yellow',
       documentKey: data['documentKey']?.toString() ?? '',
       storagePath: data['storagePath']?.toString() ?? '',
-      category: data['category']?.toString() ?? '',
+      category: _readCategory(data['category']),
       pageNumber: _readPageNumber(data['pageNumber']),
       createdAt: data['createdAt'],
       updatedAt: data['updatedAt'],
@@ -53,6 +53,7 @@ class ReaderNote {
   final dynamic updatedAt;
 
   dynamic get latestTimestamp => updatedAt is Timestamp ? updatedAt : createdAt;
+  String get displayCategory => _readCategory(category);
 
   bool matchesSearch(String query) {
     final normalizedQuery = query.trim().toLowerCase();
@@ -61,7 +62,7 @@ class ReaderNote {
     final searchableText = [
       note,
       selectedText,
-      category,
+      displayCategory,
       color,
       'page $pageNumber',
       pageNumber.toString(),
@@ -97,6 +98,11 @@ class ReaderNote {
     final page = int.tryParse(value.toString()) ?? 1;
     return page < 1 ? 1 : page;
   }
+
+  static String _readCategory(dynamic value) {
+    final category = value?.toString().trim();
+    return category == null || category.isEmpty ? 'General' : category;
+  }
 }
 
 class ReaderNoteDraft {
@@ -109,7 +115,7 @@ class ReaderNoteDraft {
     this.color = 'yellow',
     this.documentKey = '',
     this.storagePath = '',
-    this.category = '',
+    this.category = 'General',
   });
 
   final String userEmail;
@@ -131,7 +137,11 @@ abstract interface class ReaderNoteStore {
 
   Future<void> save(ReaderNoteDraft note);
 
-  Future<void> updateNote({required String noteId, required String note});
+  Future<void> updateNote({
+    required String noteId,
+    required String note,
+    required String category,
+  });
 
   Future<void> delete(String noteId);
 }
@@ -173,9 +183,14 @@ class ReaderNoteRepository implements ReaderNoteStore {
   }
 
   @override
-  Future<void> updateNote({required String noteId, required String note}) {
+  Future<void> updateNote({
+    required String noteId,
+    required String note,
+    required String category,
+  }) {
     return _collection.doc(noteId).update({
       'note': note,
+      'category': category,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

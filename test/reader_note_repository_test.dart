@@ -50,6 +50,17 @@ void main() {
     expect(sorted.map((note) => note.id), ['updated', 'older', 'pending']);
   });
 
+  test('uses General as the category for older uncategorized notes', () {
+    final note = ReaderNote.fromMap({
+      'note': 'Legacy note',
+      'pageNumber': 5,
+    }, id: 'legacy');
+
+    expect(note.category, 'General');
+    expect(note.displayCategory, 'General');
+    expect(note.matchesSearch('general'), isTrue);
+  });
+
   test(
     'searches notes by text, selected passage, category, color, and page',
     () {

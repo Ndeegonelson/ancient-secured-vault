@@ -370,6 +370,13 @@ class UserAccessState {
   }
 }
 
+class _ReaderNoteEditResult {
+  const _ReaderNoteEditResult({required this.note, required this.category});
+
+  final String note;
+  final String category;
+}
+
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
@@ -1569,6 +1576,23 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final page = int.tryParse(value.toString()) ?? 1;
 
     return page < 1 ? 1 : page;
+  }
+
+  static const List<String> readerNoteCategories = [
+    'General',
+    'Research',
+    'Action',
+    'Question',
+    'Important',
+  ];
+
+  String normalizeReaderNoteCategory(String value) {
+    final category = value.trim();
+    if (category.isEmpty) return readerNoteCategories.first;
+
+    return readerNoteCategories.contains(category)
+        ? category
+        : readerNoteCategories.first;
   }
 
   String formatReaderNoteTime(ReaderNote note) {
@@ -3577,100 +3601,150 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               if (!canUseViewerTools('add_reader_note')) return;
 
               final noteController = TextEditingController();
+              var selectedCategory = readerNoteCategories.first;
 
               showDialog(
                 barrierDismissible: false,
                 context: context,
                 builder: (dialogContext) {
-                  return PointerInterceptor(
-                    child: AlertDialog(
-                      backgroundColor: const Color(0xFF0F1117),
-                      title: const Text(
-                        'Add Note',
-                        style: TextStyle(color: Colors.greenAccent),
-                      ),
-                      content: TextField(
-                        autofocus: true,
-                        controller: noteController,
-                        maxLines: 5,
-                        textInputAction: TextInputAction.newline,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: 'Note',
-                          labelStyle: const TextStyle(color: Colors.white70),
-                          hintText: 'Write a note for this PDF',
-                          hintStyle: const TextStyle(color: Colors.white54),
-                          helperText: 'Linked to page $currentPdfPage',
-                          helperStyle: const TextStyle(color: Colors.white54),
-                          border: const OutlineInputBorder(),
-                        ),
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                          child: const Text(
-                            'Cancel',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            final noteText = noteController.text.trim();
-
-                            if (noteText.isEmpty) {
-                              ScaffoldMessenger.of(
-                                context,
-                              ).hideCurrentSnackBar();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Write a note before saving.'),
-                                ),
-                              );
-                              return;
-                            }
-
-                            final userEmail =
-                                FirebaseAuth.instance.currentUser?.email;
-                            if (userEmail == null || userEmail.isEmpty) return;
-
-                            await readerNoteRepository.save(
-                              ReaderNoteDraft(
-                                userEmail: userEmail,
-                                pdfTitle: widget.title,
-                                note: noteText,
-                                documentKey: readerDocumentKey,
-                                storagePath: normalizedReaderStoragePath,
-                                pageNumber: currentPdfPage,
-                              ),
-                            );
-
-                            await logReaderAction(
-                              action: 'add_reader_note',
-                              details: {
-                                'noteLength': noteText.length,
-                                'pageNumber': currentPdfPage,
-                              },
-                            );
-
-                            if (!dialogContext.mounted) return;
-
-                            Navigator.of(dialogContext).pop();
-
-                            if (!context.mounted) return;
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Note saved successfully'),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            'Save',
+                  return StatefulBuilder(
+                    builder: (context, setDialogState) {
+                      return PointerInterceptor(
+                        child: AlertDialog(
+                          backgroundColor: const Color(0xFF0F1117),
+                          title: const Text(
+                            'Add Note',
                             style: TextStyle(color: Colors.greenAccent),
                           ),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              DropdownButtonFormField<String>(
+                                initialValue: selectedCategory,
+                                dropdownColor: const Color(0xFF1A1D26),
+                                style: const TextStyle(color: Colors.white),
+                                decoration: const InputDecoration(
+                                  labelText: 'Category',
+                                  labelStyle: TextStyle(color: Colors.white70),
+                                  border: OutlineInputBorder(),
+                                ),
+                                items: readerNoteCategories
+                                    .map(
+                                      (category) => DropdownMenuItem<String>(
+                                        value: category,
+                                        child: Text(category),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (category) {
+                                  if (category == null) return;
+                                  setDialogState(() {
+                                    selectedCategory = category;
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                autofocus: true,
+                                controller: noteController,
+                                maxLines: 5,
+                                textInputAction: TextInputAction.newline,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  labelText: 'Note',
+                                  labelStyle: const TextStyle(
+                                    color: Colors.white70,
+                                  ),
+                                  hintText: 'Write a note for this PDF',
+                                  hintStyle: const TextStyle(
+                                    color: Colors.white54,
+                                  ),
+                                  helperText: 'Linked to page $currentPdfPage',
+                                  helperStyle: const TextStyle(
+                                    color: Colors.white54,
+                                  ),
+                                  border: const OutlineInputBorder(),
+                                ),
+                              ),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(),
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                final noteText = noteController.text.trim();
+
+                                if (noteText.isEmpty) {
+                                  ScaffoldMessenger.of(
+                                    context,
+                                  ).hideCurrentSnackBar();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Write a note before saving.',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
+
+                                final userEmail =
+                                    FirebaseAuth.instance.currentUser?.email;
+                                if (userEmail == null || userEmail.isEmpty) {
+                                  return;
+                                }
+
+                                await readerNoteRepository.save(
+                                  ReaderNoteDraft(
+                                    userEmail: userEmail,
+                                    pdfTitle: widget.title,
+                                    note: noteText,
+                                    documentKey: readerDocumentKey,
+                                    storagePath: normalizedReaderStoragePath,
+                                    category: normalizeReaderNoteCategory(
+                                      selectedCategory,
+                                    ),
+                                    pageNumber: currentPdfPage,
+                                  ),
+                                );
+
+                                await logReaderAction(
+                                  action: 'add_reader_note',
+                                  details: {
+                                    'noteLength': noteText.length,
+                                    'pageNumber': currentPdfPage,
+                                    'category': selectedCategory,
+                                  },
+                                );
+
+                                if (!dialogContext.mounted) return;
+
+                                Navigator.of(dialogContext).pop();
+
+                                if (!context.mounted) return;
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Note saved successfully'),
+                                  ),
+                                );
+                              },
+                              child: const Text(
+                                'Save',
+                                style: TextStyle(color: Colors.greenAccent),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   );
                 },
               ).whenComplete(noteController.dispose);
@@ -3699,6 +3773,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
               final noteSearchController = TextEditingController();
               var noteSearchQuery = '';
+              var noteCategoryFilter = 'All';
 
               showDialog(
                 barrierDismissible: false,
@@ -3715,7 +3790,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                           ),
                           content: SizedBox(
                             width: 400,
-                            height: 490,
+                            height: 540,
                             child: Column(
                               children: [
                                 TextField(
@@ -3742,6 +3817,33 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                   },
                                 ),
                                 const SizedBox(height: 12),
+                                DropdownButtonFormField<String>(
+                                  initialValue: noteCategoryFilter,
+                                  dropdownColor: const Color(0xFF1A1D26),
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Category',
+                                    labelStyle: TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  items: ['All', ...readerNoteCategories]
+                                      .map(
+                                        (category) => DropdownMenuItem<String>(
+                                          value: category,
+                                          child: Text(category),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (category) {
+                                    if (category == null) return;
+                                    setDialogState(() {
+                                      noteCategoryFilter = category;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 12),
                                 Expanded(
                                   child: StreamBuilder<List<ReaderNote>>(
                                     stream: readerNoteRepository
@@ -3757,10 +3859,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                       }
 
                                       final allNotes = snapshot.data!;
-                                      final notes = ReaderNote.search(
+                                      final matchingNotes = ReaderNote.search(
                                         allNotes,
                                         noteSearchQuery,
                                       );
+                                      final notes = noteCategoryFilter == 'All'
+                                          ? matchingNotes
+                                          : matchingNotes
+                                                .where(
+                                                  (note) =>
+                                                      note.displayCategory ==
+                                                      noteCategoryFilter,
+                                                )
+                                                .toList();
 
                                       if (allNotes.isEmpty) {
                                         return const Center(
@@ -3795,6 +3906,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                             note,
                                           );
                                           final notePreview = note.note;
+                                          final noteCategory =
+                                              note.displayCategory;
 
                                           return Card(
                                             color: const Color(0xFF1A1D26),
@@ -3822,7 +3935,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                 children: [
                                                   const SizedBox(height: 4),
                                                   Text(
-                                                    'Page $notePage',
+                                                    'Page $notePage | $noteCategory',
                                                     style: const TextStyle(
                                                       color: Colors.white70,
                                                     ),
@@ -3851,8 +3964,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                           TextEditingController(
                                                             text: note.note,
                                                           );
+                                                      var selectedEditCategory =
+                                                          normalizeReaderNoteCategory(
+                                                            note.category,
+                                                          );
 
-                                                      final updatedNote = await showDialog(
+                                                      final updatedNote = await showDialog<_ReaderNoteEditResult>(
                                                         context: context,
 
                                                         builder: (context) {
@@ -3885,6 +4002,56 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                                       color: Colors
                                                                           .white70,
                                                                     ),
+                                                                  ),
+                                                                  const SizedBox(
+                                                                    height: 12,
+                                                                  ),
+                                                                  DropdownButtonFormField<
+                                                                    String
+                                                                  >(
+                                                                    initialValue:
+                                                                        selectedEditCategory,
+                                                                    dropdownColor:
+                                                                        const Color(
+                                                                          0xFF1A1D26,
+                                                                        ),
+                                                                    style: const TextStyle(
+                                                                      color: Colors
+                                                                          .white,
+                                                                    ),
+                                                                    decoration: const InputDecoration(
+                                                                      labelText:
+                                                                          'Category',
+                                                                      labelStyle: TextStyle(
+                                                                        color: Colors
+                                                                            .white70,
+                                                                      ),
+                                                                      border:
+                                                                          OutlineInputBorder(),
+                                                                    ),
+                                                                    items: readerNoteCategories
+                                                                        .map(
+                                                                          (
+                                                                            category,
+                                                                          ) =>
+                                                                              DropdownMenuItem<
+                                                                                String
+                                                                              >(
+                                                                                value: category,
+                                                                                child: Text(
+                                                                                  category,
+                                                                                ),
+                                                                              ),
+                                                                        )
+                                                                        .toList(),
+                                                                    onChanged: (category) {
+                                                                      if (category ==
+                                                                          null) {
+                                                                        return;
+                                                                      }
+                                                                      selectedEditCategory =
+                                                                          category;
+                                                                    },
                                                                   ),
                                                                   const SizedBox(
                                                                     height: 12,
@@ -3929,11 +4096,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
                                                                 TextButton(
                                                                   onPressed: () {
+                                                                    final updatedText =
+                                                                        editController
+                                                                            .text
+                                                                            .trim();
                                                                     Navigator.pop(
                                                                       context,
-                                                                      editController
-                                                                          .text
-                                                                          .trim(),
+                                                                      _ReaderNoteEditResult(
+                                                                        note:
+                                                                            updatedText,
+                                                                        category:
+                                                                            selectedEditCategory,
+                                                                      ),
                                                                     );
                                                                   },
 
@@ -3958,7 +4132,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                       }
 
                                                       if (updatedNote
-                                                          .toString()
+                                                          .note
                                                           .isEmpty) {
                                                         if (!context.mounted)
                                                           return;
@@ -3982,7 +4156,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                           .updateNote(
                                                             noteId: noteId,
                                                             note: updatedNote
-                                                                .toString(),
+                                                                .note,
+                                                            category:
+                                                                normalizeReaderNoteCategory(
+                                                                  updatedNote
+                                                                      .category,
+                                                                ),
                                                           );
 
                                                       await logReaderAction(
@@ -3992,10 +4171,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                           'noteId': noteId,
                                                           'noteLength':
                                                               updatedNote
-                                                                  .toString()
+                                                                  .note
                                                                   .length,
                                                           'pageNumber':
                                                               notePage,
+                                                          'category':
+                                                              updatedNote
+                                                                  .category,
                                                         },
                                                       );
 
