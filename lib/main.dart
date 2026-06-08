@@ -17,6 +17,7 @@ import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
 import 'services/reader_narration_playback_coordinator.dart';
 import 'services/reader_narration_voice_catalog_presenter.dart';
+import 'services/reader_bookmark_repository.dart';
 import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
@@ -1505,6 +1506,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   narrationPreferencesController;
   late final ReaderNarrationSessionRepository narrationSessionRepository;
   late final ReaderNarrationSessionTracker narrationSessionTracker;
+  late final ReaderBookmarkRepository readerBookmarkRepository;
   late final ReaderHighlightRepository readerHighlightRepository;
   late final ReaderNoteRepository readerNoteRepository;
   late final ReaderSavedPositionRepository savedPositionRepository;
@@ -1642,6 +1644,16 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   String formatReaderHighlightTime(ReaderHighlight highlight) {
     return 'Saved: ${formatSavedPositionTime(highlight.createdAt)}';
+  }
+
+  String formatReaderBookmarkTime(ReaderBookmark bookmark) {
+    final updatedAt = bookmark.updatedAt;
+
+    if (updatedAt is Timestamp) {
+      return 'Updated: ${formatReaderTimestamp(updatedAt.toDate())}';
+    }
+
+    return 'Saved: ${formatSavedPositionTime(bookmark.createdAt)}';
   }
 
   String formatSearchResultSummary(List<Map<String, dynamic>> results) {
@@ -2064,6 +2076,442 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
 
     return true;
+  }
+
+  Future<String?> promptReaderBookmarkLabel({
+    required int pageNumber,
+    String initialLabel = '',
+  }) {
+    final labelController = TextEditingController(text: initialLabel);
+
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: Text(
+              initialLabel.trim().isEmpty ? 'Add Bookmark' : 'Edit Bookmark',
+              style: const TextStyle(color: Colors.greenAccent),
+            ),
+            content: TextField(
+              controller: labelController,
+              autofocus: true,
+              maxLength: 80,
+              textInputAction: TextInputAction.done,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Label',
+                labelStyle: const TextStyle(color: Colors.white70),
+                hintText: 'Optional label for page $pageNumber',
+                hintStyle: const TextStyle(color: Colors.white38),
+                helperText: 'Linked to page $pageNumber',
+                helperStyle: const TextStyle(color: Colors.white54),
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (value) {
+                Navigator.of(dialogContext).pop(value.trim());
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(
+                  dialogContext,
+                ).pop(labelController.text.trim()),
+                child: const Text(
+                  'Save',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).whenComplete(labelController.dispose);
+  }
+
+  Future<void> addReaderBookmark() async {
+    if (!canUseViewerTools('add_reader_bookmark')) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final userEmail = user?.email;
+    if (user == null || userEmail == null || userEmail.isEmpty) return;
+
+    final page = currentPdfPage < 1 ? 1 : currentPdfPage;
+    final label = await promptReaderBookmarkLabel(pageNumber: page);
+    if (label == null || !mounted) return;
+
+    late final int pageCount;
+
+    try {
+      pageCount = await loadPdfPageCount();
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      return;
+    }
+
+    if (page > pageCount) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('This document has only $pageCount pages.')),
+      );
+      return;
+    }
+
+    await readerBookmarkRepository.save(
+      ReaderBookmarkDraft(
+        userEmail: userEmail,
+        pdfTitle: widget.title,
+        label: label,
+        documentKey: readerDocumentKey,
+        storagePath: normalizedReaderStoragePath,
+        pageNumber: page,
+      ),
+    );
+
+    await logReaderAction(
+      action: 'add_reader_bookmark',
+      details: {
+        'pageNumber': page,
+        'pageCount': pageCount,
+        'hasLabel': label.trim().isNotEmpty,
+      },
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Bookmark saved: Page $page')));
+  }
+
+  Future<void> showReaderBookmarksDialog() async {
+    if (!canUseViewerTools('view_reader_bookmarks')) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final userEmail = user?.email;
+    if (user == null || userEmail == null || userEmail.isEmpty) return;
+
+    await logReaderAction(action: 'view_reader_bookmarks');
+
+    if (!mounted) return;
+
+    final bookmarkSearchController = TextEditingController();
+    var bookmarkSearchQuery = '';
+
+    showDialog(
+      barrierDismissible: false,
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Reader Bookmarks',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 420,
+                  height: 520,
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: bookmarkSearchController,
+                        textInputAction: TextInputAction.search,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: Colors.greenAccent,
+                          ),
+                          labelText: 'Search bookmarks',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          hintText: 'Label or page',
+                          hintStyle: TextStyle(color: Colors.white38),
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            bookmarkSearchQuery = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: StreamBuilder<List<ReaderBookmark>>(
+                          stream: readerBookmarkRepository.watchForDocument(
+                            userEmail: userEmail,
+                            pdfTitle: widget.title,
+                          ),
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
+
+                            final allBookmarks = snapshot.data!;
+                            final bookmarks = ReaderBookmark.search(
+                              allBookmarks,
+                              bookmarkSearchQuery,
+                            );
+
+                            if (allBookmarks.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No bookmarks saved for this PDF yet.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
+
+                            if (bookmarks.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No bookmarks match this search.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
+
+                            return ListView.builder(
+                              primary: false,
+                              itemCount: bookmarks.length,
+                              itemBuilder: (context, index) {
+                                final bookmark = bookmarks[index];
+                                final bookmarkId = bookmark.id;
+                                final bookmarkPage = bookmark.pageNumber;
+
+                                return Card(
+                                  color: const Color(0xFF1A1D26),
+                                  child: ListTile(
+                                    onTap: () {
+                                      Navigator.of(dialogContext).pop();
+                                      openPdfPage(
+                                        bookmarkPage,
+                                        source: 'reader_bookmark',
+                                      );
+                                    },
+                                    leading: const Icon(
+                                      Icons.bookmark,
+                                      color: Colors.greenAccent,
+                                    ),
+                                    title: Text(
+                                      bookmark.displayLabel,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Page $bookmarkPage',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        Text(
+                                          formatReaderBookmarkTime(bookmark),
+                                          style: const TextStyle(
+                                            color: Colors.white54,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'Edit bookmark label',
+                                          icon: const Icon(
+                                            Icons.edit,
+                                            color: Colors.greenAccent,
+                                          ),
+                                          onPressed: () async {
+                                            final updatedLabel =
+                                                await promptReaderBookmarkLabel(
+                                                  pageNumber: bookmarkPage,
+                                                  initialLabel: bookmark.label,
+                                                );
+
+                                            if (updatedLabel == null) return;
+
+                                            await readerBookmarkRepository
+                                                .updateLabel(
+                                                  bookmarkId: bookmarkId,
+                                                  label: updatedLabel,
+                                                );
+
+                                            await logReaderAction(
+                                              action: 'edit_reader_bookmark',
+                                              details: {
+                                                'bookmarkId': bookmarkId,
+                                                'pageNumber': bookmarkPage,
+                                                'hasLabel': updatedLabel
+                                                    .trim()
+                                                    .isNotEmpty,
+                                              },
+                                            );
+
+                                            if (!context.mounted) return;
+
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).hideCurrentSnackBar();
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Bookmark updated',
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Delete bookmark',
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            color: Colors.redAccent,
+                                          ),
+                                          onPressed: () async {
+                                            final confirmDelete =
+                                                await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (confirmContext) {
+                                                    return PointerInterceptor(
+                                                      child: AlertDialog(
+                                                        backgroundColor:
+                                                            const Color(
+                                                              0xFF0F1117,
+                                                            ),
+                                                        title: const Text(
+                                                          'Delete Bookmark?',
+                                                          style: TextStyle(
+                                                            color: Colors
+                                                                .redAccent,
+                                                          ),
+                                                        ),
+                                                        content: Text(
+                                                          'Remove the bookmark for page $bookmarkPage?',
+                                                          style:
+                                                              const TextStyle(
+                                                                color: Colors
+                                                                    .white70,
+                                                              ),
+                                                        ),
+                                                        actions: [
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                  confirmContext,
+                                                                  false,
+                                                                ),
+                                                            child: const Text(
+                                                              'Cancel',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .white70,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                  confirmContext,
+                                                                  true,
+                                                                ),
+                                                            child: const Text(
+                                                              'Delete',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .redAccent,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                );
+
+                                            if (confirmDelete != true) return;
+
+                                            await readerBookmarkRepository
+                                                .delete(bookmarkId);
+
+                                            await logReaderAction(
+                                              action: 'delete_reader_bookmark',
+                                              details: {
+                                                'bookmarkId': bookmarkId,
+                                                'pageNumber': bookmarkPage,
+                                              },
+                                            );
+
+                                            if (!context.mounted) return;
+
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).hideCurrentSnackBar();
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Bookmark deleted',
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(bookmarkSearchController.dispose);
   }
 
   List<TextSpan> highlightSearchText(String text, String keyword) {
@@ -3422,6 +3870,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
     narrationSessionRepository = ReaderNarrationSessionRepository();
     narrationSessionTracker = ReaderNarrationSessionTracker();
+    readerBookmarkRepository = ReaderBookmarkRepository();
     readerHighlightRepository = ReaderHighlightRepository();
     readerNoteRepository = ReaderNoteRepository();
     savedPositionRepository = ReaderSavedPositionRepository();
@@ -4224,6 +4673,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 },
               );
             },
+          ),
+          IconButton(
+            tooltip: 'Bookmark current page',
+            icon: const Icon(
+              Icons.bookmark_add_outlined,
+              size: 20,
+              color: Colors.greenAccent,
+            ),
+            onPressed: addReaderBookmark,
+          ),
+          IconButton(
+            tooltip: 'Reader bookmarks',
+            icon: const Icon(
+              Icons.bookmarks_outlined,
+              size: 20,
+              color: Colors.greenAccent,
+            ),
+            onPressed: showReaderBookmarksDialog,
           ),
           IconButton(
             tooltip: 'Add reader highlight',
