@@ -23,20 +23,90 @@ class ReaderTextSelectionDialog extends StatefulWidget {
 }
 
 class _ReaderTextSelectionDialogState extends State<ReaderTextSelectionDialog> {
+  static const int _maximumPassageCharacters = 520;
+
   String _selectedText = '';
+  int? _selectedPassageIndex;
 
-  void _updateSelection(String text, TextSelection selection) {
-    final start = selection.start.clamp(0, text.length);
-    final end = selection.end.clamp(start, text.length);
-    final selectedText = selection.isCollapsed
-        ? ''
-        : text.substring(start, end).trim();
-
-    if (_selectedText == selectedText) return;
-
+  void _selectPassage(_SelectablePassage passage) {
     setState(() {
-      _selectedText = selectedText;
+      _selectedText = passage.text;
+      _selectedPassageIndex = passage.index;
     });
+  }
+
+  List<_SelectablePassage> _passagesFor(String text) {
+    final blocks = text
+        .split(RegExp(r'\n\s*\n+'))
+        .map(_cleanPassage)
+        .where((block) => block.isNotEmpty)
+        .toList();
+    final sourceBlocks = blocks.isEmpty ? [_cleanPassage(text)] : blocks;
+    final passages = <_SelectablePassage>[];
+
+    for (final block in sourceBlocks) {
+      for (final chunk in _chunkPassage(block)) {
+        passages.add(_SelectablePassage(index: passages.length, text: chunk));
+      }
+    }
+
+    return passages;
+  }
+
+  List<String> _chunkPassage(String text) {
+    if (text.length <= _maximumPassageCharacters) return [text];
+
+    final chunks = <String>[];
+    final sentences = RegExp(
+      r'''[^.!?]+(?:[.!?]+["')\]]*)?\s*''',
+    ).allMatches(text).map((match) => match.group(0)!.trim()).toList();
+    final sourceSentences = sentences.isEmpty ? [text] : sentences;
+    var current = '';
+
+    for (final sentence in sourceSentences) {
+      if (sentence.length > _maximumPassageCharacters) {
+        if (current.isNotEmpty) {
+          chunks.add(current);
+          current = '';
+        }
+        chunks.addAll(_chunkLongText(sentence));
+        continue;
+      }
+
+      final candidate = current.isEmpty ? sentence : '$current $sentence';
+      if (candidate.length <= _maximumPassageCharacters) {
+        current = candidate;
+      } else {
+        if (current.isNotEmpty) chunks.add(current);
+        current = sentence;
+      }
+    }
+
+    if (current.isNotEmpty) chunks.add(current);
+    return chunks;
+  }
+
+  List<String> _chunkLongText(String text) {
+    final chunks = <String>[];
+    final words = text.split(RegExp(r'\s+')).where((word) => word.isNotEmpty);
+    var current = '';
+
+    for (final word in words) {
+      final candidate = current.isEmpty ? word : '$current $word';
+      if (candidate.length <= _maximumPassageCharacters) {
+        current = candidate;
+      } else {
+        if (current.isNotEmpty) chunks.add(current);
+        current = word;
+      }
+    }
+
+    if (current.isNotEmpty) chunks.add(current);
+    return chunks;
+  }
+
+  String _cleanPassage(String text) {
+    return text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   @override
@@ -68,6 +138,7 @@ class _ReaderTextSelectionDialogState extends State<ReaderTextSelectionDialog> {
               }
 
               final text = snapshot.data!.trim();
+              final passages = _passagesFor(text);
 
               if (text.isEmpty) {
                 return const Center(
@@ -98,19 +169,59 @@ class _ReaderTextSelectionDialogState extends State<ReaderTextSelectionDialog> {
                         border: Border.all(color: Colors.white12),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        child: SelectableText(
-                          text,
-                          onSelectionChanged: (selection, cause) {
-                            _updateSelection(text, selection);
-                          },
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 16,
-                            height: 1.5,
-                          ),
-                        ),
+                      child: ListView.separated(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: passages.length,
+                        separatorBuilder: (context, index) =>
+                            const Divider(color: Colors.white10),
+                        itemBuilder: (context, index) {
+                          final passage = passages[index];
+                          final isSelected =
+                              _selectedPassageIndex == passage.index &&
+                              _selectedText == passage.text;
+
+                          return Material(
+                            color: isSelected
+                                ? Colors.greenAccent.withValues(alpha: 0.08)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(6),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: () => _selectPassage(passage),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 12,
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      isSelected
+                                          ? Icons.check_circle
+                                          : Icons.ads_click,
+                                      color: isSelected
+                                          ? Colors.greenAccent
+                                          : Colors.white38,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        passage.text,
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 16,
+                                          height: 1.45,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ),
@@ -135,4 +246,11 @@ class _ReaderTextSelectionDialogState extends State<ReaderTextSelectionDialog> {
       ),
     );
   }
+}
+
+class _SelectablePassage {
+  const _SelectablePassage({required this.index, required this.text});
+
+  final int index;
+  final String text;
 }

@@ -5410,6 +5410,212 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     super.dispose();
   }
 
+  Future<void> showCompactReaderToolsMenu() async {
+    if (!mounted) return;
+
+    final selectedAction = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final menuHeight = (MediaQuery.sizeOf(dialogContext).height * 0.72)
+            .clamp(320.0, 520.0)
+            .toDouble();
+
+        Widget item({
+          required String value,
+          required IconData icon,
+          required String title,
+          String? subtitle,
+        }) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  hoverColor: Colors.greenAccent.withValues(alpha: 0.08),
+                  splashColor: Colors.greenAccent.withValues(alpha: 0.12),
+                  onTap: () => Navigator.of(dialogContext).pop(value),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(icon, color: Colors.greenAccent, size: 22),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                title,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (subtitle != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle,
+                                  style: const TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(
+                          Icons.chevron_right,
+                          color: Colors.white38,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Reader tools',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: SizedBox(
+              width: 360,
+              height: menuHeight,
+              child: ListView(
+                children: [
+                  item(
+                    value: 'selected_narration',
+                    icon: Icons.ads_click,
+                    title: 'Select passage',
+                    subtitle: 'Choose page text for narration',
+                  ),
+                  item(
+                    value: 'workspace',
+                    icon: Icons.dashboard_customize_outlined,
+                    title: 'Reader workspace',
+                  ),
+                  const Divider(color: Colors.white12),
+                  item(
+                    value: 'go_page',
+                    icon: Icons.input,
+                    title: 'Go to page',
+                  ),
+                  item(
+                    value: 'save_position',
+                    icon: Icons.bookmark_add,
+                    title: 'Save reading position',
+                  ),
+                  item(
+                    value: 'saved_positions',
+                    icon: Icons.history,
+                    title: 'Saved reading positions',
+                  ),
+                  const Divider(color: Colors.white12),
+                  item(
+                    value: 'add_bookmark',
+                    icon: Icons.bookmark_add_outlined,
+                    title: 'Bookmark current page',
+                  ),
+                  item(
+                    value: 'bookmarks',
+                    icon: Icons.bookmarks_outlined,
+                    title: 'Reader bookmarks',
+                  ),
+                  const Divider(color: Colors.white12),
+                  item(
+                    value: 'add_highlight',
+                    icon: Icons.border_color,
+                    title: 'Add reader highlight',
+                  ),
+                  item(
+                    value: 'highlights',
+                    icon: Icons.format_color_fill,
+                    title: 'Reader highlights',
+                  ),
+                  const Divider(color: Colors.white12),
+                  item(
+                    value: 'add_note',
+                    icon: Icons.note_add,
+                    title: 'Add reader note',
+                  ),
+                  item(
+                    value: 'notes',
+                    icon: Icons.list_alt,
+                    title: 'Reader notes',
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selectedAction == null || !mounted) return;
+    await runCompactReaderToolAction(selectedAction);
+  }
+
+  Future<void> runCompactReaderToolAction(String value) async {
+    switch (value) {
+      case 'selected_narration':
+        await showSelectedTextNarrationDialog();
+        break;
+      case 'workspace':
+        await showReaderWorkspaceDialog();
+        break;
+      case 'go_page':
+        await showManualPageJumpDialog();
+        break;
+      case 'save_position':
+        await showSaveReadingPositionDialog();
+        break;
+      case 'saved_positions':
+        await showSavedReadingPositionsDialog();
+        break;
+      case 'add_bookmark':
+        await addReaderBookmark();
+        break;
+      case 'bookmarks':
+        await showReaderBookmarksDialog();
+        break;
+      case 'add_highlight':
+        await addReaderHighlight();
+        break;
+      case 'highlights':
+        await showReaderHighlightsDialog();
+        break;
+      case 'add_note':
+        await addReaderNote();
+        break;
+      case 'notes':
+        await showReaderNotesDialog();
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -5708,182 +5914,16 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               );
             },
           ),
-          PopupMenuButton<String>(
-            tooltip: 'More reader tools',
-            icon: const Icon(
-              Icons.more_vert,
-              size: 22,
-              color: Colors.greenAccent,
+          PointerInterceptor(
+            child: IconButton(
+              tooltip: 'More reader tools',
+              onPressed: showCompactReaderToolsMenu,
+              icon: const Icon(
+                Icons.more_vert,
+                size: 22,
+                color: Colors.greenAccent,
+              ),
             ),
-            color: const Color(0xFF1A1D26),
-            onSelected: (value) async {
-              switch (value) {
-                case 'selected_narration':
-                  await showSelectedTextNarrationDialog();
-                  break;
-                case 'workspace':
-                  await showReaderWorkspaceDialog();
-                  break;
-                case 'go_page':
-                  await showManualPageJumpDialog();
-                  break;
-                case 'save_position':
-                  await showSaveReadingPositionDialog();
-                  break;
-                case 'saved_positions':
-                  await showSavedReadingPositionsDialog();
-                  break;
-                case 'add_bookmark':
-                  await addReaderBookmark();
-                  break;
-                case 'bookmarks':
-                  await showReaderBookmarksDialog();
-                  break;
-                case 'add_highlight':
-                  await addReaderHighlight();
-                  break;
-                case 'highlights':
-                  await showReaderHighlightsDialog();
-                  break;
-                case 'add_note':
-                  await addReaderNote();
-                  break;
-                case 'notes':
-                  await showReaderNotesDialog();
-                  break;
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'selected_narration',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.text_snippet_outlined,
-                    color: Colors.greenAccent,
-                  ),
-                  title: Text(
-                    'Narrate selected passage',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'workspace',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.dashboard_customize_outlined,
-                    color: Colors.greenAccent,
-                  ),
-                  title: Text(
-                    'Reader workspace',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'go_page',
-                child: ListTile(
-                  leading: Icon(Icons.input, color: Colors.greenAccent),
-                  title: Text(
-                    'Go to page',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'save_position',
-                child: ListTile(
-                  leading: Icon(Icons.bookmark_add, color: Colors.greenAccent),
-                  title: Text(
-                    'Save reading position',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'saved_positions',
-                child: ListTile(
-                  leading: Icon(Icons.history, color: Colors.greenAccent),
-                  title: Text(
-                    'Saved reading positions',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'add_bookmark',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.bookmark_add_outlined,
-                    color: Colors.greenAccent,
-                  ),
-                  title: Text(
-                    'Bookmark current page',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'bookmarks',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.bookmarks_outlined,
-                    color: Colors.greenAccent,
-                  ),
-                  title: Text(
-                    'Reader bookmarks',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'add_highlight',
-                child: ListTile(
-                  leading: Icon(Icons.border_color, color: Colors.greenAccent),
-                  title: Text(
-                    'Add reader highlight',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'highlights',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.format_color_fill,
-                    color: Colors.greenAccent,
-                  ),
-                  title: Text(
-                    'Reader highlights',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'add_note',
-                child: ListTile(
-                  leading: Icon(Icons.note_add, color: Colors.greenAccent),
-                  title: Text(
-                    'Add reader note',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'notes',
-                child: ListTile(
-                  leading: Icon(Icons.list_alt, color: Colors.greenAccent),
-                  title: Text(
-                    'Reader notes',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-            ],
           ),
         ],
       ),
