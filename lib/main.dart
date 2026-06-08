@@ -22,6 +22,7 @@ import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
 import 'services/reader_workspace_filters.dart';
+import 'services/reader_activity_analytics.dart';
 import 'services/reader_activity_repository.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
@@ -402,6 +403,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String accessFilter = 'all';
   List<Map<String, dynamic>> userNotes = [];
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
+  final ReaderActivityRepository readerActivityRepository =
+      ReaderActivityRepository();
 
   @override
   void initState() {
@@ -424,6 +427,198 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
 
     return false;
+  }
+
+  String formatDashboardTimestamp(dynamic value) {
+    if (value is Timestamp) {
+      final date = value.toDate();
+      final month = date.month.toString().padLeft(2, '0');
+      final day = date.day.toString().padLeft(2, '0');
+      final hour = date.hour.toString().padLeft(2, '0');
+      final minute = date.minute.toString().padLeft(2, '0');
+
+      return '${date.year}-$month-$day $hour:$minute';
+    }
+
+    return 'just now';
+  }
+
+  String formatActivityLabel(ReaderActivityRecord record) {
+    final label = record.activityLabel.replaceAll('_', ' ').trim();
+    if (label.isEmpty) return 'Reader activity';
+
+    return label[0].toUpperCase() + label.substring(1);
+  }
+
+  Future<void> showReaderAnalytics() async {
+    if (!requireVaultManagerAccess()) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Reader Analytics',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: SizedBox(
+              width: 520,
+              child: FutureBuilder<ReaderActivitySummary>(
+                future: readerActivityRepository.loadSummary(
+                  perCollectionLimit: 75,
+                  recentLimit: 6,
+                  topDocumentLimit: 4,
+                ),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Text(
+                      snapshot.error.toString(),
+                      style: const TextStyle(color: Colors.redAccent),
+                    );
+                  }
+
+                  if (!snapshot.hasData) {
+                    return const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: Colors.greenAccent,
+                        ),
+                      ),
+                    );
+                  }
+
+                  final summary = snapshot.data!;
+                  if (!summary.hasActivity) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        'No reader activity has been recorded yet.',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    );
+                  }
+
+                  return SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            _ReaderAnalyticsMetric(
+                              label: 'Events',
+                              value: summary.totalEventCount.toString(),
+                            ),
+                            _ReaderAnalyticsMetric(
+                              label: 'Readers',
+                              value: summary.uniqueReaderCount.toString(),
+                            ),
+                            _ReaderAnalyticsMetric(
+                              label: 'Documents',
+                              value: summary.uniqueDocumentCount.toString(),
+                            ),
+                            _ReaderAnalyticsMetric(
+                              label: 'Blocked',
+                              value: summary.blockedAccessCount.toString(),
+                              color: Colors.orangeAccent,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        const Text(
+                          'Top Documents',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (summary.topDocuments.isEmpty)
+                          const Text(
+                            'No document activity yet.',
+                            style: TextStyle(color: Colors.white54),
+                          )
+                        else
+                          ...summary.topDocuments.map(
+                            (document) => ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(
+                                Icons.picture_as_pdf_outlined,
+                                color: Colors.greenAccent,
+                              ),
+                              title: Text(
+                                document.pdfTitle.isEmpty
+                                    ? document.documentIdentity
+                                    : document.pdfTitle,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              trailing: Text(
+                                document.eventCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        const Divider(color: Colors.white24),
+                        const Text(
+                          'Recent Activity',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...summary.recentRecords.map(
+                          (record) => ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(
+                              record.isBlockedAccess
+                                  ? Icons.lock_outline
+                                  : Icons.timeline,
+                              color: record.isBlockedAccess
+                                  ? Colors.orangeAccent
+                                  : Colors.greenAccent,
+                            ),
+                            title: Text(
+                              formatActivityLabel(record),
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                            subtitle: Text(
+                              '${record.pdfTitle} | '
+                              '${record.userEmail.isEmpty ? 'Unknown reader' : record.userEmail} | '
+                              '${formatDashboardTimestamp(record.createdAt)}',
+                              style: const TextStyle(color: Colors.white38),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Close',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> saveUserNote({
@@ -1218,6 +1413,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               },
             ),
 
+          if (userAccess.isAdmin)
+            IconButton(
+              tooltip: 'Reader Analytics',
+              icon: const Icon(
+                Icons.insights_outlined,
+                color: Colors.greenAccent,
+              ),
+              onPressed: showReaderAnalytics,
+            ),
+
           IconButton(
             icon: const Icon(Icons.search, color: Colors.greenAccent),
 
@@ -1448,6 +1653,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ReaderAnalyticsMetric extends StatelessWidget {
+  const _ReaderAnalyticsMetric({
+    required this.label,
+    required this.value,
+    this.color = Colors.greenAccent,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 112,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ],
       ),
     );
   }
