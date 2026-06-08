@@ -3514,6 +3514,33 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               );
             }
 
+            Widget workspaceTab({
+              required IconData icon,
+              required String label,
+              int? count,
+            }) {
+              final text = count == null ? label : '$label ($count)';
+
+              return Tab(icon: Icon(icon), text: text);
+            }
+
+            Widget workspaceCountTab<T>({
+              required Stream<List<T>> stream,
+              required IconData icon,
+              required String label,
+            }) {
+              return StreamBuilder<List<T>>(
+                stream: stream,
+                builder: (context, snapshot) {
+                  return workspaceTab(
+                    icon: icon,
+                    label: label,
+                    count: snapshot.data?.length,
+                  );
+                },
+              );
+            }
+
             String workspacePreview(String value, {int maximumLength = 44}) {
               final cleaned = value.replaceAll(RegExp(r'\s+'), ' ').trim();
               if (cleaned.length <= maximumLength) return cleaned;
@@ -4037,23 +4064,49 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                           },
                         ),
                         const SizedBox(height: 12),
-                        const TabBar(
+                        TabBar(
                           isScrollable: true,
                           labelColor: Colors.greenAccent,
                           unselectedLabelColor: Colors.white54,
                           indicatorColor: Colors.greenAccent,
                           tabs: [
-                            Tab(
+                            const Tab(
                               icon: Icon(Icons.dashboard_customize_outlined),
                               text: 'Overview',
                             ),
-                            Tab(icon: Icon(Icons.history), text: 'Positions'),
-                            Tab(icon: Icon(Icons.bookmark), text: 'Bookmarks'),
-                            Tab(
-                              icon: Icon(Icons.border_color),
-                              text: 'Highlights',
+                            workspaceCountTab<ReaderSavedPosition>(
+                              stream: savedPositionRepository.watchForDocument(
+                                userEmail: userEmail,
+                                pdfTitle: widget.title,
+                              ),
+                              icon: Icons.history,
+                              label: 'Positions',
                             ),
-                            Tab(icon: Icon(Icons.note_alt), text: 'Notes'),
+                            workspaceCountTab<ReaderBookmark>(
+                              stream: readerBookmarkRepository.watchForDocument(
+                                userEmail: userEmail,
+                                pdfTitle: widget.title,
+                              ),
+                              icon: Icons.bookmark,
+                              label: 'Bookmarks',
+                            ),
+                            workspaceCountTab<ReaderHighlight>(
+                              stream: readerHighlightRepository
+                                  .watchForDocument(
+                                    userEmail: userEmail,
+                                    pdfTitle: widget.title,
+                                  ),
+                              icon: Icons.border_color,
+                              label: 'Highlights',
+                            ),
+                            workspaceCountTab<ReaderNote>(
+                              stream: readerNoteRepository.watchForDocument(
+                                userEmail: userEmail,
+                                pdfTitle: widget.title,
+                              ),
+                              icon: Icons.note_alt,
+                              label: 'Notes',
+                            ),
                           ],
                         ),
                         const SizedBox(height: 12),
