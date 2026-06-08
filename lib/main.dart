@@ -3320,6 +3320,460 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     ).whenComplete(highlightSearchController.dispose);
   }
 
+  Future<void> showReaderWorkspaceDialog() async {
+    if (!canUseViewerTools('view_reader_workspace')) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final userEmail = user?.email;
+    if (user == null || userEmail == null || userEmail.isEmpty) return;
+
+    await logReaderAction(action: 'view_reader_workspace');
+
+    if (!mounted) return;
+
+    final workspaceSearchController = TextEditingController();
+    var workspaceSearchQuery = '';
+
+    bool positionMatchesSearch(ReaderSavedPosition position, String query) {
+      final normalizedQuery = query.trim().toLowerCase();
+      if (normalizedQuery.isEmpty) return true;
+
+      final page = position.pageNumber;
+      return 'page $page'.contains(normalizedQuery) ||
+          page.toString().contains(normalizedQuery);
+    }
+
+    Widget emptyWorkspaceMessage(String message) {
+      return Center(
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+
+    showDialog(
+      barrierDismissible: false,
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Widget positionsTab() {
+              return StreamBuilder<List<ReaderSavedPosition>>(
+                stream: savedPositionRepository.watchForDocument(
+                  userEmail: userEmail,
+                  pdfTitle: widget.title,
+                ),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final allPositions = snapshot.data!;
+                  final positions = allPositions
+                      .where(
+                        (position) => positionMatchesSearch(
+                          position,
+                          workspaceSearchQuery,
+                        ),
+                      )
+                      .toList();
+
+                  if (allPositions.isEmpty) {
+                    return emptyWorkspaceMessage(
+                      'No saved positions for this PDF yet.',
+                    );
+                  }
+
+                  if (positions.isEmpty) {
+                    return emptyWorkspaceMessage(
+                      'No saved positions match this search.',
+                    );
+                  }
+
+                  return ListView.builder(
+                    primary: false,
+                    itemCount: positions.length,
+                    itemBuilder: (context, index) {
+                      final position = positions[index];
+                      final page = position.pageNumber;
+
+                      return Card(
+                        color: const Color(0xFF1A1D26),
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.history,
+                            color: Colors.greenAccent,
+                          ),
+                          title: Text(
+                            'Page $page',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Text(
+                            'Saved: ${formatSavedPositionTime(position.createdAt)}',
+                            style: const TextStyle(color: Colors.white54),
+                          ),
+                          trailing: const Icon(
+                            Icons.open_in_new,
+                            color: Colors.greenAccent,
+                            size: 18,
+                          ),
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            openPdfPage(
+                              page,
+                              source: 'reader_workspace_position',
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            }
+
+            Widget bookmarksTab() {
+              return StreamBuilder<List<ReaderBookmark>>(
+                stream: readerBookmarkRepository.watchForDocument(
+                  userEmail: userEmail,
+                  pdfTitle: widget.title,
+                ),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final allBookmarks = snapshot.data!;
+                  final bookmarks = ReaderBookmark.search(
+                    allBookmarks,
+                    workspaceSearchQuery,
+                  );
+
+                  if (allBookmarks.isEmpty) {
+                    return emptyWorkspaceMessage(
+                      'No bookmarks saved for this PDF yet.',
+                    );
+                  }
+
+                  if (bookmarks.isEmpty) {
+                    return emptyWorkspaceMessage(
+                      'No bookmarks match this search.',
+                    );
+                  }
+
+                  return ListView.builder(
+                    primary: false,
+                    itemCount: bookmarks.length,
+                    itemBuilder: (context, index) {
+                      final bookmark = bookmarks[index];
+                      final page = bookmark.pageNumber;
+
+                      return Card(
+                        color: const Color(0xFF1A1D26),
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.bookmark,
+                            color: Colors.greenAccent,
+                          ),
+                          title: Text(
+                            bookmark.displayLabel,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text(
+                                'Page $page',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              Text(
+                                formatReaderBookmarkTime(bookmark),
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                            ],
+                          ),
+                          trailing: const Icon(
+                            Icons.open_in_new,
+                            color: Colors.greenAccent,
+                            size: 18,
+                          ),
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            openPdfPage(
+                              page,
+                              source: 'reader_workspace_bookmark',
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            }
+
+            Widget highlightsTab() {
+              return StreamBuilder<List<ReaderHighlight>>(
+                stream: readerHighlightRepository.watchForDocument(
+                  userEmail: userEmail,
+                  pdfTitle: widget.title,
+                ),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final allHighlights = snapshot.data!;
+                  final highlights = ReaderHighlight.search(
+                    allHighlights,
+                    workspaceSearchQuery,
+                  );
+
+                  if (allHighlights.isEmpty) {
+                    return emptyWorkspaceMessage(
+                      'No highlights saved for this PDF yet.',
+                    );
+                  }
+
+                  if (highlights.isEmpty) {
+                    return emptyWorkspaceMessage(
+                      'No highlights match this search.',
+                    );
+                  }
+
+                  return ListView.builder(
+                    primary: false,
+                    itemCount: highlights.length,
+                    itemBuilder: (context, index) {
+                      final highlight = highlights[index];
+                      final page = highlight.pageNumber;
+
+                      return Card(
+                        color: const Color(0xFF1A1D26),
+                        child: ListTile(
+                          leading: Container(
+                            width: 14,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: readerHighlightColor(highlight.color),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          title: Text(
+                            highlight.selectedText,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text(
+                                'Page $page | ${highlight.displayColor}',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              Text(
+                                formatReaderHighlightTime(highlight),
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                              if (highlight.hasNote) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  highlight.note,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ],
+                            ],
+                          ),
+                          trailing: const Icon(
+                            Icons.open_in_new,
+                            color: Colors.greenAccent,
+                            size: 18,
+                          ),
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            openPdfPage(
+                              page,
+                              source: 'reader_workspace_highlight',
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            }
+
+            Widget notesTab() {
+              return StreamBuilder<List<ReaderNote>>(
+                stream: readerNoteRepository.watchForDocument(
+                  userEmail: userEmail,
+                  pdfTitle: widget.title,
+                ),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final allNotes = snapshot.data!;
+                  final notes = ReaderNote.search(
+                    allNotes,
+                    workspaceSearchQuery,
+                  );
+
+                  if (allNotes.isEmpty) {
+                    return emptyWorkspaceMessage(
+                      'No notes saved for this PDF yet.',
+                    );
+                  }
+
+                  if (notes.isEmpty) {
+                    return emptyWorkspaceMessage('No notes match this search.');
+                  }
+
+                  return ListView.builder(
+                    primary: false,
+                    itemCount: notes.length,
+                    itemBuilder: (context, index) {
+                      final note = notes[index];
+                      final page = note.pageNumber;
+
+                      return Card(
+                        color: const Color(0xFF1A1D26),
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.note_alt_outlined,
+                            color: Colors.greenAccent,
+                          ),
+                          title: Text(
+                            note.note,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text(
+                                'Page $page | ${note.displayCategory}',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              Text(
+                                formatReaderNoteTime(note),
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                            ],
+                          ),
+                          trailing: const Icon(
+                            Icons.open_in_new,
+                            color: Colors.greenAccent,
+                            size: 18,
+                          ),
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            openPdfPage(page, source: 'reader_workspace_note');
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            }
+
+            return PointerInterceptor(
+              child: DefaultTabController(
+                length: 4,
+                child: AlertDialog(
+                  backgroundColor: const Color(0xFF0F1117),
+                  title: const Text(
+                    'Reader Workspace',
+                    style: TextStyle(color: Colors.greenAccent),
+                  ),
+                  content: SizedBox(
+                    width: 620,
+                    height: 560,
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: workspaceSearchController,
+                          textInputAction: TextInputAction.search,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: const InputDecoration(
+                            prefixIcon: Icon(
+                              Icons.search,
+                              color: Colors.greenAccent,
+                            ),
+                            labelText: 'Search reader workspace',
+                            labelStyle: TextStyle(color: Colors.white70),
+                            hintText: 'Page, label, note, or highlighted text',
+                            hintStyle: TextStyle(color: Colors.white38),
+                            border: OutlineInputBorder(),
+                          ),
+                          onChanged: (value) {
+                            setDialogState(() {
+                              workspaceSearchQuery = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        const TabBar(
+                          isScrollable: true,
+                          labelColor: Colors.greenAccent,
+                          unselectedLabelColor: Colors.white54,
+                          indicatorColor: Colors.greenAccent,
+                          tabs: [
+                            Tab(icon: Icon(Icons.history), text: 'Positions'),
+                            Tab(icon: Icon(Icons.bookmark), text: 'Bookmarks'),
+                            Tab(
+                              icon: Icon(Icons.border_color),
+                              text: 'Highlights',
+                            ),
+                            Tab(icon: Icon(Icons.note_alt), text: 'Notes'),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              positionsTab(),
+                              bookmarksTab(),
+                              highlightsTab(),
+                              notesTab(),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text(
+                        'Close',
+                        style: TextStyle(color: Colors.greenAccent),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(workspaceSearchController.dispose);
+  }
+
   Future<void> loadNarrationPreferences() async {
     await narrationPreferencesController.load(
       context: narrationPreferencesContext,
@@ -4023,6 +4477,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 },
               );
             },
+          ),
+          IconButton(
+            tooltip: 'Reader workspace',
+            icon: const Icon(
+              Icons.dashboard_customize_outlined,
+              size: 20,
+              color: Colors.greenAccent,
+            ),
+            onPressed: showReaderWorkspaceDialog,
           ),
           IconButton(
             tooltip: 'Search in PDF',
