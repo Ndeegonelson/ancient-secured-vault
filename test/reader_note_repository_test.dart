@@ -49,4 +49,36 @@ void main() {
 
     expect(sorted.map((note) => note.id), ['updated', 'older', 'pending']);
   });
+
+  test(
+    'searches notes by text, selected passage, category, color, and page',
+    () {
+      final research = ReaderNote.fromMap({
+        'note': 'Review the banking reference.',
+        'selectedText': 'Central bank policy',
+        'category': 'Research',
+        'color': 'green',
+        'pageNumber': 12,
+      }, id: 'research');
+      final admin = ReaderNote.fromMap({
+        'note': 'Send to admin team.',
+        'category': 'Operations',
+        'color': 'yellow',
+        'pageNumber': 4,
+      }, id: 'admin');
+
+      expect(research.matchesSearch('bank policy'), isTrue);
+      expect(research.matchesSearch('research'), isTrue);
+      expect(research.matchesSearch('green'), isTrue);
+      expect(research.matchesSearch('page 12'), isTrue);
+      expect(research.matchesSearch('missing'), isFalse);
+      expect(
+        ReaderNote.search([
+          research,
+          admin,
+        ], 'operations').map((note) => note.id),
+        ['admin'],
+      );
+    },
+  );
 }

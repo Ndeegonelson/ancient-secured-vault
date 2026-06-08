@@ -54,6 +54,22 @@ class ReaderNote {
 
   dynamic get latestTimestamp => updatedAt is Timestamp ? updatedAt : createdAt;
 
+  bool matchesSearch(String query) {
+    final normalizedQuery = query.trim().toLowerCase();
+    if (normalizedQuery.isEmpty) return true;
+
+    final searchableText = [
+      note,
+      selectedText,
+      category,
+      color,
+      'page $pageNumber',
+      pageNumber.toString(),
+    ].join(' ').toLowerCase();
+
+    return searchableText.contains(normalizedQuery);
+  }
+
   static List<ReaderNote> sortNewest(Iterable<ReaderNote> notes) {
     final sorted = List<ReaderNote>.from(notes);
     sorted.sort((a, b) {
@@ -71,6 +87,10 @@ class ReaderNote {
     });
 
     return sorted;
+  }
+
+  static List<ReaderNote> search(Iterable<ReaderNote> notes, String query) {
+    return notes.where((note) => note.matchesSearch(query)).toList();
   }
 
   static int _readPageNumber(dynamic value) {
