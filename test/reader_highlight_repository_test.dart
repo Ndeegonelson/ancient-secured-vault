@@ -9,6 +9,7 @@ void main() {
       'pdfTitle': 'Protected Guide.pdf',
       'selectedText': 'Important passage',
       'color': 'green',
+      'note': 'Compare this with the funding memo.',
       'documentKey': 'vault_pdfs/protected-guide.pdf',
       'storagePath': 'vault_pdfs/protected-guide.pdf',
       'pageNumber': '0',
@@ -20,6 +21,8 @@ void main() {
     expect(highlight.selectedText, 'Important passage');
     expect(highlight.color, 'green');
     expect(highlight.displayColor, 'Green');
+    expect(highlight.note, 'Compare this with the funding memo.');
+    expect(highlight.hasNote, isTrue);
     expect(highlight.documentKey, 'vault_pdfs/protected-guide.pdf');
     expect(highlight.storagePath, 'vault_pdfs/protected-guide.pdf');
     expect(highlight.pageNumber, 1);
@@ -36,7 +39,7 @@ void main() {
     expect(highlight.displayColor, 'Yellow');
   });
 
-  test('sorts highlights from newest to oldest', () {
+  test('sorts updated highlights before older saved highlights', () {
     final older = ReaderHighlight.fromMap({
       'selectedText': 'Older highlight',
       'pageNumber': 2,
@@ -47,14 +50,21 @@ void main() {
       'pageNumber': 3,
       'createdAt': Timestamp.fromMillisecondsSinceEpoch(3000),
     }, id: 'newer');
+    final updated = ReaderHighlight.fromMap({
+      'selectedText': 'Updated highlight',
+      'pageNumber': 5,
+      'createdAt': Timestamp.fromMillisecondsSinceEpoch(500),
+      'updatedAt': Timestamp.fromMillisecondsSinceEpoch(5000),
+    }, id: 'updated');
     final pending = ReaderHighlight.fromMap({
       'selectedText': 'Pending highlight',
       'pageNumber': 4,
     }, id: 'pending');
 
-    final sorted = ReaderHighlight.sortNewest([older, pending, newer]);
+    final sorted = ReaderHighlight.sortNewest([older, pending, newer, updated]);
 
     expect(sorted.map((highlight) => highlight.id), [
+      'updated',
       'newer',
       'older',
       'pending',
@@ -64,6 +74,7 @@ void main() {
   test('searches highlights by text, page, and color', () {
     final finance = ReaderHighlight.fromMap({
       'selectedText': 'Central bank policy reference',
+      'note': 'Review with treasury team.',
       'color': 'blue',
       'pageNumber': 12,
     }, id: 'finance');
@@ -74,6 +85,7 @@ void main() {
     }, id: 'admin');
 
     expect(finance.matchesSearch('bank policy'), isTrue);
+    expect(finance.matchesSearch('treasury'), isTrue);
     expect(finance.matchesSearch('blue'), isTrue);
     expect(finance.matchesSearch('page 12'), isTrue);
     expect(finance.matchesSearch('missing'), isFalse);

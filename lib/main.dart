@@ -378,6 +378,16 @@ class _ReaderNoteEditResult {
   final String category;
 }
 
+class _ReaderHighlightDetailsResult {
+  const _ReaderHighlightDetailsResult({
+    required this.color,
+    required this.note,
+  });
+
+  final String color;
+  final String note;
+}
+
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
@@ -2266,69 +2276,133 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
   }
 
-  Future<String?> chooseReaderHighlightColor() {
-    return showDialog<String>(
+  Future<_ReaderHighlightDetailsResult?> chooseReaderHighlightDetails() {
+    final noteController = TextEditingController();
+    var selectedColor = 'yellow';
+
+    return showDialog<_ReaderHighlightDetailsResult>(
       context: context,
       builder: (dialogContext) {
-        return PointerInterceptor(
-          child: AlertDialog(
-            backgroundColor: const Color(0xFF0F1117),
-            title: const Text(
-              'Highlight Color',
-              style: TextStyle(color: Colors.greenAccent),
-            ),
-            content: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: readerHighlightColors.entries.map((entry) {
-                final colorName = entry.key;
-                final colorValue = entry.value;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Highlight Details',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 360,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Color',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: readerHighlightColors.entries.map((entry) {
+                          final colorName = entry.key;
+                          final colorValue = entry.value;
+                          final isSelected = selectedColor == colorName;
 
-                return InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => Navigator.of(dialogContext).pop(colorName),
-                  child: Container(
-                    width: 128,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.white24),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 18,
-                          height: 18,
-                          decoration: BoxDecoration(
-                            color: colorValue,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () {
+                              setDialogState(() {
+                                selectedColor = colorName;
+                              });
+                            },
+                            child: Container(
+                              width: 128,
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Colors.greenAccent
+                                      : Colors.white24,
+                                  width: isSelected ? 2 : 1,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 18,
+                                    height: 18,
+                                    decoration: BoxDecoration(
+                                      color: colorValue,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      readerHighlightColorLabel(colorName),
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: noteController,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.newline,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Note',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          hintText: 'Optional context for this highlight',
+                          hintStyle: TextStyle(color: Colors.white38),
+                          border: OutlineInputBorder(),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          readerHighlightColorLabel(colorName),
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                      ],
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.white70),
                     ),
                   ),
-                );
-              }).toList(),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text(
-                  'Cancel',
-                  style: TextStyle(color: Colors.white70),
-                ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop(
+                        _ReaderHighlightDetailsResult(
+                          color: selectedColor,
+                          note: noteController.text.trim(),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Save',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         );
       },
-    );
+    ).whenComplete(noteController.dispose);
   }
 
   Future<void> addReaderHighlight() async {
@@ -2351,8 +2425,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final trimmedSelection = selectedText?.trim() ?? '';
     if (trimmedSelection.isEmpty || !mounted) return;
 
-    final selectedColor = await chooseReaderHighlightColor();
-    if (selectedColor == null || !mounted) return;
+    final highlightDetails = await chooseReaderHighlightDetails();
+    if (highlightDetails == null || !mounted) return;
 
     final userEmail = FirebaseAuth.instance.currentUser?.email;
     if (userEmail == null || userEmail.isEmpty) return;
@@ -2362,7 +2436,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         userEmail: userEmail,
         pdfTitle: widget.title,
         selectedText: trimmedSelection,
-        color: normalizeReaderHighlightColor(selectedColor),
+        color: normalizeReaderHighlightColor(highlightDetails.color),
+        note: highlightDetails.note,
         documentKey: readerDocumentKey,
         storagePath: normalizedReaderStoragePath,
         pageNumber: selectionPage,
@@ -2374,7 +2449,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       details: {
         'pageNumber': selectionPage,
         'characterCount': trimmedSelection.length,
-        'color': selectedColor,
+        'color': highlightDetails.color,
+        'hasNote': highlightDetails.note.isNotEmpty,
       },
     );
 
@@ -2533,41 +2609,76 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                             color: Colors.white54,
                                           ),
                                         ),
+                                        if (highlight.hasNote) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            highlight.note,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
-                                    trailing: IconButton(
-                                      tooltip: 'Delete highlight',
-                                      icon: const Icon(
-                                        Icons.delete,
-                                        color: Colors.redAccent,
-                                      ),
-                                      onPressed: () async {
-                                        final confirmDelete =
-                                            await showDialog<bool>(
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: highlight.hasNote
+                                              ? 'Edit highlight note'
+                                              : 'Add highlight note',
+                                          icon: const Icon(
+                                            Icons.edit_note,
+                                            color: Colors.greenAccent,
+                                          ),
+                                          onPressed: () async {
+                                            final noteController =
+                                                TextEditingController(
+                                                  text: highlight.note,
+                                                );
+
+                                            final updatedNote = await showDialog<String>(
                                               context: context,
-                                              builder: (confirmContext) {
+                                              builder: (editContext) {
                                                 return PointerInterceptor(
                                                   child: AlertDialog(
                                                     backgroundColor:
                                                         const Color(0xFF0F1117),
                                                     title: const Text(
-                                                      'Delete Highlight?',
+                                                      'Highlight Note',
                                                       style: TextStyle(
-                                                        color: Colors.redAccent,
+                                                        color:
+                                                            Colors.greenAccent,
                                                       ),
                                                     ),
-                                                    content: Text(
-                                                      'Remove the saved highlight from page $highlightPage?',
+                                                    content: TextField(
+                                                      controller:
+                                                          noteController,
+                                                      autofocus: true,
+                                                      maxLines: 5,
+                                                      textInputAction:
+                                                          TextInputAction
+                                                              .newline,
                                                       style: const TextStyle(
-                                                        color: Colors.white70,
+                                                        color: Colors.white,
+                                                      ),
+                                                      decoration: const InputDecoration(
+                                                        hintText:
+                                                            'Add context for this highlight',
+                                                        hintStyle: TextStyle(
+                                                          color: Colors.white54,
+                                                        ),
+                                                        border:
+                                                            OutlineInputBorder(),
                                                       ),
                                                     ),
                                                     actions: [
                                                       TextButton(
                                                         onPressed: () =>
                                                             Navigator.pop(
-                                                              confirmContext,
-                                                              false,
+                                                              editContext,
                                                             ),
                                                         child: const Text(
                                                           'Cancel',
@@ -2578,16 +2689,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                         ),
                                                       ),
                                                       TextButton(
-                                                        onPressed: () =>
-                                                            Navigator.pop(
-                                                              confirmContext,
-                                                              true,
-                                                            ),
+                                                        onPressed: () {
+                                                          Navigator.pop(
+                                                            editContext,
+                                                            noteController.text
+                                                                .trim(),
+                                                          );
+                                                        },
                                                         child: const Text(
-                                                          'Delete',
+                                                          'Save',
                                                           style: TextStyle(
                                                             color: Colors
-                                                                .redAccent,
+                                                                .greenAccent,
                                                           ),
                                                         ),
                                                       ),
@@ -2597,33 +2710,140 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                               },
                                             );
 
-                                        if (confirmDelete != true) return;
+                                            noteController.dispose();
 
-                                        await readerHighlightRepository.delete(
-                                          highlightId,
-                                        );
+                                            if (updatedNote == null) return;
 
-                                        await logReaderAction(
-                                          action: 'delete_reader_highlight',
-                                          details: {
-                                            'highlightId': highlightId,
-                                            'pageNumber': highlightPage,
+                                            await readerHighlightRepository
+                                                .updateNote(
+                                                  highlightId: highlightId,
+                                                  note: updatedNote,
+                                                );
+
+                                            await logReaderAction(
+                                              action:
+                                                  'edit_reader_highlight_note',
+                                              details: {
+                                                'highlightId': highlightId,
+                                                'pageNumber': highlightPage,
+                                                'hasNote':
+                                                    updatedNote.isNotEmpty,
+                                              },
+                                            );
+
+                                            if (!context.mounted) return;
+
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).hideCurrentSnackBar();
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Highlight note updated',
+                                                ),
+                                              ),
+                                            );
                                           },
-                                        );
-
-                                        if (!context.mounted) return;
-
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).hideCurrentSnackBar();
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('Highlight deleted'),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Delete highlight',
+                                          icon: const Icon(
+                                            Icons.delete,
+                                            color: Colors.redAccent,
                                           ),
-                                        );
-                                      },
+                                          onPressed: () async {
+                                            final confirmDelete =
+                                                await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (confirmContext) {
+                                                    return PointerInterceptor(
+                                                      child: AlertDialog(
+                                                        backgroundColor:
+                                                            const Color(
+                                                              0xFF0F1117,
+                                                            ),
+                                                        title: const Text(
+                                                          'Delete Highlight?',
+                                                          style: TextStyle(
+                                                            color: Colors
+                                                                .redAccent,
+                                                          ),
+                                                        ),
+                                                        content: Text(
+                                                          'Remove the saved highlight from page $highlightPage?',
+                                                          style:
+                                                              const TextStyle(
+                                                                color: Colors
+                                                                    .white70,
+                                                              ),
+                                                        ),
+                                                        actions: [
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                  confirmContext,
+                                                                  false,
+                                                                ),
+                                                            child: const Text(
+                                                              'Cancel',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .white70,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                  confirmContext,
+                                                                  true,
+                                                                ),
+                                                            child: const Text(
+                                                              'Delete',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .redAccent,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                );
+
+                                            if (confirmDelete != true) return;
+
+                                            await readerHighlightRepository
+                                                .delete(highlightId);
+
+                                            await logReaderAction(
+                                              action: 'delete_reader_highlight',
+                                              details: {
+                                                'highlightId': highlightId,
+                                                'pageNumber': highlightPage,
+                                              },
+                                            );
+
+                                            if (!context.mounted) return;
+
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).hideCurrentSnackBar();
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Highlight deleted',
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 );

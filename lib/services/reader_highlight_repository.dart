@@ -8,9 +8,11 @@ class ReaderHighlight {
     required this.selectedText,
     required this.pageNumber,
     this.color = 'yellow',
+    this.note = '',
     this.documentKey = '',
     this.storagePath = '',
     this.createdAt,
+    this.updatedAt,
   });
 
   factory ReaderHighlight.fromSnapshot(
@@ -26,10 +28,12 @@ class ReaderHighlight {
       pdfTitle: data['pdfTitle']?.toString() ?? '',
       selectedText: data['selectedText']?.toString() ?? '',
       color: _readColor(data['color']),
+      note: data['note']?.toString() ?? '',
       documentKey: data['documentKey']?.toString() ?? '',
       storagePath: data['storagePath']?.toString() ?? '',
       pageNumber: _readPageNumber(data['pageNumber']),
       createdAt: data['createdAt'],
+      updatedAt: data['updatedAt'],
     );
   }
 
@@ -38,12 +42,16 @@ class ReaderHighlight {
   final String pdfTitle;
   final String selectedText;
   final String color;
+  final String note;
   final String documentKey;
   final String storagePath;
   final int pageNumber;
   final dynamic createdAt;
+  final dynamic updatedAt;
 
   String get displayColor => _displayColor(color);
+  bool get hasNote => note.trim().isNotEmpty;
+  dynamic get latestTimestamp => updatedAt is Timestamp ? updatedAt : createdAt;
 
   bool matchesSearch(String query) {
     final normalizedQuery = query.trim().toLowerCase();
@@ -51,6 +59,7 @@ class ReaderHighlight {
 
     final searchableText = [
       selectedText,
+      note,
       displayColor,
       color,
       'page $pageNumber',
@@ -65,8 +74,8 @@ class ReaderHighlight {
   ) {
     final sorted = List<ReaderHighlight>.from(highlights);
     sorted.sort((a, b) {
-      final aCreatedAt = a.createdAt;
-      final bCreatedAt = b.createdAt;
+      final aCreatedAt = a.latestTimestamp;
+      final bCreatedAt = b.latestTimestamp;
 
       if (aCreatedAt is Timestamp && bCreatedAt is Timestamp) {
         return bCreatedAt.compareTo(aCreatedAt);
@@ -118,6 +127,7 @@ class ReaderHighlightDraft {
     required this.selectedText,
     required this.pageNumber,
     this.color = 'yellow',
+    this.note = '',
     this.documentKey = '',
     this.storagePath = '',
   });
@@ -126,6 +136,7 @@ class ReaderHighlightDraft {
   final String pdfTitle;
   final String selectedText;
   final String color;
+  final String note;
   final String documentKey;
   final String storagePath;
   final int pageNumber;
@@ -138,6 +149,8 @@ abstract interface class ReaderHighlightStore {
   });
 
   Future<void> save(ReaderHighlightDraft highlight);
+
+  Future<void> updateNote({required String highlightId, required String note});
 
   Future<void> delete(String highlightId);
 }
@@ -170,10 +183,19 @@ class ReaderHighlightRepository implements ReaderHighlightStore {
       'pdfTitle': highlight.pdfTitle,
       'selectedText': highlight.selectedText,
       'color': highlight.color,
+      'note': highlight.note,
       'documentKey': highlight.documentKey,
       'storagePath': highlight.storagePath,
       'pageNumber': highlight.pageNumber,
       'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  @override
+  Future<void> updateNote({required String highlightId, required String note}) {
+    return _collection.doc(highlightId).update({
+      'note': note,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
