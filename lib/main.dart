@@ -17,6 +17,7 @@ import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
 import 'services/reader_narration_playback_coordinator.dart';
 import 'services/reader_narration_voice_catalog_presenter.dart';
+import 'services/reader_saved_position_repository.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
@@ -1460,7 +1461,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
 
   String searchQuery = '';
-  Map<String, dynamic>? latestReadingPosition;
+  ReaderSavedPosition? latestReadingPosition;
   late final String viewId;
   html.IFrameElement? pdfIframe;
   int currentPdfPage = 1;
@@ -1482,6 +1483,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   narrationPreferencesController;
   late final ReaderNarrationSessionRepository narrationSessionRepository;
   late final ReaderNarrationSessionTracker narrationSessionTracker;
+  late final ReaderSavedPositionRepository savedPositionRepository;
   late final ReaderCloudNarrationSessionCoordinator narrationCloudSession;
   late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
   late final ReaderNarrationVoiceCatalogPresenter narrationVoicePresenter;
@@ -1790,24 +1792,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   Future<void> loadLatestReadingPosition() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final userEmail = user?.email;
+    if (userEmail == null || userEmail.isEmpty) return;
 
-    final snapshot = await FirebaseFirestore.instance
-        .collection('reading_positions')
-        .where('userEmail', isEqualTo: user.email)
-        .where('pdfTitle', isEqualTo: widget.title)
-        .get();
+    final position = await savedPositionRepository.loadLatest(
+      userEmail: userEmail,
+      pdfTitle: widget.title,
+    );
 
-    if (snapshot.docs.isNotEmpty) {
-      final position =
-          sortReadingPositionsByNewest(snapshot.docs).first.data()
-              as Map<String, dynamic>;
-      final savedPage = int.tryParse(position['pageNumber'].toString()) ?? 1;
-
+    if (position != null) {
       latestReadingPosition = position;
 
       if (widget.initialPage == 0) {
-        openPdfPage(savedPage, source: 'latest_saved_position');
+        openPdfPage(position.pageNumber, source: 'latest_saved_position');
       }
     }
   }
@@ -1940,8 +1937,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   Future<bool> saveReadingPositionPage(int page) async {
     final user = FirebaseAuth.instance.currentUser;
+    final userEmail = user?.email;
 
-    if (user == null) {
+    if (user == null || userEmail == null || userEmail.isEmpty) {
       return false;
     }
 
@@ -1976,12 +1974,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       return false;
     }
 
-    await FirebaseFirestore.instance.collection('reading_positions').add({
-      'userEmail': user.email,
-      'pdfTitle': widget.title,
-      'pageNumber': page,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    await savedPositionRepository.save(
+      ReaderSavedPositionDraft(
+        userEmail: userEmail,
+        pdfTitle: widget.title,
+        documentKey: readerDocumentKey,
+        storagePath: normalizedReaderStoragePath,
+        pageNumber: page,
+      ),
+    );
 
     await logReaderAction(
       action: 'save_reading_position',
@@ -2757,6 +2758,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
     narrationSessionRepository = ReaderNarrationSessionRepository();
     narrationSessionTracker = ReaderNarrationSessionTracker();
+    savedPositionRepository = ReaderSavedPositionRepository();
     final cloudNarrationRegistry = ReaderCloudNarrationRegistry(
       providers: [
         ReaderCloudNarrationCallableProvider(
@@ -3349,7 +3351,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               if (!canUseViewerTools('view_saved_reading_positions')) return;
 
               final user = FirebaseAuth.instance.currentUser;
-              if (user == null) return;
+              final userEmail = user?.email;
+              if (user == null || userEmail == null || userEmail.isEmpty) {
+                return;
+              }
 
               await logReaderAction(action: 'view_saved_reading_positions');
 
@@ -3369,12 +3374,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         child: SizedBox(
                           width: 400,
                           height: 400,
-                          child: StreamBuilder<QuerySnapshot>(
-                            stream: FirebaseFirestore.instance
-                                .collection('reading_positions')
-                                .where('userEmail', isEqualTo: user.email)
-                                .where('pdfTitle', isEqualTo: widget.title)
-                                .snapshots(),
+                          child: StreamBuilder<List<ReaderSavedPosition>>(
+                            stream: savedPositionRepository.watchForDocument(
+                              userEmail: userEmail,
+                              pdfTitle: widget.title,
+                            ),
                             builder: (context, snapshot) {
                               if (!snapshot.hasData) {
                                 return const Center(
@@ -3382,9 +3386,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 );
                               }
 
-                              final positions = sortReadingPositionsByNewest(
-                                snapshot.data!.docs,
-                              );
+                              final positions = snapshot.data!;
 
                               if (positions.isEmpty) {
                                 return const Center(
@@ -3398,17 +3400,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               return ListView.builder(
                                 itemCount: positions.length,
                                 itemBuilder: (context, index) {
-                                  final position =
-                                      positions[index].data()
-                                          as Map<String, dynamic>;
-                                  final positionId = positions[index].id;
-                                  final page =
-                                      int.tryParse(
-                                        position['pageNumber'].toString(),
-                                      ) ??
-                                      1;
+                                  final position = positions[index];
+                                  final positionId = position.id;
+                                  final page = position.pageNumber;
                                   final savedAt = formatSavedPositionTime(
-                                    position['createdAt'],
+                                    position.createdAt,
                                   );
 
                                   return Card(
@@ -3508,12 +3504,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
                                               if (confirmDelete != true) return;
 
-                                              await FirebaseFirestore.instance
-                                                  .collection(
-                                                    'reading_positions',
-                                                  )
-                                                  .doc(positionId)
-                                                  .delete();
+                                              await savedPositionRepository
+                                                  .delete(positionId);
 
                                               await logReaderAction(
                                                 action:
