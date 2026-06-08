@@ -22,6 +22,7 @@ import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
 import 'services/reader_workspace_filters.dart';
+import 'services/reader_activity_repository.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
@@ -1511,6 +1512,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final ReaderHighlightRepository readerHighlightRepository;
   late final ReaderNoteRepository readerNoteRepository;
   late final ReaderSavedPositionRepository savedPositionRepository;
+  late final ReaderActivityRepository readerActivityRepository;
   late final ReaderCloudNarrationSessionCoordinator narrationCloudSession;
   late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
   late final ReaderNarrationVoiceCatalogPresenter narrationVoicePresenter;
@@ -1545,6 +1547,17 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   ReaderNarrationPreferencesContext get narrationPreferencesContext =>
       ReaderNarrationPreferencesContext(
         userEmail: FirebaseAuth.instance.currentUser?.email,
+      );
+
+  ReaderActivityLogContext get readerActivityLogContext =>
+      ReaderActivityLogContext(
+        userEmail: FirebaseAuth.instance.currentUser?.email,
+        pdfTitle: widget.title,
+        readerSessionId: readerSessionId,
+        documentAccessLevel: widget.accessLevel,
+        openSource: widget.openSource,
+        documentKey: readerDocumentKey,
+        storagePath: normalizedReaderStoragePath,
       );
 
   String get readerSourceLabel => widget.openSource.replaceAll('_', ' ');
@@ -1688,14 +1701,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         'Opened: ${formatReaderTimestamp(readerSessionStartedAt)}';
   }
 
-  void addStoragePathToLog(Map<String, dynamic> logData) {
-    final storagePath = normalizedReaderStoragePath;
-
-    if (storagePath.isNotEmpty) {
-      logData['storagePath'] = storagePath;
-    }
-  }
-
   Future<UserAccessState> loadCurrentUserAccess() async {
     final user = FirebaseAuth.instance.currentUser;
 
@@ -1754,29 +1759,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     required bool allowed,
     required UserAccessState userAccess,
   }) async {
-    final user = FirebaseAuth.instance.currentUser;
-
     try {
-      final logData = <String, dynamic>{
-        'userEmail': user?.email,
-        'pdfTitle': widget.title,
-        'readerSessionId': readerSessionId,
-        'documentAccessLevel': widget.accessLevel,
-        'openSource': widget.openSource,
-        'userAccessLevel': userAccess.accessLevel,
-        'initialPage': widget.initialPage,
-        'hasInitialSearchQuery': widget.initialSearchQuery.trim().isNotEmpty,
-        'isAdmin': userAccess.isAdmin,
-        'hasActiveSubscription': userAccess.hasActiveSubscription,
-        'allowed': allowed,
-        'createdAt': FieldValue.serverTimestamp(),
-      };
-
-      addStoragePathToLog(logData);
-
-      await FirebaseFirestore.instance
-          .collection('reader_access_logs')
-          .add(logData);
+      await readerActivityRepository.logAccessAttempt(
+        ReaderAccessLogDraft(
+          context: readerActivityLogContext,
+          userAccessLevel: userAccess.accessLevel,
+          initialPage: widget.initialPage,
+          hasInitialSearchQuery: widget.initialSearchQuery.trim().isNotEmpty,
+          isAdmin: userAccess.isAdmin,
+          hasActiveSubscription: userAccess.hasActiveSubscription,
+          allowed: allowed,
+        ),
+      );
     } catch (_) {
       // Logging should not block the reader if Firestore rules are not ready yet.
     }
@@ -1786,25 +1780,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     required String action,
     Map<String, dynamic> details = const {},
   }) async {
-    final user = FirebaseAuth.instance.currentUser;
-
     try {
-      final logData = <String, dynamic>{
-        'userEmail': user?.email,
-        'pdfTitle': widget.title,
-        'readerSessionId': readerSessionId,
-        'documentAccessLevel': widget.accessLevel,
-        'openSource': widget.openSource,
-        'action': action,
-        'details': details,
-        'createdAt': FieldValue.serverTimestamp(),
-      };
-
-      addStoragePathToLog(logData);
-
-      await FirebaseFirestore.instance
-          .collection('reader_activity_logs')
-          .add(logData);
+      await readerActivityRepository.logAction(
+        ReaderActionLogDraft(
+          context: readerActivityLogContext,
+          action: action,
+          details: details,
+        ),
+      );
     } catch (_) {
       // Activity logging should not interrupt the reader experience.
     }
@@ -1814,25 +1797,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     String event, {
     Map<String, dynamic> details = const {},
   }) async {
-    final user = FirebaseAuth.instance.currentUser;
-
     try {
-      final logData = <String, dynamic>{
-        'userEmail': user?.email,
-        'pdfTitle': widget.title,
-        'readerSessionId': readerSessionId,
-        'documentAccessLevel': widget.accessLevel,
-        'openSource': widget.openSource,
-        'event': event,
-        'details': details,
-        'createdAt': FieldValue.serverTimestamp(),
-      };
-
-      addStoragePathToLog(logData);
-
-      await FirebaseFirestore.instance
-          .collection('reader_session_logs')
-          .add(logData);
+      await readerActivityRepository.logSessionLifecycle(
+        ReaderSessionLogDraft(
+          context: readerActivityLogContext,
+          event: event,
+          details: details,
+        ),
+      );
     } catch (_) {
       // Session logging should not interrupt the reader experience.
     }
@@ -5941,6 +5913,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerHighlightRepository = ReaderHighlightRepository();
     readerNoteRepository = ReaderNoteRepository();
     savedPositionRepository = ReaderSavedPositionRepository();
+    readerActivityRepository = ReaderActivityRepository();
     final cloudNarrationRegistry = ReaderCloudNarrationRegistry(
       providers: [
         ReaderCloudNarrationCallableProvider(
