@@ -52,4 +52,34 @@ void main() {
       'free@example.com',
     ]);
   });
+
+  test('summarizes admin, subscriber, and free user counts', () {
+    final users = [
+      UserAccessRecord.fromMap({
+        'role': 'admin',
+        'subscriptionStatus': 'inactive',
+      }, email: 'admin@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'active',
+      }, email: 'premium@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'inactive',
+      }, email: 'free@example.com'),
+    ];
+
+    final summary = UserAccessSummary.fromUsers(users);
+
+    expect(summary.totalCount, 3);
+    expect(summary.adminCount, 1);
+    expect(summary.premiumCount, 1);
+    expect(summary.freeCount, 1);
+    expect(summary.hasUsers, isTrue);
+    expect(summary.users.map((user) => user.email), [
+      'admin@example.com',
+      'premium@example.com',
+      'free@example.com',
+    ]);
+  });
 }

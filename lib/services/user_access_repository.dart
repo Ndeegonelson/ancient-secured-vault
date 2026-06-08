@@ -4,6 +4,10 @@ import 'user_access_state.dart';
 
 abstract interface class UserAccessStore {
   Future<UserAccessState> loadForEmail(String? email);
+
+  Future<List<UserAccessRecord>> listUsers({int limit = 100});
+
+  Future<UserAccessSummary> loadSummary({int limit = 100});
 }
 
 class UserAccessRecord {
@@ -59,6 +63,47 @@ class UserAccessRecord {
   }
 }
 
+class UserAccessSummary {
+  const UserAccessSummary({
+    required this.users,
+    required this.adminCount,
+    required this.premiumCount,
+    required this.freeCount,
+  });
+
+  factory UserAccessSummary.fromUsers(Iterable<UserAccessRecord> users) {
+    final sortedUsers = UserAccessRecord.sortForAdminList(users);
+    var adminCount = 0;
+    var premiumCount = 0;
+    var freeCount = 0;
+
+    for (final user in sortedUsers) {
+      if (user.access.isAdmin) {
+        adminCount++;
+      } else if (user.access.hasActiveSubscription) {
+        premiumCount++;
+      } else {
+        freeCount++;
+      }
+    }
+
+    return UserAccessSummary(
+      users: List.unmodifiable(sortedUsers),
+      adminCount: adminCount,
+      premiumCount: premiumCount,
+      freeCount: freeCount,
+    );
+  }
+
+  final List<UserAccessRecord> users;
+  final int adminCount;
+  final int premiumCount;
+  final int freeCount;
+
+  int get totalCount => users.length;
+  bool get hasUsers => users.isNotEmpty;
+}
+
 class UserAccessRepository implements UserAccessStore {
   UserAccessRepository({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
@@ -72,6 +117,26 @@ class UserAccessRepository implements UserAccessStore {
 
     final doc = await _firestore.collection('users').doc(documentId).get();
     return UserAccessState.fromFirestore(doc.data());
+  }
+
+  @override
+  Future<List<UserAccessRecord>> listUsers({int limit = 100}) async {
+    final safeLimit = limit < 1 ? 1 : limit;
+    final snapshot = await _firestore
+        .collection('users')
+        .limit(safeLimit)
+        .get();
+
+    return UserAccessRecord.sortForAdminList(
+      snapshot.docs.map(
+        (doc) => UserAccessRecord.fromMap(doc.data(), email: doc.id),
+      ),
+    );
+  }
+
+  @override
+  Future<UserAccessSummary> loadSummary({int limit = 100}) async {
+    return UserAccessSummary.fromUsers(await listUsers(limit: limit));
   }
 
   static String emailDocumentId(String? email) {
