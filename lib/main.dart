@@ -3391,12 +3391,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           page.toString().contains(normalizedQuery);
     }
 
-    Widget emptyWorkspaceMessage(String message) {
+    Widget emptyWorkspaceMessage(
+      String message, {
+      VoidCallback? onClearSearch,
+    }) {
       return Center(
-        child: Text(
-          message,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white70),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70),
+            ),
+            if (onClearSearch != null) ...[
+              const SizedBox(height: 10),
+              TextButton.icon(
+                onPressed: onClearSearch,
+                icon: const Icon(Icons.clear, size: 18),
+                label: const Text('Clear search'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.greenAccent,
+                ),
+              ),
+            ],
+          ],
         ),
       );
     }
@@ -3407,6 +3426,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            void clearWorkspaceSearch() {
+              if (workspaceSearchQuery.trim().isEmpty) return;
+
+              workspaceSearchController.clear();
+              setDialogState(() {
+                workspaceSearchQuery = '';
+              });
+            }
+
             Widget workspaceSummaryCard({
               required IconData icon,
               required String title,
@@ -3608,14 +3636,30 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                       .trim()
                                       .isNotEmpty) ...[
                                     const SizedBox(height: 4),
-                                    Text(
-                                      'Showing matches for "${workspaceSearchQuery.trim()}"',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.greenAccent,
-                                        fontSize: 12,
-                                      ),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            'Showing matches for "${workspaceSearchQuery.trim()}"',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.greenAccent,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Clear workspace search',
+                                          visualDensity: VisualDensity.compact,
+                                          onPressed: clearWorkspaceSearch,
+                                          icon: const Icon(
+                                            Icons.clear,
+                                            color: Colors.greenAccent,
+                                            size: 18,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ],
@@ -3763,6 +3807,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   if (positions.isEmpty) {
                     return emptyWorkspaceMessage(
                       'No saved positions match this search.',
+                      onClearSearch: clearWorkspaceSearch,
                     );
                   }
 
@@ -3836,6 +3881,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   if (bookmarks.isEmpty) {
                     return emptyWorkspaceMessage(
                       'No bookmarks match this search.',
+                      onClearSearch: clearWorkspaceSearch,
                     );
                   }
 
@@ -3921,6 +3967,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   if (highlights.isEmpty) {
                     return emptyWorkspaceMessage(
                       'No highlights match this search.',
+                      onClearSearch: clearWorkspaceSearch,
                     );
                   }
 
@@ -4017,7 +4064,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   }
 
                   if (notes.isEmpty) {
-                    return emptyWorkspaceMessage('No notes match this search.');
+                    return emptyWorkspaceMessage(
+                      'No notes match this search.',
+                      onClearSearch: clearWorkspaceSearch,
+                    );
                   }
 
                   return ListView.builder(
