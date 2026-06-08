@@ -3359,6 +3359,240 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            Widget workspaceSummaryCard({
+              required IconData icon,
+              required String title,
+              required String countLabel,
+              required String subtitle,
+              required int tabIndex,
+            }) {
+              return Builder(
+                builder: (cardContext) {
+                  return MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Card(
+                      color: const Color(0xFF1A1D26),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        hoverColor: Colors.greenAccent.withValues(alpha: 0.08),
+                        splashColor: Colors.greenAccent.withValues(alpha: 0.12),
+                        onTap: () {
+                          DefaultTabController.of(
+                            cardContext,
+                          ).animateTo(tabIndex);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(
+                            children: [
+                              Icon(icon, color: Colors.greenAccent, size: 28),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      title,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      countLabel,
+                                      style: const TextStyle(
+                                        color: Colors.greenAccent,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      subtitle,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(
+                                Icons.chevron_right,
+                                color: Colors.white38,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            }
+
+            Widget workspaceSummaryStreamCard<T>({
+              required Stream<List<T>> stream,
+              required IconData icon,
+              required String title,
+              required String emptySubtitle,
+              required String filledSubtitle,
+              required int tabIndex,
+            }) {
+              return StreamBuilder<List<T>>(
+                stream: stream,
+                builder: (context, snapshot) {
+                  final count = snapshot.data?.length;
+                  final subtitle = count == null || count == 0
+                      ? emptySubtitle
+                      : filledSubtitle;
+
+                  return workspaceSummaryCard(
+                    icon: icon,
+                    title: title,
+                    countLabel: count == null ? '...' : count.toString(),
+                    subtitle: subtitle,
+                    tabIndex: tabIndex,
+                  );
+                },
+              );
+            }
+
+            Widget overviewTab() {
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Card(
+                      color: const Color(0xFF151821),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.menu_book_outlined,
+                              color: Colors.greenAccent,
+                              size: 28,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    widget.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    pdfPageCount == null
+                                        ? 'Tracked page: $currentPdfPage'
+                                        : 'Tracked page: $currentPdfPage of $pdfPageCount',
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final cardWidth = constraints.maxWidth >= 520
+                            ? (constraints.maxWidth - 12) / 2
+                            : constraints.maxWidth;
+
+                        return Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            SizedBox(
+                              width: cardWidth,
+                              child:
+                                  workspaceSummaryStreamCard<
+                                    ReaderSavedPosition
+                                  >(
+                                    stream: savedPositionRepository
+                                        .watchForDocument(
+                                          userEmail: userEmail,
+                                          pdfTitle: widget.title,
+                                        ),
+                                    icon: Icons.history,
+                                    title: 'Positions',
+                                    emptySubtitle: 'No saved positions yet',
+                                    filledSubtitle: 'Resume from saved pages',
+                                    tabIndex: 1,
+                                  ),
+                            ),
+                            SizedBox(
+                              width: cardWidth,
+                              child: workspaceSummaryStreamCard<ReaderBookmark>(
+                                stream: readerBookmarkRepository
+                                    .watchForDocument(
+                                      userEmail: userEmail,
+                                      pdfTitle: widget.title,
+                                    ),
+                                icon: Icons.bookmark,
+                                title: 'Bookmarks',
+                                emptySubtitle: 'No bookmarks yet',
+                                filledSubtitle: 'Jump to marked pages',
+                                tabIndex: 2,
+                              ),
+                            ),
+                            SizedBox(
+                              width: cardWidth,
+                              child:
+                                  workspaceSummaryStreamCard<ReaderHighlight>(
+                                    stream: readerHighlightRepository
+                                        .watchForDocument(
+                                          userEmail: userEmail,
+                                          pdfTitle: widget.title,
+                                        ),
+                                    icon: Icons.border_color,
+                                    title: 'Highlights',
+                                    emptySubtitle: 'No highlights yet',
+                                    filledSubtitle: 'Review marked passages',
+                                    tabIndex: 3,
+                                  ),
+                            ),
+                            SizedBox(
+                              width: cardWidth,
+                              child: workspaceSummaryStreamCard<ReaderNote>(
+                                stream: readerNoteRepository.watchForDocument(
+                                  userEmail: userEmail,
+                                  pdfTitle: widget.title,
+                                ),
+                                icon: Icons.note_alt,
+                                title: 'Notes',
+                                emptySubtitle: 'No notes yet',
+                                filledSubtitle: 'Review saved notes',
+                                tabIndex: 4,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              );
+            }
+
             Widget positionsTab() {
               return StreamBuilder<List<ReaderSavedPosition>>(
                 stream: savedPositionRepository.watchForDocument(
@@ -3693,7 +3927,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
             return PointerInterceptor(
               child: DefaultTabController(
-                length: 4,
+                length: 5,
                 child: AlertDialog(
                   backgroundColor: const Color(0xFF0F1117),
                   title: const Text(
@@ -3733,6 +3967,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                           unselectedLabelColor: Colors.white54,
                           indicatorColor: Colors.greenAccent,
                           tabs: [
+                            Tab(
+                              icon: Icon(Icons.dashboard_customize_outlined),
+                              text: 'Overview',
+                            ),
                             Tab(icon: Icon(Icons.history), text: 'Positions'),
                             Tab(icon: Icon(Icons.bookmark), text: 'Bookmarks'),
                             Tab(
@@ -3746,6 +3984,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         Expanded(
                           child: TabBarView(
                             children: [
+                              overviewTab(),
                               positionsTab(),
                               bookmarksTab(),
                               highlightsTab(),
