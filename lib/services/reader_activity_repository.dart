@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'reader_activity_analytics.dart';
+
 class ReaderActivityLogContext {
   const ReaderActivityLogContext({
     required this.userEmail,
@@ -150,5 +152,53 @@ class ReaderActivityRepository implements ReaderActivityLogStore {
     return _firestore
         .collection('reader_session_logs')
         .add(draft.toMap(createdAt: FieldValue.serverTimestamp()));
+  }
+
+  Future<ReaderActivitySummary> loadSummary({
+    int perCollectionLimit = 50,
+    int recentLimit = 8,
+    int topDocumentLimit = 5,
+  }) async {
+    final records = await listRecentRecords(limit: perCollectionLimit);
+
+    return const ReaderActivityAnalytics().summarize(
+      records,
+      recentLimit: recentLimit,
+      topDocumentLimit: topDocumentLimit,
+    );
+  }
+
+  Future<List<ReaderActivityRecord>> listRecentRecords({int limit = 50}) async {
+    final safeLimit = limit < 1 ? 1 : limit;
+    final snapshots = await Future.wait([
+      _recentQuery('reader_access_logs', safeLimit).get(),
+      _recentQuery('reader_activity_logs', safeLimit).get(),
+      _recentQuery('reader_session_logs', safeLimit).get(),
+    ]);
+
+    final records = <ReaderActivityRecord>[
+      ...snapshots[0].docs.map(
+        (doc) => ReaderActivityRecord.fromAccessLog(doc.data(), id: doc.id),
+      ),
+      ...snapshots[1].docs.map(
+        (doc) => ReaderActivityRecord.fromActionLog(doc.data(), id: doc.id),
+      ),
+      ...snapshots[2].docs.map(
+        (doc) => ReaderActivityRecord.fromSessionLog(doc.data(), id: doc.id),
+      ),
+    ];
+
+    return List.unmodifiable(
+      const ReaderActivityAnalytics()
+          .summarize(records, recentLimit: records.length)
+          .recentRecords,
+    );
+  }
+
+  Query<Map<String, dynamic>> _recentQuery(String collection, int limit) {
+    return _firestore
+        .collection(collection)
+        .orderBy('createdAt', descending: true)
+        .limit(limit);
   }
 }
