@@ -3528,16 +3528,25 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               required Stream<List<T>> stream,
               required IconData icon,
               required String label,
+              int Function(List<T> items)? countBuilder,
             }) {
               return StreamBuilder<List<T>>(
                 stream: stream,
                 builder: (context, snapshot) {
-                  return workspaceTab(
-                    icon: icon,
-                    label: label,
-                    count: snapshot.data?.length,
-                  );
+                  final items = snapshot.data;
+                  final count = items == null
+                      ? null
+                      : countBuilder?.call(items) ?? items.length;
+
+                  return workspaceTab(icon: icon, label: label, count: count);
                 },
+              );
+            }
+
+            Widget workspaceClickableCard({required Widget child}) {
+              return MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Card(color: const Color(0xFF1A1D26), child: child),
               );
             }
 
@@ -3721,9 +3730,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       final position = positions[index];
                       final page = position.pageNumber;
 
-                      return Card(
-                        color: const Color(0xFF1A1D26),
+                      return workspaceClickableCard(
                         child: ListTile(
+                          hoverColor: Colors.greenAccent.withValues(
+                            alpha: 0.08,
+                          ),
                           leading: const Icon(
                             Icons.history,
                             color: Colors.greenAccent,
@@ -3792,9 +3803,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       final bookmark = bookmarks[index];
                       final page = bookmark.pageNumber;
 
-                      return Card(
-                        color: const Color(0xFF1A1D26),
+                      return workspaceClickableCard(
                         child: ListTile(
+                          hoverColor: Colors.greenAccent.withValues(
+                            alpha: 0.08,
+                          ),
                           leading: const Icon(
                             Icons.bookmark,
                             color: Colors.greenAccent,
@@ -3875,9 +3888,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       final highlight = highlights[index];
                       final page = highlight.pageNumber;
 
-                      return Card(
-                        color: const Color(0xFF1A1D26),
+                      return workspaceClickableCard(
                         child: ListTile(
+                          hoverColor: Colors.greenAccent.withValues(
+                            alpha: 0.08,
+                          ),
                           leading: Container(
                             width: 14,
                             height: 48,
@@ -3969,9 +3984,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       final note = notes[index];
                       final page = note.pageNumber;
 
-                      return Card(
-                        color: const Color(0xFF1A1D26),
+                      return workspaceClickableCard(
                         child: ListTile(
+                          hoverColor: Colors.greenAccent.withValues(
+                            alpha: 0.08,
+                          ),
                           leading: const Icon(
                             Icons.note_alt_outlined,
                             color: Colors.greenAccent,
@@ -4081,6 +4098,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               ),
                               icon: Icons.history,
                               label: 'Positions',
+                              countBuilder: (positions) => positions
+                                  .where(
+                                    (position) => positionMatchesSearch(
+                                      position,
+                                      workspaceSearchQuery,
+                                    ),
+                                  )
+                                  .length,
                             ),
                             workspaceCountTab<ReaderBookmark>(
                               stream: readerBookmarkRepository.watchForDocument(
@@ -4089,6 +4114,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               ),
                               icon: Icons.bookmark,
                               label: 'Bookmarks',
+                              countBuilder: (bookmarks) =>
+                                  ReaderBookmark.search(
+                                    bookmarks,
+                                    workspaceSearchQuery,
+                                  ).length,
                             ),
                             workspaceCountTab<ReaderHighlight>(
                               stream: readerHighlightRepository
@@ -4098,6 +4128,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                   ),
                               icon: Icons.border_color,
                               label: 'Highlights',
+                              countBuilder: (highlights) =>
+                                  ReaderHighlight.search(
+                                    highlights,
+                                    workspaceSearchQuery,
+                                  ).length,
                             ),
                             workspaceCountTab<ReaderNote>(
                               stream: readerNoteRepository.watchForDocument(
@@ -4106,6 +4141,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               ),
                               icon: Icons.note_alt,
                               label: 'Notes',
+                              countBuilder: (notes) => ReaderNote.search(
+                                notes,
+                                workspaceSearchQuery,
+                              ).length,
                             ),
                           ],
                         ),
