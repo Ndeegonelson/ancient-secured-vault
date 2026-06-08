@@ -6,10 +6,16 @@ class ReaderTextSelectionDialog extends StatefulWidget {
     super.key,
     required this.pageNumber,
     required this.pageText,
+    this.title,
+    this.confirmLabel = 'Narrate Selection',
+    this.confirmIcon = Icons.record_voice_over,
   });
 
   final int pageNumber;
   final Future<String> pageText;
+  final String? title;
+  final String confirmLabel;
+  final IconData confirmIcon;
 
   @override
   State<ReaderTextSelectionDialog> createState() =>
@@ -39,7 +45,7 @@ class _ReaderTextSelectionDialogState extends State<ReaderTextSelectionDialog> {
       child: AlertDialog(
         backgroundColor: const Color(0xFF0F1117),
         title: Text(
-          'Select Passage | Page ${widget.pageNumber}',
+          widget.title ?? 'Select Passage | Page ${widget.pageNumber}',
           style: const TextStyle(color: Colors.greenAccent),
         ),
         content: SizedBox(
@@ -122,8 +128,8 @@ class _ReaderTextSelectionDialogState extends State<ReaderTextSelectionDialog> {
             onPressed: _selectedText.isEmpty
                 ? null
                 : () => Navigator.pop(context, _selectedText),
-            icon: const Icon(Icons.record_voice_over),
-            label: const Text('Narrate Selection'),
+            icon: Icon(widget.confirmIcon),
+            label: Text(widget.confirmLabel),
           ),
         ],
       ),
