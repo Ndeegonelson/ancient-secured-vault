@@ -4185,6 +4185,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 controller: pageController,
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
+                autofocus: true,
                 onSubmitted: (_) => submitTypedSave(),
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
@@ -4192,7 +4193,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   labelStyle: const TextStyle(color: Colors.white70),
                   hintText: 'Page number',
                   hintStyle: const TextStyle(color: Colors.white54),
-                  helperText: 'Tracked page: $currentPdfPage',
+                  helperText: pdfPageCount == null
+                      ? 'Current page is prefilled: $currentPdfPage'
+                      : 'Current page is prefilled: $currentPdfPage of $pdfPageCount',
                   suffixText: 'Enter saves',
                   helperStyle: const TextStyle(color: Colors.white54),
                   border: const OutlineInputBorder(),
@@ -4208,23 +4211,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () async {
-                  if (!canUseViewerTools('save_reading_position')) return;
-
-                  final saved = await saveReadingPositionPage(currentPdfPage);
-
-                  if (!dialogContext.mounted) return;
-                  if (saved) Navigator.pop(dialogContext);
-                },
-                child: const Text(
-                  'Save Tracked',
-                  style: TextStyle(color: Colors.greenAccent),
-                ),
-              ),
-              TextButton(
                 onPressed: submitTypedSave,
                 child: const Text(
-                  'Save Typed',
+                  'Save',
                   style: TextStyle(color: Colors.greenAccent),
                 ),
               ),
