@@ -24,6 +24,7 @@ import 'services/reader_saved_position_repository.dart';
 import 'services/reader_workspace_filters.dart';
 import 'services/reader_activity_analytics.dart';
 import 'services/reader_activity_repository.dart';
+import 'services/user_access_repository.dart';
 import 'services/user_access_state.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
@@ -372,6 +373,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
   final ReaderActivityRepository readerActivityRepository =
       ReaderActivityRepository();
+  final UserAccessRepository userAccessRepository = UserAccessRepository();
 
   @override
   void initState() {
@@ -613,20 +615,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> checkUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final access = await userAccessRepository.loadForEmail(user?.email);
 
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.email)
-        .get();
+    if (!mounted) return;
 
-    if (doc.exists) {
-      final data = doc.data();
-
-      setState(() {
-        userAccess = UserAccessState.fromFirestore(data);
-      });
-    }
+    setState(() {
+      userAccess = access;
+    });
   }
 
   bool looksLikePdfFile(Uint8List fileBytes) {
@@ -1728,6 +1723,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final ReaderNoteRepository readerNoteRepository;
   late final ReaderSavedPositionRepository savedPositionRepository;
   late final ReaderActivityRepository readerActivityRepository;
+  late final UserAccessRepository userAccessRepository;
   late final ReaderCloudNarrationSessionCoordinator narrationCloudSession;
   late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
   late final ReaderNarrationVoiceCatalogPresenter narrationVoicePresenter;
@@ -1918,17 +1914,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   Future<UserAccessState> loadCurrentUserAccess() async {
     final user = FirebaseAuth.instance.currentUser;
-
-    if (user == null) {
-      return const UserAccessState();
-    }
-
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.email)
-        .get();
-
-    return UserAccessState.fromFirestore(doc.data());
+    return userAccessRepository.loadForEmail(user?.email);
   }
 
   Future<void> checkViewerAccess() async {
@@ -6129,6 +6115,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerNoteRepository = ReaderNoteRepository();
     savedPositionRepository = ReaderSavedPositionRepository();
     readerActivityRepository = ReaderActivityRepository();
+    userAccessRepository = UserAccessRepository();
     final cloudNarrationRegistry = ReaderCloudNarrationRegistry(
       providers: [
         ReaderCloudNarrationCallableProvider(
