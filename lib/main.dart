@@ -2234,16 +2234,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         controller: bookmarkSearchController,
                         textInputAction: TextInputAction.search,
                         style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(
                             Icons.search,
                             color: Colors.greenAccent,
                           ),
                           labelText: 'Search bookmarks',
-                          labelStyle: TextStyle(color: Colors.white70),
+                          labelStyle: const TextStyle(color: Colors.white70),
                           hintText: 'Label or page',
-                          hintStyle: TextStyle(color: Colors.white38),
-                          border: OutlineInputBorder(),
+                          hintStyle: const TextStyle(color: Colors.white38),
+                          suffixIcon: bookmarkSearchQuery.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear search',
+                                  icon: const Icon(
+                                    Icons.clear,
+                                    color: Colors.white54,
+                                  ),
+                                  onPressed: () {
+                                    bookmarkSearchController.clear();
+                                    setDialogState(() {
+                                      bookmarkSearchQuery = '';
+                                    });
+                                  },
+                                ),
+                          border: const OutlineInputBorder(),
                         ),
                         onChanged: (value) {
                           setDialogState(() {
@@ -2946,16 +2961,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         controller: highlightSearchController,
                         textInputAction: TextInputAction.search,
                         style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(
                             Icons.search,
                             color: Colors.greenAccent,
                           ),
                           labelText: 'Search highlights',
-                          labelStyle: TextStyle(color: Colors.white70),
+                          labelStyle: const TextStyle(color: Colors.white70),
                           hintText: 'Text, page, or color',
-                          hintStyle: TextStyle(color: Colors.white38),
-                          border: OutlineInputBorder(),
+                          hintStyle: const TextStyle(color: Colors.white38),
+                          suffixIcon: highlightSearchQuery.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear search',
+                                  icon: const Icon(
+                                    Icons.clear,
+                                    color: Colors.white54,
+                                  ),
+                                  onPressed: () {
+                                    highlightSearchController.clear();
+                                    setDialogState(() {
+                                      highlightSearchQuery = '';
+                                    });
+                                  },
+                                ),
+                          border: const OutlineInputBorder(),
                         ),
                         onChanged: (value) {
                           setDialogState(() {
@@ -3956,16 +3986,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                           controller: workspaceSearchController,
                           textInputAction: TextInputAction.search,
                           style: const TextStyle(color: Colors.white),
-                          decoration: const InputDecoration(
-                            prefixIcon: Icon(
+                          decoration: InputDecoration(
+                            prefixIcon: const Icon(
                               Icons.search,
                               color: Colors.greenAccent,
                             ),
                             labelText: 'Search reader workspace',
-                            labelStyle: TextStyle(color: Colors.white70),
+                            labelStyle: const TextStyle(color: Colors.white70),
                             hintText: 'Page, label, note, or highlighted text',
-                            hintStyle: TextStyle(color: Colors.white38),
-                            border: OutlineInputBorder(),
+                            hintStyle: const TextStyle(color: Colors.white38),
+                            suffixIcon: workspaceSearchQuery.isEmpty
+                                ? null
+                                : IconButton(
+                                    tooltip: 'Clear search',
+                                    icon: const Icon(
+                                      Icons.clear,
+                                      color: Colors.white54,
+                                    ),
+                                    onPressed: () {
+                                      workspaceSearchController.clear();
+                                      setDialogState(() {
+                                        workspaceSearchQuery = '';
+                                      });
+                                    },
+                                  ),
+                            border: const OutlineInputBorder(),
                           ),
                           onChanged: (value) {
                             setDialogState(() {
@@ -4551,16 +4596,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         controller: noteSearchController,
                         textInputAction: TextInputAction.search,
                         style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(
                             Icons.search,
                             color: Colors.greenAccent,
                           ),
                           labelText: 'Search notes',
-                          labelStyle: TextStyle(color: Colors.white70),
+                          labelStyle: const TextStyle(color: Colors.white70),
                           hintText: 'Text, page, color, category',
-                          hintStyle: TextStyle(color: Colors.white38),
-                          border: OutlineInputBorder(),
+                          hintStyle: const TextStyle(color: Colors.white38),
+                          suffixIcon: noteSearchQuery.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear search',
+                                  icon: const Icon(
+                                    Icons.clear,
+                                    color: Colors.white54,
+                                  ),
+                                  onPressed: () {
+                                    noteSearchController.clear();
+                                    setDialogState(() {
+                                      noteSearchQuery = '';
+                                    });
+                                  },
+                                ),
+                          border: const OutlineInputBorder(),
                         ),
                         onChanged: (value) {
                           setDialogState(() {
