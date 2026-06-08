@@ -3441,16 +3441,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               required IconData icon,
               required String title,
               required String emptySubtitle,
-              required String filledSubtitle,
+              required String Function(List<T> items) filledSubtitleBuilder,
               required int tabIndex,
             }) {
               return StreamBuilder<List<T>>(
                 stream: stream,
                 builder: (context, snapshot) {
-                  final count = snapshot.data?.length;
-                  final subtitle = count == null || count == 0
+                  final items = snapshot.data;
+                  final count = items?.length;
+                  final subtitle = items == null
+                      ? 'Checking saved items...'
+                      : items.isEmpty
                       ? emptySubtitle
-                      : filledSubtitle;
+                      : filledSubtitleBuilder(items);
 
                   return workspaceSummaryCard(
                     icon: icon,
@@ -3461,6 +3464,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   );
                 },
               );
+            }
+
+            String workspacePreview(String value, {int maximumLength = 44}) {
+              final cleaned = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+              if (cleaned.length <= maximumLength) return cleaned;
+
+              return '${cleaned.substring(0, maximumLength).trimRight()}...';
             }
 
             Widget overviewTab() {
@@ -3535,7 +3545,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                     icon: Icons.history,
                                     title: 'Positions',
                                     emptySubtitle: 'No saved positions yet',
-                                    filledSubtitle: 'Resume from saved pages',
+                                    filledSubtitleBuilder: (positions) =>
+                                        'Latest: page ${positions.first.pageNumber}',
                                     tabIndex: 1,
                                   ),
                             ),
@@ -3550,25 +3561,26 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 icon: Icons.bookmark,
                                 title: 'Bookmarks',
                                 emptySubtitle: 'No bookmarks yet',
-                                filledSubtitle: 'Jump to marked pages',
+                                filledSubtitleBuilder: (bookmarks) =>
+                                    'Latest: ${workspacePreview(bookmarks.first.displayLabel)}',
                                 tabIndex: 2,
                               ),
                             ),
                             SizedBox(
                               width: cardWidth,
-                              child:
-                                  workspaceSummaryStreamCard<ReaderHighlight>(
-                                    stream: readerHighlightRepository
-                                        .watchForDocument(
-                                          userEmail: userEmail,
-                                          pdfTitle: widget.title,
-                                        ),
-                                    icon: Icons.border_color,
-                                    title: 'Highlights',
-                                    emptySubtitle: 'No highlights yet',
-                                    filledSubtitle: 'Review marked passages',
-                                    tabIndex: 3,
-                                  ),
+                              child: workspaceSummaryStreamCard<ReaderHighlight>(
+                                stream: readerHighlightRepository
+                                    .watchForDocument(
+                                      userEmail: userEmail,
+                                      pdfTitle: widget.title,
+                                    ),
+                                icon: Icons.border_color,
+                                title: 'Highlights',
+                                emptySubtitle: 'No highlights yet',
+                                filledSubtitleBuilder: (highlights) =>
+                                    'Latest: ${workspacePreview(highlights.first.selectedText)}',
+                                tabIndex: 3,
+                              ),
                             ),
                             SizedBox(
                               width: cardWidth,
@@ -3580,7 +3592,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 icon: Icons.note_alt,
                                 title: 'Notes',
                                 emptySubtitle: 'No notes yet',
-                                filledSubtitle: 'Review saved notes',
+                                filledSubtitleBuilder: (notes) =>
+                                    'Latest: ${workspacePreview(notes.first.note)}',
                                 tabIndex: 4,
                               ),
                             ),
