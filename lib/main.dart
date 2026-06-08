@@ -3421,7 +3421,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
     Widget emptyWorkspaceMessage(
       String message, {
-      VoidCallback? onClearSearch,
+      VoidCallback? onClearFilters,
       String clearLabel = 'Clear search',
     }) {
       return Center(
@@ -3433,10 +3433,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70),
             ),
-            if (onClearSearch != null) ...[
+            if (onClearFilters != null) ...[
               const SizedBox(height: 10),
               TextButton.icon(
-                onPressed: onClearSearch,
+                onPressed: onClearFilters,
                 icon: const Icon(Icons.clear, size: 18),
                 label: Text(clearLabel),
                 style: TextButton.styleFrom(
@@ -3464,7 +3464,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               });
             }
 
-            void clearWorkspaceNoteFilters() {
+            void clearWorkspaceFilters() {
               workspaceSearchController.clear();
               setDialogState(() {
                 workspaceSearchQuery = '';
@@ -3701,7 +3701,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                         IconButton(
                                           tooltip: 'Clear workspace filters',
                                           visualDensity: VisualDensity.compact,
-                                          onPressed: clearWorkspaceNoteFilters,
+                                          onPressed: clearWorkspaceFilters,
                                           icon: const Icon(
                                             Icons.clear,
                                             color: Colors.greenAccent,
@@ -3849,7 +3849,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   if (positions.isEmpty) {
                     return emptyWorkspaceMessage(
                       'No saved positions match this search.',
-                      onClearSearch: clearWorkspaceSearch,
+                      onClearFilters: clearWorkspaceSearch,
                     );
                   }
 
@@ -3923,7 +3923,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   if (bookmarks.isEmpty) {
                     return emptyWorkspaceMessage(
                       'No bookmarks match this search.',
-                      onClearSearch: clearWorkspaceSearch,
+                      onClearFilters: clearWorkspaceSearch,
                     );
                   }
 
@@ -4040,7 +4040,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         child: highlights.isEmpty
                             ? emptyWorkspaceMessage(
                                 'No highlights match these filters.',
-                                onClearSearch: clearWorkspaceNoteFilters,
+                                onClearFilters: clearWorkspaceFilters,
                                 clearLabel: 'Clear highlight filters',
                               )
                             : ListView.builder(
@@ -4181,7 +4181,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         child: notes.isEmpty
                             ? emptyWorkspaceMessage(
                                 'No notes match these filters.',
-                                onClearSearch: clearWorkspaceNoteFilters,
+                                onClearFilters: clearWorkspaceFilters,
                                 clearLabel: 'Clear note filters',
                               )
                             : ListView.builder(
