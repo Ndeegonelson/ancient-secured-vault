@@ -17,6 +17,7 @@ import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
 import 'services/reader_narration_playback_coordinator.dart';
 import 'services/reader_narration_voice_catalog_presenter.dart';
+import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
@@ -379,6 +380,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String searchMode = 'all';
   String accessFilter = 'all';
   List<Map<String, dynamic>> userNotes = [];
+  final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
 
   @override
   void initState() {
@@ -411,17 +413,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required int pageNumber,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final userEmail = user?.email;
+    if (userEmail == null || userEmail.isEmpty) return;
 
-    await FirebaseFirestore.instance.collection('reader_notes').add({
-      'userEmail': user.email,
-      'pdfTitle': pdfTitle,
-      'selectedText': selectedText,
-      'note': note,
-      'color': color,
-      'pageNumber': pageNumber,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    await readerNoteRepository.save(
+      ReaderNoteDraft(
+        userEmail: userEmail,
+        pdfTitle: pdfTitle,
+        selectedText: selectedText,
+        note: note,
+        color: color,
+        pageNumber: pageNumber,
+      ),
+    );
   }
 
   Future<void> checkUserRole() async {
@@ -1483,6 +1487,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   narrationPreferencesController;
   late final ReaderNarrationSessionRepository narrationSessionRepository;
   late final ReaderNarrationSessionTracker narrationSessionTracker;
+  late final ReaderNoteRepository readerNoteRepository;
   late final ReaderSavedPositionRepository savedPositionRepository;
   late final ReaderCloudNarrationSessionCoordinator narrationCloudSession;
   late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
@@ -1566,14 +1571,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     return page < 1 ? 1 : page;
   }
 
-  String formatReaderNoteTime(Map<String, dynamic> note) {
-    final updatedAt = note['updatedAt'];
+  String formatReaderNoteTime(ReaderNote note) {
+    final updatedAt = note.updatedAt;
 
     if (updatedAt is Timestamp) {
       return 'Updated: ${formatReaderTimestamp(updatedAt.toDate())}';
     }
 
-    return 'Saved: ${formatSavedPositionTime(note['createdAt'])}';
+    return 'Saved: ${formatSavedPositionTime(note.createdAt)}';
   }
 
   String formatSearchResultSummary(List<Map<String, dynamic>> results) {
@@ -2758,6 +2763,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
     narrationSessionRepository = ReaderNarrationSessionRepository();
     narrationSessionTracker = ReaderNarrationSessionTracker();
+    readerNoteRepository = ReaderNoteRepository();
     savedPositionRepository = ReaderSavedPositionRepository();
     final cloudNarrationRegistry = ReaderCloudNarrationRegistry(
       providers: [
@@ -3623,26 +3629,20 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               return;
                             }
 
-                            final noteData = <String, dynamic>{
-                              'userEmail':
-                                  FirebaseAuth.instance.currentUser?.email,
-                              'pdfTitle': widget.title,
-                              'selectedText': '',
-                              'note': noteText,
-                              'color': 'yellow',
-                              'pageNumber': currentPdfPage,
-                              'createdAt': FieldValue.serverTimestamp(),
-                            };
+                            final userEmail =
+                                FirebaseAuth.instance.currentUser?.email;
+                            if (userEmail == null || userEmail.isEmpty) return;
 
-                            final storagePath = normalizedReaderStoragePath;
-
-                            if (storagePath.isNotEmpty) {
-                              noteData['storagePath'] = storagePath;
-                            }
-
-                            await FirebaseFirestore.instance
-                                .collection('reader_notes')
-                                .add(noteData);
+                            await readerNoteRepository.save(
+                              ReaderNoteDraft(
+                                userEmail: userEmail,
+                                pdfTitle: widget.title,
+                                note: noteText,
+                                documentKey: readerDocumentKey,
+                                storagePath: normalizedReaderStoragePath,
+                                pageNumber: currentPdfPage,
+                              ),
+                            );
 
                             await logReaderAction(
                               action: 'add_reader_note',
@@ -3688,7 +3688,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               if (!canUseViewerTools('view_reader_notes')) return;
 
               final user = FirebaseAuth.instance.currentUser;
-              if (user == null) return;
+              final userEmail = user?.email;
+              if (user == null || userEmail == null || userEmail.isEmpty) {
+                return;
+              }
 
               await logReaderAction(action: 'view_reader_notes');
 
@@ -3708,12 +3711,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       content: SizedBox(
                         width: 400,
                         height: 450,
-                        child: StreamBuilder<QuerySnapshot>(
-                          stream: FirebaseFirestore.instance
-                              .collection('reader_notes')
-                              .where('userEmail', isEqualTo: user.email)
-                              .where('pdfTitle', isEqualTo: widget.title)
-                              .snapshots(),
+                        child: StreamBuilder<List<ReaderNote>>(
+                          stream: readerNoteRepository.watchForDocument(
+                            userEmail: userEmail,
+                            pdfTitle: widget.title,
+                          ),
                           builder: (context, snapshot) {
                             if (!snapshot.hasData) {
                               return const Center(
@@ -3721,9 +3723,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               );
                             }
 
-                            final notes = sortReadingPositionsByNewest(
-                              snapshot.data!.docs,
-                            );
+                            final notes = snapshot.data!;
 
                             if (notes.isEmpty) {
                               return const Center(
@@ -3738,15 +3738,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               primary: false,
                               itemCount: notes.length,
                               itemBuilder: (context, index) {
-                                final note =
-                                    notes[index].data() as Map<String, dynamic>;
-                                final noteId = notes[index].id;
-                                final notePage = readStoredPageNumber(
-                                  note['pageNumber'],
-                                );
+                                final note = notes[index];
+                                final noteId = note.id;
+                                final notePage = note.pageNumber;
                                 final noteTime = formatReaderNoteTime(note);
-                                final notePreview = (note['note'] ?? '')
-                                    .toString();
+                                final notePreview = note.note;
 
                                 return Card(
                                   color: const Color(0xFF1A1D26),
@@ -3759,7 +3755,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                       );
                                     },
                                     title: Text(
-                                      note['note'] ?? '',
+                                      note.note,
                                       maxLines: 3,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -3799,7 +3795,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                           onPressed: () async {
                                             final editController =
                                                 TextEditingController(
-                                                  text: note['note'] ?? '',
+                                                  text: note.note,
                                                 );
 
                                             final updatedNote = await showDialog(
@@ -3926,14 +3922,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                               return;
                                             }
 
-                                            await FirebaseFirestore.instance
-                                                .collection('reader_notes')
-                                                .doc(noteId)
-                                                .update({
-                                                  'note': updatedNote,
-                                                  'updatedAt':
-                                                      FieldValue.serverTimestamp(),
-                                                });
+                                            await readerNoteRepository
+                                                .updateNote(
+                                                  noteId: noteId,
+                                                  note: updatedNote.toString(),
+                                                );
 
                                             await logReaderAction(
                                               action: 'edit_reader_note',
@@ -4069,10 +4062,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                             );
 
                                             if (confirmDelete == true) {
-                                              await FirebaseFirestore.instance
-                                                  .collection('reader_notes')
-                                                  .doc(noteId)
-                                                  .delete();
+                                              await readerNoteRepository.delete(
+                                                noteId,
+                                              );
 
                                               await logReaderAction(
                                                 action: 'delete_reader_note',
