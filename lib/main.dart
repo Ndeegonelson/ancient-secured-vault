@@ -1672,8 +1672,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final searchStatus = searchText.isEmpty
         ? 'No active search'
         : 'Search: $searchText';
+    final pageStatus = pdfPageCount == null
+        ? 'Page $currentPdfPage'
+        : 'Page $currentPdfPage of $pdfPageCount';
 
-    return 'Page $currentPdfPage | $readerAccessLabel | $searchStatus';
+    return '$pageStatus | $readerAccessLabel | $searchStatus';
   }
 
   String get readerWatermarkText {
