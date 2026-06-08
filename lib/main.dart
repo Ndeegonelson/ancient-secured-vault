@@ -24,6 +24,7 @@ import 'services/reader_saved_position_repository.dart';
 import 'services/reader_workspace_filters.dart';
 import 'services/reader_activity_analytics.dart';
 import 'services/reader_activity_repository.dart';
+import 'services/user_access_state.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
@@ -339,40 +340,6 @@ class DashboardScreen extends StatefulWidget {
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
-}
-
-class UserAccessState {
-  final bool isAdmin;
-  final bool hasActiveSubscription;
-  final String accessLevel;
-
-  const UserAccessState({
-    this.isAdmin = false,
-    this.hasActiveSubscription = false,
-    this.accessLevel = 'free',
-  });
-
-  factory UserAccessState.fromFirestore(Map<String, dynamic>? data) {
-    return UserAccessState(
-      isAdmin: data?['role'] == 'admin',
-      hasActiveSubscription: data?['subscriptionStatus'] == 'active',
-      accessLevel: data?['accessLevel']?.toString() ?? 'free',
-    );
-  }
-
-  bool get canAccessMainVault => isAdmin || hasActiveSubscription;
-
-  bool get canManageVault => isAdmin;
-
-  bool canOpenPdfWithAccessLevel(String documentAccessLevel) {
-    final normalizedAccessLevel = documentAccessLevel.trim().toLowerCase();
-
-    if (normalizedAccessLevel == 'premium') {
-      return canAccessMainVault;
-    }
-
-    return true;
-  }
 }
 
 class _ReaderNoteEditResult {
