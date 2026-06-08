@@ -1952,6 +1952,21 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     preloadNarrationTextForPage(safePageNumber);
   }
 
+  void clearActivePdfSearch() {
+    if (currentSearchQuery.trim().isEmpty) return;
+
+    openPdfPage(
+      currentPdfPage,
+      searchQuery: '',
+      source: 'clear_internal_pdf_search',
+    );
+
+    logReaderAction(
+      action: 'clear_internal_pdf_search',
+      details: {'currentPdfPage': currentPdfPage},
+    );
+  }
+
   Future<bool> goToPdfPage(int page) async {
     if (page < 1) {
       if (!mounted) return false;
@@ -6218,6 +6233,16 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               );
             },
           ),
+          if (currentSearchQuery.trim().isNotEmpty)
+            IconButton(
+              tooltip: 'Clear active PDF search',
+              icon: const Icon(
+                Icons.search_off,
+                size: 20,
+                color: Colors.greenAccent,
+              ),
+              onPressed: clearActivePdfSearch,
+            ),
           PointerInterceptor(
             child: IconButton(
               tooltip: 'More reader tools',
