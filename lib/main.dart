@@ -17,6 +17,7 @@ import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
 import 'services/reader_narration_playback_coordinator.dart';
 import 'services/reader_narration_voice_catalog_presenter.dart';
+import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
@@ -1494,6 +1495,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   narrationPreferencesController;
   late final ReaderNarrationSessionRepository narrationSessionRepository;
   late final ReaderNarrationSessionTracker narrationSessionTracker;
+  late final ReaderHighlightRepository readerHighlightRepository;
   late final ReaderNoteRepository readerNoteRepository;
   late final ReaderSavedPositionRepository savedPositionRepository;
   late final ReaderCloudNarrationSessionCoordinator narrationCloudSession;
@@ -1586,6 +1588,29 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     'Important',
   ];
 
+  static const Map<String, Color> readerHighlightColors = {
+    'yellow': Color(0xFFFFD54F),
+    'green': Color(0xFF69F0AE),
+    'blue': Color(0xFF64B5F6),
+    'pink': Color(0xFFF48FB1),
+    'red': Color(0xFFFF8A80),
+  };
+
+  String normalizeReaderHighlightColor(String value) {
+    final color = value.trim().toLowerCase();
+    return readerHighlightColors.containsKey(color) ? color : 'yellow';
+  }
+
+  Color readerHighlightColor(String value) {
+    return readerHighlightColors[normalizeReaderHighlightColor(value)] ??
+        readerHighlightColors['yellow']!;
+  }
+
+  String readerHighlightColorLabel(String value) {
+    final color = normalizeReaderHighlightColor(value);
+    return color[0].toUpperCase() + color.substring(1);
+  }
+
   String normalizeReaderNoteCategory(String value) {
     final category = value.trim();
     if (category.isEmpty) return readerNoteCategories.first;
@@ -1603,6 +1628,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
 
     return 'Saved: ${formatSavedPositionTime(note.createdAt)}';
+  }
+
+  String formatReaderHighlightTime(ReaderHighlight highlight) {
+    return 'Saved: ${formatSavedPositionTime(highlight.createdAt)}';
   }
 
   String formatSearchResultSummary(List<Map<String, dynamic>> results) {
@@ -2237,6 +2266,392 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
   }
 
+  Future<String?> chooseReaderHighlightColor() {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Highlight Color',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: readerHighlightColors.entries.map((entry) {
+                final colorName = entry.key;
+                final colorValue = entry.value;
+
+                return InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => Navigator.of(dialogContext).pop(colorName),
+                  child: Container(
+                    width: 128,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.white24),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: colorValue,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          readerHighlightColorLabel(colorName),
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> addReaderHighlight() async {
+    if (!canUseViewerTools('add_reader_highlight')) return;
+
+    final selectionPage = currentPdfPage;
+    final selectedText = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return ReaderTextSelectionDialog(
+          pageNumber: selectionPage,
+          pageText: loadNarrationTextForPage(selectionPage),
+          title: 'Highlight Passage | Page $selectionPage',
+          confirmLabel: 'Save Highlight',
+          confirmIcon: Icons.border_color,
+        );
+      },
+    );
+
+    final trimmedSelection = selectedText?.trim() ?? '';
+    if (trimmedSelection.isEmpty || !mounted) return;
+
+    final selectedColor = await chooseReaderHighlightColor();
+    if (selectedColor == null || !mounted) return;
+
+    final userEmail = FirebaseAuth.instance.currentUser?.email;
+    if (userEmail == null || userEmail.isEmpty) return;
+
+    await readerHighlightRepository.save(
+      ReaderHighlightDraft(
+        userEmail: userEmail,
+        pdfTitle: widget.title,
+        selectedText: trimmedSelection,
+        color: normalizeReaderHighlightColor(selectedColor),
+        documentKey: readerDocumentKey,
+        storagePath: normalizedReaderStoragePath,
+        pageNumber: selectionPage,
+      ),
+    );
+
+    await logReaderAction(
+      action: 'add_reader_highlight',
+      details: {
+        'pageNumber': selectionPage,
+        'characterCount': trimmedSelection.length,
+        'color': selectedColor,
+      },
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Highlight saved')));
+  }
+
+  Future<void> showReaderHighlightsDialog() async {
+    if (!canUseViewerTools('view_reader_highlights')) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final userEmail = user?.email;
+    if (user == null || userEmail == null || userEmail.isEmpty) return;
+
+    await logReaderAction(action: 'view_reader_highlights');
+
+    if (!mounted) return;
+
+    final highlightSearchController = TextEditingController();
+    var highlightSearchQuery = '';
+
+    showDialog(
+      barrierDismissible: false,
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Reader Highlights',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 420,
+                  height: 520,
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: highlightSearchController,
+                        textInputAction: TextInputAction.search,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: Colors.greenAccent,
+                          ),
+                          labelText: 'Search highlights',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          hintText: 'Text, page, or color',
+                          hintStyle: TextStyle(color: Colors.white38),
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            highlightSearchQuery = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: StreamBuilder<List<ReaderHighlight>>(
+                          stream: readerHighlightRepository.watchForDocument(
+                            userEmail: userEmail,
+                            pdfTitle: widget.title,
+                          ),
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
+
+                            final allHighlights = snapshot.data!;
+                            final highlights = ReaderHighlight.search(
+                              allHighlights,
+                              highlightSearchQuery,
+                            );
+
+                            if (allHighlights.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No highlights saved for this PDF yet.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
+
+                            if (highlights.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No highlights match this search.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
+
+                            return ListView.builder(
+                              primary: false,
+                              itemCount: highlights.length,
+                              itemBuilder: (context, index) {
+                                final highlight = highlights[index];
+                                final highlightId = highlight.id;
+                                final highlightPage = highlight.pageNumber;
+                                final highlightColor = readerHighlightColor(
+                                  highlight.color,
+                                );
+                                final highlightColorLabel =
+                                    highlight.displayColor;
+
+                                return Card(
+                                  color: const Color(0xFF1A1D26),
+                                  child: ListTile(
+                                    onTap: () {
+                                      Navigator.of(dialogContext).pop();
+                                      openPdfPage(
+                                        highlightPage,
+                                        source: 'reader_highlight',
+                                      );
+                                    },
+                                    leading: Container(
+                                      width: 14,
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        color: highlightColor,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                    title: Text(
+                                      highlight.selectedText,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Page $highlightPage | $highlightColorLabel',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        Text(
+                                          formatReaderHighlightTime(highlight),
+                                          style: const TextStyle(
+                                            color: Colors.white54,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    trailing: IconButton(
+                                      tooltip: 'Delete highlight',
+                                      icon: const Icon(
+                                        Icons.delete,
+                                        color: Colors.redAccent,
+                                      ),
+                                      onPressed: () async {
+                                        final confirmDelete =
+                                            await showDialog<bool>(
+                                              context: context,
+                                              builder: (confirmContext) {
+                                                return PointerInterceptor(
+                                                  child: AlertDialog(
+                                                    backgroundColor:
+                                                        const Color(0xFF0F1117),
+                                                    title: const Text(
+                                                      'Delete Highlight?',
+                                                      style: TextStyle(
+                                                        color: Colors.redAccent,
+                                                      ),
+                                                    ),
+                                                    content: Text(
+                                                      'Remove the saved highlight from page $highlightPage?',
+                                                      style: const TextStyle(
+                                                        color: Colors.white70,
+                                                      ),
+                                                    ),
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () =>
+                                                            Navigator.pop(
+                                                              confirmContext,
+                                                              false,
+                                                            ),
+                                                        child: const Text(
+                                                          'Cancel',
+                                                          style: TextStyle(
+                                                            color:
+                                                                Colors.white70,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      TextButton(
+                                                        onPressed: () =>
+                                                            Navigator.pop(
+                                                              confirmContext,
+                                                              true,
+                                                            ),
+                                                        child: const Text(
+                                                          'Delete',
+                                                          style: TextStyle(
+                                                            color: Colors
+                                                                .redAccent,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                            );
+
+                                        if (confirmDelete != true) return;
+
+                                        await readerHighlightRepository.delete(
+                                          highlightId,
+                                        );
+
+                                        await logReaderAction(
+                                          action: 'delete_reader_highlight',
+                                          details: {
+                                            'highlightId': highlightId,
+                                            'pageNumber': highlightPage,
+                                          },
+                                        );
+
+                                        if (!context.mounted) return;
+
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).hideCurrentSnackBar();
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Highlight deleted'),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(highlightSearchController.dispose);
+  }
+
   Future<void> loadNarrationPreferences() async {
     await narrationPreferencesController.load(
       context: narrationPreferencesContext,
@@ -2787,6 +3202,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     narrationPreferencesRepository = ReaderNarrationPreferencesRepository();
     narrationSessionRepository = ReaderNarrationSessionRepository();
     narrationSessionTracker = ReaderNarrationSessionTracker();
+    readerHighlightRepository = ReaderHighlightRepository();
     readerNoteRepository = ReaderNoteRepository();
     savedPositionRepository = ReaderSavedPositionRepository();
     final cloudNarrationRegistry = ReaderCloudNarrationRegistry(
@@ -3588,6 +4004,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 },
               );
             },
+          ),
+          IconButton(
+            tooltip: 'Add reader highlight',
+            icon: const Icon(
+              Icons.border_color,
+              size: 20,
+              color: Colors.greenAccent,
+            ),
+            onPressed: addReaderHighlight,
+          ),
+          IconButton(
+            tooltip: 'Reader highlights',
+            icon: const Icon(
+              Icons.format_color_fill,
+              size: 20,
+              color: Colors.greenAccent,
+            ),
+            onPressed: showReaderHighlightsDialog,
           ),
           IconButton(
             tooltip: 'Add reader note',
