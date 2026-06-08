@@ -3381,6 +3381,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
     final workspaceSearchController = TextEditingController();
     var workspaceSearchQuery = '';
+    var workspaceNoteCategoryFilter = 'All';
 
     bool positionMatchesSearch(ReaderSavedPosition position, String query) {
       final normalizedQuery = query.trim().toLowerCase();
@@ -3391,9 +3392,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           page.toString().contains(normalizedQuery);
     }
 
+    List<ReaderNote> filterWorkspaceNotes(Iterable<ReaderNote> notes) {
+      final matchingNotes = ReaderNote.search(notes, workspaceSearchQuery);
+      if (workspaceNoteCategoryFilter == 'All') return matchingNotes;
+
+      return matchingNotes
+          .where((note) => note.displayCategory == workspaceNoteCategoryFilter)
+          .toList();
+    }
+
     Widget emptyWorkspaceMessage(
       String message, {
       VoidCallback? onClearSearch,
+      String clearLabel = 'Clear search',
     }) {
       return Center(
         child: Column(
@@ -3409,7 +3420,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               TextButton.icon(
                 onPressed: onClearSearch,
                 icon: const Icon(Icons.clear, size: 18),
-                label: const Text('Clear search'),
+                label: Text(clearLabel),
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.greenAccent,
                 ),
@@ -3432,6 +3443,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               workspaceSearchController.clear();
               setDialogState(() {
                 workspaceSearchQuery = '';
+              });
+            }
+
+            void clearWorkspaceNoteFilters() {
+              workspaceSearchController.clear();
+              setDialogState(() {
+                workspaceSearchQuery = '';
+                workspaceNoteCategoryFilter = 'All';
               });
             }
 
@@ -3632,15 +3651,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                       fontSize: 12,
                                     ),
                                   ),
-                                  if (workspaceSearchQuery
-                                      .trim()
-                                      .isNotEmpty) ...[
+                                  if (workspaceSearchQuery.trim().isNotEmpty ||
+                                      workspaceNoteCategoryFilter != 'All') ...[
                                     const SizedBox(height: 4),
                                     Row(
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            'Showing matches for "${workspaceSearchQuery.trim()}"',
+                                            [
+                                              if (workspaceSearchQuery
+                                                  .trim()
+                                                  .isNotEmpty)
+                                                'Showing matches for "${workspaceSearchQuery.trim()}"',
+                                              if (workspaceNoteCategoryFilter !=
+                                                  'All')
+                                                'Note category: $workspaceNoteCategoryFilter',
+                                            ].join(' | '),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
@@ -3650,9 +3676,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                           ),
                                         ),
                                         IconButton(
-                                          tooltip: 'Clear workspace search',
+                                          tooltip: 'Clear workspace filters',
                                           visualDensity: VisualDensity.compact,
-                                          onPressed: clearWorkspaceSearch,
+                                          onPressed: clearWorkspaceNoteFilters,
                                           icon: const Icon(
                                             Icons.clear,
                                             color: Colors.greenAccent,
@@ -3761,10 +3787,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 emptySubtitle: 'No notes yet',
                                 filledSubtitleBuilder: (notes) =>
                                     'Latest: ${workspacePreview(notes.first.note)}',
-                                filterBuilder: (notes) => ReaderNote.search(
-                                  notes,
-                                  workspaceSearchQuery,
-                                ),
+                                filterBuilder: filterWorkspaceNotes,
                                 tabIndex: 4,
                               ),
                             ),
@@ -4052,10 +4075,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   }
 
                   final allNotes = snapshot.data!;
-                  final notes = ReaderNote.search(
-                    allNotes,
-                    workspaceSearchQuery,
-                  );
+                  final notes = filterWorkspaceNotes(allNotes);
 
                   if (allNotes.isEmpty) {
                     return emptyWorkspaceMessage(
@@ -4063,61 +4083,101 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                     );
                   }
 
-                  if (notes.isEmpty) {
-                    return emptyWorkspaceMessage(
-                      'No notes match this search.',
-                      onClearSearch: clearWorkspaceSearch,
-                    );
-                  }
-
-                  return ListView.builder(
-                    primary: false,
-                    itemCount: notes.length,
-                    itemBuilder: (context, index) {
-                      final note = notes[index];
-                      final page = note.pageNumber;
-
-                      return workspaceClickableCard(
-                        child: ListTile(
-                          hoverColor: Colors.greenAccent.withValues(
-                            alpha: 0.08,
-                          ),
-                          leading: const Icon(
-                            Icons.note_alt_outlined,
-                            color: Colors.greenAccent,
-                          ),
-                          title: Text(
-                            note.note,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 4),
-                              Text(
-                                'Page $page | ${note.displayCategory}',
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              Text(
-                                formatReaderNoteTime(note),
-                                style: const TextStyle(color: Colors.white54),
-                              ),
-                            ],
-                          ),
-                          trailing: const Icon(
-                            Icons.open_in_new,
-                            color: Colors.greenAccent,
-                            size: 18,
-                          ),
-                          onTap: () {
-                            Navigator.of(dialogContext).pop();
-                            openPdfPage(page, source: 'reader_workspace_note');
-                          },
+                  return Column(
+                    children: [
+                      DropdownButtonFormField<String>(
+                        initialValue: workspaceNoteCategoryFilter,
+                        dropdownColor: const Color(0xFF1A1D26),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Note category',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          border: OutlineInputBorder(),
                         ),
-                      );
-                    },
+                        items: ['All', ...readerNoteCategories]
+                            .map(
+                              (category) => DropdownMenuItem<String>(
+                                value: category,
+                                child: Text(category),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (category) {
+                          if (category == null) return;
+                          setDialogState(() {
+                            workspaceNoteCategoryFilter = category;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: notes.isEmpty
+                            ? emptyWorkspaceMessage(
+                                'No notes match these filters.',
+                                onClearSearch: clearWorkspaceNoteFilters,
+                                clearLabel: 'Clear note filters',
+                              )
+                            : ListView.builder(
+                                primary: false,
+                                itemCount: notes.length,
+                                itemBuilder: (context, index) {
+                                  final note = notes[index];
+                                  final page = note.pageNumber;
+
+                                  return workspaceClickableCard(
+                                    child: ListTile(
+                                      hoverColor: Colors.greenAccent.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                      leading: const Icon(
+                                        Icons.note_alt_outlined,
+                                        color: Colors.greenAccent,
+                                      ),
+                                      title: Text(
+                                        note.note,
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      subtitle: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Page $page | ${note.displayCategory}',
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                          Text(
+                                            formatReaderNoteTime(note),
+                                            style: const TextStyle(
+                                              color: Colors.white54,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      trailing: const Icon(
+                                        Icons.open_in_new,
+                                        color: Colors.greenAccent,
+                                        size: 18,
+                                      ),
+                                      onTap: () {
+                                        Navigator.of(dialogContext).pop();
+                                        openPdfPage(
+                                          page,
+                                          source: 'reader_workspace_note',
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
                   );
                 },
               );
@@ -4234,10 +4294,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               ),
                               icon: Icons.note_alt,
                               label: 'Notes',
-                              countBuilder: (notes) => ReaderNote.search(
-                                notes,
-                                workspaceSearchQuery,
-                              ).length,
+                              countBuilder: (notes) =>
+                                  filterWorkspaceNotes(notes).length,
                             ),
                           ],
                         ),
