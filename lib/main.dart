@@ -3774,6 +3774,1019 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     ).whenComplete(workspaceSearchController.dispose);
   }
 
+  Future<void> showManualPageJumpDialog() async {
+    if (!canUseViewerTools('manual_page_jump')) return;
+
+    await logReaderAction(
+      action: 'open_manual_page_jump_dialog',
+      details: {'currentPdfPage': currentPdfPage},
+    );
+
+    if (!mounted) return;
+
+    final pageController = TextEditingController(
+      text: currentPdfPage.toString(),
+    );
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        Future<void> submitPageJump() async {
+          final page = int.tryParse(pageController.text.trim()) ?? 0;
+          final opened = await goToPdfPage(page);
+
+          if (!dialogContext.mounted) return;
+          if (opened) Navigator.pop(dialogContext);
+        }
+
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Go to Page',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: PointerInterceptor(
+              child: TextField(
+                controller: pageController,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                autofocus: true,
+                onSubmitted: (_) => submitPageJump(),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Page number',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintText: 'Enter page number',
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  helperText: pdfPageCount == null
+                      ? 'Tracked page: $currentPdfPage'
+                      : 'Tracked page: $currentPdfPage of $pdfPageCount',
+                  helperStyle: const TextStyle(color: Colors.white54),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+              ),
+              TextButton(
+                onPressed: submitPageJump,
+                child: const Text(
+                  'Open',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).whenComplete(pageController.dispose);
+  }
+
+  Future<void> showSaveReadingPositionDialog() async {
+    if (!canUseViewerTools('open_save_reading_position_dialog')) return;
+
+    await logReaderAction(
+      action: 'open_save_reading_position_dialog',
+      details: {'currentPdfPage': currentPdfPage},
+    );
+
+    if (!mounted) return;
+
+    final pageController = TextEditingController(
+      text: currentPdfPage.toString(),
+    );
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        Future<void> submitTypedSave() async {
+          if (!canUseViewerTools('save_reading_position')) return;
+
+          final page = int.tryParse(pageController.text.trim()) ?? 0;
+          final saved = await saveReadingPositionPage(page);
+
+          if (!dialogContext.mounted) return;
+          if (saved) Navigator.pop(dialogContext);
+        }
+
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Save Current Position',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: PointerInterceptor(
+              child: TextField(
+                controller: pageController,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => submitTypedSave(),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Page to save',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintText: 'Page number',
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  helperText: 'Tracked page: $currentPdfPage',
+                  suffixText: 'Enter saves',
+                  helperStyle: const TextStyle(color: Colors.white54),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  if (!canUseViewerTools('save_reading_position')) return;
+
+                  final saved = await saveReadingPositionPage(currentPdfPage);
+
+                  if (!dialogContext.mounted) return;
+                  if (saved) Navigator.pop(dialogContext);
+                },
+                child: const Text(
+                  'Save Tracked',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+              TextButton(
+                onPressed: submitTypedSave,
+                child: const Text(
+                  'Save Typed',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).whenComplete(pageController.dispose);
+  }
+
+  Future<void> showSavedReadingPositionsDialog() async {
+    if (!canUseViewerTools('view_saved_reading_positions')) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final userEmail = user?.email;
+    if (user == null || userEmail == null || userEmail.isEmpty) return;
+
+    await logReaderAction(action: 'view_saved_reading_positions');
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Saved Positions',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: PointerInterceptor(
+              child: SizedBox(
+                width: 400,
+                height: 400,
+                child: StreamBuilder<List<ReaderSavedPosition>>(
+                  stream: savedPositionRepository.watchForDocument(
+                    userEmail: userEmail,
+                    pdfTitle: widget.title,
+                  ),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final positions = snapshot.data!;
+
+                    if (positions.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          'No saved positions for this PDF yet.',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: positions.length,
+                      itemBuilder: (context, index) {
+                        final position = positions[index];
+                        final positionId = position.id;
+                        final page = position.pageNumber;
+                        final savedAt = formatSavedPositionTime(
+                          position.createdAt,
+                        );
+
+                        return Card(
+                          color: const Color(0xFF1A1D26),
+                          child: ListTile(
+                            onTap: () {
+                              Navigator.of(dialogContext).pop();
+                              openPdfPage(
+                                page,
+                                source: 'saved_reading_position',
+                              );
+                            },
+                            title: Text(
+                              'Page $page',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            subtitle: Text(
+                              'Saved: $savedAt',
+                              style: const TextStyle(color: Colors.white54),
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Delete saved position',
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: Colors.redAccent,
+                                size: 20,
+                              ),
+                              onPressed: () async {
+                                final confirmDelete = await showDialog<bool>(
+                                  context: context,
+                                  builder: (confirmContext) {
+                                    return PointerInterceptor(
+                                      child: AlertDialog(
+                                        backgroundColor: const Color(
+                                          0xFF0F1117,
+                                        ),
+                                        title: const Text(
+                                          'Delete Saved Position?',
+                                          style: TextStyle(
+                                            color: Colors.redAccent,
+                                          ),
+                                        ),
+                                        content: Text(
+                                          'Remove the saved position for page $page?',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(
+                                              confirmContext,
+                                              false,
+                                            ),
+                                            child: const Text(
+                                              'Cancel',
+                                              style: TextStyle(
+                                                color: Colors.white70,
+                                              ),
+                                            ),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(
+                                              confirmContext,
+                                              true,
+                                            ),
+                                            child: const Text(
+                                              'Delete',
+                                              style: TextStyle(
+                                                color: Colors.redAccent,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                );
+
+                                if (confirmDelete != true) return;
+
+                                await savedPositionRepository.delete(
+                                  positionId,
+                                );
+
+                                await logReaderAction(
+                                  action: 'delete_reading_position',
+                                  details: {
+                                    'positionId': positionId,
+                                    'pageNumber': page,
+                                  },
+                                );
+
+                                if (!mounted) return;
+
+                                ScaffoldMessenger.of(
+                                  context,
+                                ).hideCurrentSnackBar();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Saved position removed: Page $page',
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+            actions: [
+              PointerInterceptor(
+                child: TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text(
+                    'Close',
+                    style: TextStyle(color: Colors.greenAccent),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> addReaderNote() async {
+    if (!canUseViewerTools('add_reader_note')) return;
+
+    final noteController = TextEditingController();
+    var selectedCategory = readerNoteCategories.first;
+
+    showDialog(
+      barrierDismissible: false,
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Add Note',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedCategory,
+                      dropdownColor: const Color(0xFF1A1D26),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Category',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        border: OutlineInputBorder(),
+                      ),
+                      items: readerNoteCategories
+                          .map(
+                            (category) => DropdownMenuItem<String>(
+                              value: category,
+                              child: Text(category),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (category) {
+                        if (category == null) return;
+                        setDialogState(() {
+                          selectedCategory = category;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      autofocus: true,
+                      controller: noteController,
+                      maxLines: 5,
+                      textInputAction: TextInputAction.newline,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: 'Note',
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        hintText: 'Write a note for this PDF',
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        helperText: 'Linked to page $currentPdfPage',
+                        helperStyle: const TextStyle(color: Colors.white54),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      final noteText = noteController.text.trim();
+
+                      if (noteText.isEmpty) {
+                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Write a note before saving.'),
+                          ),
+                        );
+                        return;
+                      }
+
+                      final userEmail =
+                          FirebaseAuth.instance.currentUser?.email;
+                      if (userEmail == null || userEmail.isEmpty) return;
+
+                      await readerNoteRepository.save(
+                        ReaderNoteDraft(
+                          userEmail: userEmail,
+                          pdfTitle: widget.title,
+                          note: noteText,
+                          documentKey: readerDocumentKey,
+                          storagePath: normalizedReaderStoragePath,
+                          category: normalizeReaderNoteCategory(
+                            selectedCategory,
+                          ),
+                          pageNumber: currentPdfPage,
+                        ),
+                      );
+
+                      await logReaderAction(
+                        action: 'add_reader_note',
+                        details: {
+                          'noteLength': noteText.length,
+                          'pageNumber': currentPdfPage,
+                          'category': selectedCategory,
+                        },
+                      );
+
+                      if (!dialogContext.mounted) return;
+                      Navigator.of(dialogContext).pop();
+
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Note saved successfully'),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Save',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(noteController.dispose);
+  }
+
+  Future<void> showReaderNotesDialog() async {
+    if (!canUseViewerTools('view_reader_notes')) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final userEmail = user?.email;
+    if (user == null || userEmail == null || userEmail.isEmpty) return;
+
+    await logReaderAction(action: 'view_reader_notes');
+
+    if (!mounted) return;
+
+    final noteSearchController = TextEditingController();
+    var noteSearchQuery = '';
+    var noteCategoryFilter = 'All';
+
+    showDialog(
+      barrierDismissible: false,
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Reader Notes',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 420,
+                  height: 540,
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: noteSearchController,
+                        textInputAction: TextInputAction.search,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: Colors.greenAccent,
+                          ),
+                          labelText: 'Search notes',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          hintText: 'Text, page, color, category',
+                          hintStyle: TextStyle(color: Colors.white38),
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            noteSearchQuery = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: noteCategoryFilter,
+                        dropdownColor: const Color(0xFF1A1D26),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: ['All', ...readerNoteCategories]
+                            .map(
+                              (category) => DropdownMenuItem<String>(
+                                value: category,
+                                child: Text(category),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (category) {
+                          if (category == null) return;
+                          setDialogState(() {
+                            noteCategoryFilter = category;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: StreamBuilder<List<ReaderNote>>(
+                          stream: readerNoteRepository.watchForDocument(
+                            userEmail: userEmail,
+                            pdfTitle: widget.title,
+                          ),
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
+
+                            final allNotes = snapshot.data!;
+                            final matchingNotes = ReaderNote.search(
+                              allNotes,
+                              noteSearchQuery,
+                            );
+                            final notes = noteCategoryFilter == 'All'
+                                ? matchingNotes
+                                : matchingNotes
+                                      .where(
+                                        (note) =>
+                                            note.displayCategory ==
+                                            noteCategoryFilter,
+                                      )
+                                      .toList();
+
+                            if (allNotes.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No notes saved for this PDF yet.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
+
+                            if (notes.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No notes match this search.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
+
+                            return ListView.builder(
+                              primary: false,
+                              itemCount: notes.length,
+                              itemBuilder: (context, index) {
+                                final note = notes[index];
+                                final noteId = note.id;
+                                final notePage = note.pageNumber;
+
+                                return Card(
+                                  color: const Color(0xFF1A1D26),
+                                  child: ListTile(
+                                    onTap: () {
+                                      Navigator.of(dialogContext).pop();
+                                      openPdfPage(
+                                        notePage,
+                                        source: 'reader_note',
+                                      );
+                                    },
+                                    title: Text(
+                                      note.note,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Page $notePage | ${note.displayCategory}',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        Text(
+                                          formatReaderNoteTime(note),
+                                          style: const TextStyle(
+                                            color: Colors.white54,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'Edit note',
+                                          icon: const Icon(
+                                            Icons.edit,
+                                            color: Colors.greenAccent,
+                                          ),
+                                          onPressed: () async {
+                                            final editController =
+                                                TextEditingController(
+                                                  text: note.note,
+                                                );
+                                            var selectedEditCategory =
+                                                normalizeReaderNoteCategory(
+                                                  note.category,
+                                                );
+
+                                            final updatedNote = await showDialog<_ReaderNoteEditResult>(
+                                              context: context,
+                                              builder: (editContext) {
+                                                return StatefulBuilder(
+                                                  builder: (context, setEditState) {
+                                                    return PointerInterceptor(
+                                                      child: AlertDialog(
+                                                        backgroundColor:
+                                                            const Color(
+                                                              0xFF0F1117,
+                                                            ),
+                                                        title: const Text(
+                                                          'Edit Note',
+                                                          style: TextStyle(
+                                                            color: Colors
+                                                                .greenAccent,
+                                                          ),
+                                                        ),
+                                                        content: Column(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              'Linked page: $notePage',
+                                                              style:
+                                                                  const TextStyle(
+                                                                    color: Colors
+                                                                        .white70,
+                                                                  ),
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            DropdownButtonFormField<
+                                                              String
+                                                            >(
+                                                              initialValue:
+                                                                  selectedEditCategory,
+                                                              dropdownColor:
+                                                                  const Color(
+                                                                    0xFF1A1D26,
+                                                                  ),
+                                                              style:
+                                                                  const TextStyle(
+                                                                    color: Colors
+                                                                        .white,
+                                                                  ),
+                                                              decoration: const InputDecoration(
+                                                                labelText:
+                                                                    'Category',
+                                                                labelStyle: TextStyle(
+                                                                  color: Colors
+                                                                      .white70,
+                                                                ),
+                                                                border:
+                                                                    OutlineInputBorder(),
+                                                              ),
+                                                              items: readerNoteCategories
+                                                                  .map(
+                                                                    (
+                                                                      category,
+                                                                    ) => DropdownMenuItem<String>(
+                                                                      value:
+                                                                          category,
+                                                                      child: Text(
+                                                                        category,
+                                                                      ),
+                                                                    ),
+                                                                  )
+                                                                  .toList(),
+                                                              onChanged: (category) {
+                                                                if (category ==
+                                                                    null) {
+                                                                  return;
+                                                                }
+                                                                setEditState(() {
+                                                                  selectedEditCategory =
+                                                                      category;
+                                                                });
+                                                              },
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            TextField(
+                                                              controller:
+                                                                  editController,
+                                                              maxLines: 6,
+                                                              style:
+                                                                  const TextStyle(
+                                                                    color: Colors
+                                                                        .white,
+                                                                  ),
+                                                              decoration: const InputDecoration(
+                                                                border:
+                                                                    OutlineInputBorder(),
+                                                                hintText:
+                                                                    'Edit your note...',
+                                                                hintStyle: TextStyle(
+                                                                  color: Colors
+                                                                      .white54,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        actions: [
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                  editContext,
+                                                                ),
+                                                            child: const Text(
+                                                              'Cancel',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .white70,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          TextButton(
+                                                            onPressed: () {
+                                                              Navigator.pop(
+                                                                editContext,
+                                                                _ReaderNoteEditResult(
+                                                                  note: editController
+                                                                      .text
+                                                                      .trim(),
+                                                                  category:
+                                                                      selectedEditCategory,
+                                                                ),
+                                                              );
+                                                            },
+                                                            child: const Text(
+                                                              'Save',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .greenAccent,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                );
+                                              },
+                                            );
+
+                                            editController.dispose();
+
+                                            if (updatedNote == null) return;
+
+                                            if (updatedNote.note.isEmpty) {
+                                              if (!context.mounted) return;
+
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).hideCurrentSnackBar();
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Write a note before saving changes.',
+                                                  ),
+                                                ),
+                                              );
+                                              return;
+                                            }
+
+                                            await readerNoteRepository.updateNote(
+                                              noteId: noteId,
+                                              note: updatedNote.note,
+                                              category:
+                                                  normalizeReaderNoteCategory(
+                                                    updatedNote.category,
+                                                  ),
+                                            );
+
+                                            await logReaderAction(
+                                              action: 'edit_reader_note',
+                                              details: {
+                                                'noteId': noteId,
+                                                'noteLength':
+                                                    updatedNote.note.length,
+                                                'pageNumber': notePage,
+                                                'category':
+                                                    updatedNote.category,
+                                              },
+                                            );
+
+                                            if (!context.mounted) return;
+
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).hideCurrentSnackBar();
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Note updated successfully',
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Delete note',
+                                          icon: const Icon(
+                                            Icons.delete,
+                                            color: Colors.redAccent,
+                                          ),
+                                          onPressed: () async {
+                                            final confirmDelete =
+                                                await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (confirmContext) {
+                                                    return PointerInterceptor(
+                                                      child: AlertDialog(
+                                                        backgroundColor:
+                                                            const Color(
+                                                              0xFF0F1117,
+                                                            ),
+                                                        title: const Text(
+                                                          'Delete Note?',
+                                                          style: TextStyle(
+                                                            color: Colors
+                                                                .redAccent,
+                                                          ),
+                                                        ),
+                                                        content: Text(
+                                                          'Remove this note from page $notePage?',
+                                                          style:
+                                                              const TextStyle(
+                                                                color: Colors
+                                                                    .white70,
+                                                              ),
+                                                        ),
+                                                        actions: [
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                  confirmContext,
+                                                                  false,
+                                                                ),
+                                                            child: const Text(
+                                                              'Cancel',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .white70,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                  confirmContext,
+                                                                  true,
+                                                                ),
+                                                            child: const Text(
+                                                              'Delete',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .redAccent,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                );
+
+                                            if (confirmDelete != true) return;
+
+                                            await readerNoteRepository.delete(
+                                              noteId,
+                                            );
+
+                                            await logReaderAction(
+                                              action: 'delete_reader_note',
+                                              details: {
+                                                'noteId': noteId,
+                                                'pageNumber': notePage,
+                                              },
+                                            );
+
+                                            if (!context.mounted) return;
+
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).hideCurrentSnackBar();
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('Note deleted'),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(noteSearchController.dispose);
+  }
+
   Future<void> loadNarrationPreferences() async {
     await narrationPreferencesController.load(
       context: narrationPreferencesContext,
@@ -4433,15 +5446,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             onPressed: showReaderNarrationDialog,
           ),
           IconButton(
-            tooltip: 'Narrate selected passage',
-            icon: const Icon(
-              Icons.text_snippet_outlined,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: showSelectedTextNarrationDialog,
-          ),
-          IconButton(
             tooltip: showReaderStatusOverlay
                 ? 'Hide reader status'
                 : 'Show reader status',
@@ -4477,15 +5481,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 },
               );
             },
-          ),
-          IconButton(
-            tooltip: 'Reader workspace',
-            icon: const Icon(
-              Icons.dashboard_customize_outlined,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: showReaderWorkspaceDialog,
           ),
           IconButton(
             tooltip: 'Search in PDF',
@@ -4713,1246 +5708,182 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               );
             },
           ),
-          IconButton(
-            tooltip: 'Go to page',
-            icon: const Icon(Icons.input, size: 20, color: Colors.greenAccent),
-            onPressed: () async {
-              if (!canUseViewerTools('manual_page_jump')) return;
-
-              await logReaderAction(
-                action: 'open_manual_page_jump_dialog',
-                details: {'currentPdfPage': currentPdfPage},
-              );
-
-              if (!mounted) return;
-
-              final pageController = TextEditingController(
-                text: currentPdfPage.toString(),
-              );
-
-              showDialog(
-                context: this.context,
-                builder: (dialogContext) {
-                  Future<void> submitPageJump() async {
-                    final page = int.tryParse(pageController.text.trim()) ?? 0;
-
-                    final opened = await goToPdfPage(page);
-
-                    if (!dialogContext.mounted) return;
-
-                    if (opened) {
-                      Navigator.pop(dialogContext);
-                    }
-                  }
-
-                  return PointerInterceptor(
-                    child: AlertDialog(
-                      backgroundColor: const Color(0xFF0F1117),
-                      title: const Text(
-                        'Go to Page',
-                        style: TextStyle(color: Colors.greenAccent),
-                      ),
-                      content: PointerInterceptor(
-                        child: TextField(
-                          controller: pageController,
-                          keyboardType: TextInputType.number,
-                          textInputAction: TextInputAction.done,
-                          autofocus: true,
-                          onSubmitted: (_) => submitPageJump(),
-                          style: const TextStyle(color: Colors.white),
-                          decoration: InputDecoration(
-                            labelText: 'Page to open',
-                            labelStyle: const TextStyle(color: Colors.white70),
-                            hintText: 'Page number',
-                            hintStyle: const TextStyle(color: Colors.white54),
-                            helperText: pdfPageCount == null
-                                ? 'Tracked page: $currentPdfPage'
-                                : 'Tracked page: $currentPdfPage of $pdfPageCount',
-                            suffixText: 'Enter opens',
-                            helperStyle: const TextStyle(color: Colors.white54),
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      actions: [
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: () {
-                              Navigator.pop(dialogContext);
-                            },
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(color: Colors.redAccent),
-                            ),
-                          ),
-                        ),
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: submitPageJump,
-                            child: const Text(
-                              'Open',
-                              style: TextStyle(color: Colors.greenAccent),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ).whenComplete(pageController.dispose);
-            },
-          ),
-          IconButton(
-            tooltip: 'Save reading position',
+          PopupMenuButton<String>(
+            tooltip: 'More reader tools',
             icon: const Icon(
-              Icons.bookmark_add,
-              size: 20,
+              Icons.more_vert,
+              size: 22,
               color: Colors.greenAccent,
             ),
-            onPressed: () async {
-              if (!canUseViewerTools('open_save_reading_position_dialog'))
-                return;
-
-              await logReaderAction(
-                action: 'open_save_reading_position_dialog',
-                details: {'currentPdfPage': currentPdfPage},
-              );
-
-              if (!mounted) return;
-
-              final pageController = TextEditingController(
-                text: currentPdfPage.toString(),
-              );
-
-              showDialog(
-                context: this.context,
-                builder: (dialogContext) {
-                  Future<void> submitTypedSave() async {
-                    if (!canUseViewerTools('save_reading_position')) return;
-
-                    final page = int.tryParse(pageController.text.trim()) ?? 0;
-
-                    final saved = await saveReadingPositionPage(page);
-
-                    if (!dialogContext.mounted) return;
-
-                    if (saved) {
-                      Navigator.pop(dialogContext);
-                    }
-                  }
-
-                  return PointerInterceptor(
-                    child: AlertDialog(
-                      backgroundColor: const Color(0xFF0F1117),
-                      title: const Text(
-                        'Save Current Position',
-                        style: TextStyle(color: Colors.greenAccent),
-                      ),
-                      content: PointerInterceptor(
-                        child: TextField(
-                          controller: pageController,
-                          keyboardType: TextInputType.number,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => submitTypedSave(),
-                          style: const TextStyle(color: Colors.white),
-                          decoration: InputDecoration(
-                            labelText: 'Page to save',
-                            labelStyle: const TextStyle(color: Colors.white70),
-                            hintText: 'Page number',
-                            hintStyle: const TextStyle(color: Colors.white54),
-                            helperText: 'Tracked page: $currentPdfPage',
-                            suffixText: 'Enter saves',
-                            helperStyle: const TextStyle(color: Colors.white54),
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      actions: [
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: () {
-                              Navigator.pop(dialogContext);
-                            },
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(color: Colors.redAccent),
-                            ),
-                          ),
-                        ),
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: () async {
-                              if (!canUseViewerTools('save_reading_position'))
-                                return;
-
-                              final saved = await saveReadingPositionPage(
-                                currentPdfPage,
-                              );
-
-                              if (!dialogContext.mounted) return;
-
-                              if (saved) {
-                                Navigator.pop(dialogContext);
-                              }
-                            },
-                            child: const Text(
-                              'Save Tracked',
-                              style: TextStyle(color: Colors.greenAccent),
-                            ),
-                          ),
-                        ),
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: submitTypedSave,
-                            child: const Text(
-                              'Save Typed',
-                              style: TextStyle(color: Colors.greenAccent),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ).whenComplete(pageController.dispose);
-            },
-          ),
-          IconButton(
-            tooltip: 'Saved reading positions',
-            icon: const Icon(
-              Icons.history,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-
-            onPressed: () async {
-              if (!canUseViewerTools('view_saved_reading_positions')) return;
-
-              final user = FirebaseAuth.instance.currentUser;
-              final userEmail = user?.email;
-              if (user == null || userEmail == null || userEmail.isEmpty) {
-                return;
+            color: const Color(0xFF1A1D26),
+            onSelected: (value) async {
+              switch (value) {
+                case 'selected_narration':
+                  await showSelectedTextNarrationDialog();
+                  break;
+                case 'workspace':
+                  await showReaderWorkspaceDialog();
+                  break;
+                case 'go_page':
+                  await showManualPageJumpDialog();
+                  break;
+                case 'save_position':
+                  await showSaveReadingPositionDialog();
+                  break;
+                case 'saved_positions':
+                  await showSavedReadingPositionsDialog();
+                  break;
+                case 'add_bookmark':
+                  await addReaderBookmark();
+                  break;
+                case 'bookmarks':
+                  await showReaderBookmarksDialog();
+                  break;
+                case 'add_highlight':
+                  await addReaderHighlight();
+                  break;
+                case 'highlights':
+                  await showReaderHighlightsDialog();
+                  break;
+                case 'add_note':
+                  await addReaderNote();
+                  break;
+                case 'notes':
+                  await showReaderNotesDialog();
+                  break;
               }
-
-              await logReaderAction(action: 'view_saved_reading_positions');
-
-              if (!mounted) return;
-
-              showDialog(
-                context: this.context,
-                builder: (dialogContext) {
-                  return PointerInterceptor(
-                    child: AlertDialog(
-                      backgroundColor: const Color(0xFF0F1117),
-                      title: const Text(
-                        'Saved Positions',
-                        style: TextStyle(color: Colors.greenAccent),
-                      ),
-                      content: PointerInterceptor(
-                        child: SizedBox(
-                          width: 400,
-                          height: 400,
-                          child: StreamBuilder<List<ReaderSavedPosition>>(
-                            stream: savedPositionRepository.watchForDocument(
-                              userEmail: userEmail,
-                              pdfTitle: widget.title,
-                            ),
-                            builder: (context, snapshot) {
-                              if (!snapshot.hasData) {
-                                return const Center(
-                                  child: CircularProgressIndicator(),
-                                );
-                              }
-
-                              final positions = snapshot.data!;
-
-                              if (positions.isEmpty) {
-                                return const Center(
-                                  child: Text(
-                                    'No saved positions for this PDF yet.',
-                                    style: TextStyle(color: Colors.white70),
-                                  ),
-                                );
-                              }
-
-                              return ListView.builder(
-                                itemCount: positions.length,
-                                itemBuilder: (context, index) {
-                                  final position = positions[index];
-                                  final positionId = position.id;
-                                  final page = position.pageNumber;
-                                  final savedAt = formatSavedPositionTime(
-                                    position.createdAt,
-                                  );
-
-                                  return Card(
-                                    color: const Color(0xFF1A1D26),
-                                    child: ListTile(
-                                      onTap: () {
-                                        Navigator.of(dialogContext).pop();
-                                        openPdfPage(
-                                          page,
-                                          source: 'saved_reading_position',
-                                        );
-                                      },
-                                      title: Text(
-                                        'Page $page',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        'Saved: $savedAt',
-                                        style: const TextStyle(
-                                          color: Colors.white54,
-                                        ),
-                                      ),
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.open_in_new,
-                                            color: Colors.greenAccent,
-                                            size: 18,
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Delete saved position',
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Colors.redAccent,
-                                              size: 20,
-                                            ),
-                                            onPressed: () async {
-                                              final confirmDelete = await showDialog<bool>(
-                                                context: this.context,
-                                                builder: (confirmContext) {
-                                                  return PointerInterceptor(
-                                                    child: AlertDialog(
-                                                      backgroundColor:
-                                                          const Color(
-                                                            0xFF0F1117,
-                                                          ),
-                                                      title: const Text(
-                                                        'Delete Saved Position?',
-                                                        style: TextStyle(
-                                                          color:
-                                                              Colors.redAccent,
-                                                        ),
-                                                      ),
-                                                      content: Text(
-                                                        'Remove the saved position for page $page?',
-                                                        style: const TextStyle(
-                                                          color: Colors.white70,
-                                                        ),
-                                                      ),
-                                                      actions: [
-                                                        TextButton(
-                                                          onPressed: () =>
-                                                              Navigator.pop(
-                                                                confirmContext,
-                                                                false,
-                                                              ),
-                                                          child: const Text(
-                                                            'Cancel',
-                                                            style: TextStyle(
-                                                              color: Colors
-                                                                  .white70,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        TextButton(
-                                                          onPressed: () =>
-                                                              Navigator.pop(
-                                                                confirmContext,
-                                                                true,
-                                                              ),
-                                                          child: const Text(
-                                                            'Delete',
-                                                            style: TextStyle(
-                                                              color: Colors
-                                                                  .redAccent,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                },
-                                              );
-
-                                              if (confirmDelete != true) return;
-
-                                              await savedPositionRepository
-                                                  .delete(positionId);
-
-                                              await logReaderAction(
-                                                action:
-                                                    'delete_reading_position',
-                                                details: {
-                                                  'positionId': positionId,
-                                                  'pageNumber': page,
-                                                },
-                                              );
-
-                                              if (!mounted) return;
-
-                                              ScaffoldMessenger.of(
-                                                this.context,
-                                              ).hideCurrentSnackBar();
-                                              ScaffoldMessenger.of(
-                                                this.context,
-                                              ).showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                    'Saved position removed: Page $page',
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                      actions: [
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: () => Navigator.of(dialogContext).pop(),
-                            child: const Text(
-                              'Close',
-                              style: TextStyle(color: Colors.greenAccent),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
             },
-          ),
-          IconButton(
-            tooltip: 'Bookmark current page',
-            icon: const Icon(
-              Icons.bookmark_add_outlined,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: addReaderBookmark,
-          ),
-          IconButton(
-            tooltip: 'Reader bookmarks',
-            icon: const Icon(
-              Icons.bookmarks_outlined,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: showReaderBookmarksDialog,
-          ),
-          IconButton(
-            tooltip: 'Add reader highlight',
-            icon: const Icon(
-              Icons.border_color,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: addReaderHighlight,
-          ),
-          IconButton(
-            tooltip: 'Reader highlights',
-            icon: const Icon(
-              Icons.format_color_fill,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: showReaderHighlightsDialog,
-          ),
-          IconButton(
-            tooltip: 'Add reader note',
-            icon: const Icon(
-              Icons.note_add,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-
-            onPressed: () {
-              if (!canUseViewerTools('add_reader_note')) return;
-
-              final noteController = TextEditingController();
-              var selectedCategory = readerNoteCategories.first;
-
-              showDialog(
-                barrierDismissible: false,
-                context: context,
-                builder: (dialogContext) {
-                  return StatefulBuilder(
-                    builder: (context, setDialogState) {
-                      return PointerInterceptor(
-                        child: AlertDialog(
-                          backgroundColor: const Color(0xFF0F1117),
-                          title: const Text(
-                            'Add Note',
-                            style: TextStyle(color: Colors.greenAccent),
-                          ),
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              DropdownButtonFormField<String>(
-                                initialValue: selectedCategory,
-                                dropdownColor: const Color(0xFF1A1D26),
-                                style: const TextStyle(color: Colors.white),
-                                decoration: const InputDecoration(
-                                  labelText: 'Category',
-                                  labelStyle: TextStyle(color: Colors.white70),
-                                  border: OutlineInputBorder(),
-                                ),
-                                items: readerNoteCategories
-                                    .map(
-                                      (category) => DropdownMenuItem<String>(
-                                        value: category,
-                                        child: Text(category),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (category) {
-                                  if (category == null) return;
-                                  setDialogState(() {
-                                    selectedCategory = category;
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              TextField(
-                                autofocus: true,
-                                controller: noteController,
-                                maxLines: 5,
-                                textInputAction: TextInputAction.newline,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  labelText: 'Note',
-                                  labelStyle: const TextStyle(
-                                    color: Colors.white70,
-                                  ),
-                                  hintText: 'Write a note for this PDF',
-                                  hintStyle: const TextStyle(
-                                    color: Colors.white54,
-                                  ),
-                                  helperText: 'Linked to page $currentPdfPage',
-                                  helperStyle: const TextStyle(
-                                    color: Colors.white54,
-                                  ),
-                                  border: const OutlineInputBorder(),
-                                ),
-                              ),
-                            ],
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () =>
-                                  Navigator.of(dialogContext).pop(),
-                              child: const Text(
-                                'Cancel',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                final noteText = noteController.text.trim();
-
-                                if (noteText.isEmpty) {
-                                  ScaffoldMessenger.of(
-                                    context,
-                                  ).hideCurrentSnackBar();
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Write a note before saving.',
-                                      ),
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                final userEmail =
-                                    FirebaseAuth.instance.currentUser?.email;
-                                if (userEmail == null || userEmail.isEmpty) {
-                                  return;
-                                }
-
-                                await readerNoteRepository.save(
-                                  ReaderNoteDraft(
-                                    userEmail: userEmail,
-                                    pdfTitle: widget.title,
-                                    note: noteText,
-                                    documentKey: readerDocumentKey,
-                                    storagePath: normalizedReaderStoragePath,
-                                    category: normalizeReaderNoteCategory(
-                                      selectedCategory,
-                                    ),
-                                    pageNumber: currentPdfPage,
-                                  ),
-                                );
-
-                                await logReaderAction(
-                                  action: 'add_reader_note',
-                                  details: {
-                                    'noteLength': noteText.length,
-                                    'pageNumber': currentPdfPage,
-                                    'category': selectedCategory,
-                                  },
-                                );
-
-                                if (!dialogContext.mounted) return;
-
-                                Navigator.of(dialogContext).pop();
-
-                                if (!context.mounted) return;
-
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Note saved successfully'),
-                                  ),
-                                );
-                              },
-                              child: const Text(
-                                'Save',
-                                style: TextStyle(color: Colors.greenAccent),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                },
-              ).whenComplete(noteController.dispose);
-            },
-          ),
-          IconButton(
-            tooltip: 'Reader notes',
-            icon: const Icon(
-              Icons.list_alt,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-
-            onPressed: () async {
-              if (!canUseViewerTools('view_reader_notes')) return;
-
-              final user = FirebaseAuth.instance.currentUser;
-              final userEmail = user?.email;
-              if (user == null || userEmail == null || userEmail.isEmpty) {
-                return;
-              }
-
-              await logReaderAction(action: 'view_reader_notes');
-
-              if (!mounted) return;
-
-              final noteSearchController = TextEditingController();
-              var noteSearchQuery = '';
-              var noteCategoryFilter = 'All';
-
-              showDialog(
-                barrierDismissible: false,
-                context: this.context,
-                builder: (dialogContext) {
-                  return StatefulBuilder(
-                    builder: (context, setDialogState) {
-                      return PointerInterceptor(
-                        child: AlertDialog(
-                          backgroundColor: const Color(0xFF0F1117),
-                          title: const Text(
-                            'Reader Notes',
-                            style: TextStyle(color: Colors.greenAccent),
-                          ),
-                          content: SizedBox(
-                            width: 400,
-                            height: 540,
-                            child: Column(
-                              children: [
-                                TextField(
-                                  controller: noteSearchController,
-                                  textInputAction: TextInputAction.search,
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: const InputDecoration(
-                                    prefixIcon: Icon(
-                                      Icons.search,
-                                      color: Colors.greenAccent,
-                                    ),
-                                    labelText: 'Search notes',
-                                    labelStyle: TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                    hintText: 'Text, page, color, category',
-                                    hintStyle: TextStyle(color: Colors.white38),
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (value) {
-                                    setDialogState(() {
-                                      noteSearchQuery = value;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                DropdownButtonFormField<String>(
-                                  initialValue: noteCategoryFilter,
-                                  dropdownColor: const Color(0xFF1A1D26),
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Category',
-                                    labelStyle: TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  items: ['All', ...readerNoteCategories]
-                                      .map(
-                                        (category) => DropdownMenuItem<String>(
-                                          value: category,
-                                          child: Text(category),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (category) {
-                                    if (category == null) return;
-                                    setDialogState(() {
-                                      noteCategoryFilter = category;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                Expanded(
-                                  child: StreamBuilder<List<ReaderNote>>(
-                                    stream: readerNoteRepository
-                                        .watchForDocument(
-                                          userEmail: userEmail,
-                                          pdfTitle: widget.title,
-                                        ),
-                                    builder: (context, snapshot) {
-                                      if (!snapshot.hasData) {
-                                        return const Center(
-                                          child: CircularProgressIndicator(),
-                                        );
-                                      }
-
-                                      final allNotes = snapshot.data!;
-                                      final matchingNotes = ReaderNote.search(
-                                        allNotes,
-                                        noteSearchQuery,
-                                      );
-                                      final notes = noteCategoryFilter == 'All'
-                                          ? matchingNotes
-                                          : matchingNotes
-                                                .where(
-                                                  (note) =>
-                                                      note.displayCategory ==
-                                                      noteCategoryFilter,
-                                                )
-                                                .toList();
-
-                                      if (allNotes.isEmpty) {
-                                        return const Center(
-                                          child: Text(
-                                            'No notes saved for this PDF yet.',
-                                            style: TextStyle(
-                                              color: Colors.white70,
-                                            ),
-                                          ),
-                                        );
-                                      }
-
-                                      if (notes.isEmpty) {
-                                        return const Center(
-                                          child: Text(
-                                            'No notes match this search.',
-                                            style: TextStyle(
-                                              color: Colors.white70,
-                                            ),
-                                          ),
-                                        );
-                                      }
-
-                                      return ListView.builder(
-                                        primary: false,
-                                        itemCount: notes.length,
-                                        itemBuilder: (context, index) {
-                                          final note = notes[index];
-                                          final noteId = note.id;
-                                          final notePage = note.pageNumber;
-                                          final noteTime = formatReaderNoteTime(
-                                            note,
-                                          );
-                                          final notePreview = note.note;
-                                          final noteCategory =
-                                              note.displayCategory;
-
-                                          return Card(
-                                            color: const Color(0xFF1A1D26),
-                                            child: ListTile(
-                                              onTap: () {
-                                                Navigator.of(
-                                                  dialogContext,
-                                                ).pop();
-                                                openPdfPage(
-                                                  notePage,
-                                                  source: 'reader_note',
-                                                );
-                                              },
-                                              title: Text(
-                                                note.note,
-                                                maxLines: 3,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                              subtitle: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    'Page $notePage | $noteCategory',
-                                                    style: const TextStyle(
-                                                      color: Colors.white70,
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    noteTime,
-                                                    style: const TextStyle(
-                                                      color: Colors.white54,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              trailing: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  // EDIT BUTTON
-                                                  IconButton(
-                                                    tooltip: 'Edit note',
-                                                    icon: const Icon(
-                                                      Icons.edit,
-                                                      color: Colors.greenAccent,
-                                                    ),
-
-                                                    onPressed: () async {
-                                                      final editController =
-                                                          TextEditingController(
-                                                            text: note.note,
-                                                          );
-                                                      var selectedEditCategory =
-                                                          normalizeReaderNoteCategory(
-                                                            note.category,
-                                                          );
-
-                                                      final updatedNote = await showDialog<_ReaderNoteEditResult>(
-                                                        context: context,
-
-                                                        builder: (context) {
-                                                          return PointerInterceptor(
-                                                            child: AlertDialog(
-                                                              backgroundColor:
-                                                                  const Color(
-                                                                    0xFF0F1117,
-                                                                  ),
-
-                                                              title: const Text(
-                                                                'Edit Note',
-                                                                style: TextStyle(
-                                                                  color: Colors
-                                                                      .greenAccent,
-                                                                ),
-                                                              ),
-
-                                                              content: Column(
-                                                                mainAxisSize:
-                                                                    MainAxisSize
-                                                                        .min,
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .start,
-                                                                children: [
-                                                                  Text(
-                                                                    'Linked page: $notePage',
-                                                                    style: const TextStyle(
-                                                                      color: Colors
-                                                                          .white70,
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                    height: 12,
-                                                                  ),
-                                                                  DropdownButtonFormField<
-                                                                    String
-                                                                  >(
-                                                                    initialValue:
-                                                                        selectedEditCategory,
-                                                                    dropdownColor:
-                                                                        const Color(
-                                                                          0xFF1A1D26,
-                                                                        ),
-                                                                    style: const TextStyle(
-                                                                      color: Colors
-                                                                          .white,
-                                                                    ),
-                                                                    decoration: const InputDecoration(
-                                                                      labelText:
-                                                                          'Category',
-                                                                      labelStyle: TextStyle(
-                                                                        color: Colors
-                                                                            .white70,
-                                                                      ),
-                                                                      border:
-                                                                          OutlineInputBorder(),
-                                                                    ),
-                                                                    items: readerNoteCategories
-                                                                        .map(
-                                                                          (
-                                                                            category,
-                                                                          ) =>
-                                                                              DropdownMenuItem<
-                                                                                String
-                                                                              >(
-                                                                                value: category,
-                                                                                child: Text(
-                                                                                  category,
-                                                                                ),
-                                                                              ),
-                                                                        )
-                                                                        .toList(),
-                                                                    onChanged: (category) {
-                                                                      if (category ==
-                                                                          null) {
-                                                                        return;
-                                                                      }
-                                                                      selectedEditCategory =
-                                                                          category;
-                                                                    },
-                                                                  ),
-                                                                  const SizedBox(
-                                                                    height: 12,
-                                                                  ),
-                                                                  TextField(
-                                                                    controller:
-                                                                        editController,
-                                                                    maxLines: 6,
-                                                                    style: const TextStyle(
-                                                                      color: Colors
-                                                                          .white,
-                                                                    ),
-                                                                    decoration: const InputDecoration(
-                                                                      border:
-                                                                          OutlineInputBorder(),
-                                                                      hintText:
-                                                                          'Edit your note...',
-                                                                      hintStyle: TextStyle(
-                                                                        color: Colors
-                                                                            .white54,
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                              ),
-
-                                                              actions: [
-                                                                TextButton(
-                                                                  onPressed: () =>
-                                                                      Navigator.pop(
-                                                                        context,
-                                                                      ),
-
-                                                                  child: const Text(
-                                                                    'Cancel',
-                                                                    style: TextStyle(
-                                                                      color: Colors
-                                                                          .white70,
-                                                                    ),
-                                                                  ),
-                                                                ),
-
-                                                                TextButton(
-                                                                  onPressed: () {
-                                                                    final updatedText =
-                                                                        editController
-                                                                            .text
-                                                                            .trim();
-                                                                    Navigator.pop(
-                                                                      context,
-                                                                      _ReaderNoteEditResult(
-                                                                        note:
-                                                                            updatedText,
-                                                                        category:
-                                                                            selectedEditCategory,
-                                                                      ),
-                                                                    );
-                                                                  },
-
-                                                                  child: const Text(
-                                                                    'Save',
-                                                                    style: TextStyle(
-                                                                      color: Colors
-                                                                          .greenAccent,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          );
-                                                        },
-                                                      );
-
-                                                      editController.dispose();
-
-                                                      if (updatedNote == null) {
-                                                        return;
-                                                      }
-
-                                                      if (updatedNote
-                                                          .note
-                                                          .isEmpty) {
-                                                        if (!context.mounted)
-                                                          return;
-
-                                                        ScaffoldMessenger.of(
-                                                          context,
-                                                        ).hideCurrentSnackBar();
-                                                        ScaffoldMessenger.of(
-                                                          context,
-                                                        ).showSnackBar(
-                                                          const SnackBar(
-                                                            content: Text(
-                                                              'Write a note before saving changes.',
-                                                            ),
-                                                          ),
-                                                        );
-                                                        return;
-                                                      }
-
-                                                      await readerNoteRepository
-                                                          .updateNote(
-                                                            noteId: noteId,
-                                                            note: updatedNote
-                                                                .note,
-                                                            category:
-                                                                normalizeReaderNoteCategory(
-                                                                  updatedNote
-                                                                      .category,
-                                                                ),
-                                                          );
-
-                                                      await logReaderAction(
-                                                        action:
-                                                            'edit_reader_note',
-                                                        details: {
-                                                          'noteId': noteId,
-                                                          'noteLength':
-                                                              updatedNote
-                                                                  .note
-                                                                  .length,
-                                                          'pageNumber':
-                                                              notePage,
-                                                          'category':
-                                                              updatedNote
-                                                                  .category,
-                                                        },
-                                                      );
-
-                                                      if (!context.mounted)
-                                                        return;
-
-                                                      ScaffoldMessenger.of(
-                                                        context,
-                                                      ).hideCurrentSnackBar();
-                                                      ScaffoldMessenger.of(
-                                                        context,
-                                                      ).showSnackBar(
-                                                        const SnackBar(
-                                                          content: Text(
-                                                            'Note updated successfully',
-                                                          ),
-                                                        ),
-                                                      );
-                                                    },
-                                                  ),
-
-                                                  // DELETE BUTTON
-                                                  IconButton(
-                                                    tooltip: 'Delete note',
-                                                    icon: const Icon(
-                                                      Icons.delete,
-                                                      color: Colors.redAccent,
-                                                    ),
-
-                                                    onPressed: () async {
-                                                      final confirmDelete = await showDialog(
-                                                        context: context,
-
-                                                        builder: (context) {
-                                                          return PointerInterceptor(
-                                                            child: AlertDialog(
-                                                              backgroundColor:
-                                                                  const Color(
-                                                                    0xFF0F1117,
-                                                                  ),
-
-                                                              title: const Text(
-                                                                'Delete Note?',
-                                                                style: TextStyle(
-                                                                  color: Colors
-                                                                      .redAccent,
-                                                                ),
-                                                              ),
-
-                                                              content: Column(
-                                                                mainAxisSize:
-                                                                    MainAxisSize
-                                                                        .min,
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .start,
-                                                                children: [
-                                                                  Text(
-                                                                    'Page $notePage',
-                                                                    style: const TextStyle(
-                                                                      color: Colors
-                                                                          .white70,
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                    height: 8,
-                                                                  ),
-                                                                  Text(
-                                                                    notePreview,
-                                                                    maxLines: 3,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                    style: const TextStyle(
-                                                                      color: Colors
-                                                                          .white,
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                    height: 12,
-                                                                  ),
-                                                                  const Text(
-                                                                    'This note will be permanently deleted.',
-                                                                    style: TextStyle(
-                                                                      color: Colors
-                                                                          .white70,
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                              ),
-
-                                                              actions: [
-                                                                TextButton(
-                                                                  onPressed: () =>
-                                                                      Navigator.pop(
-                                                                        context,
-                                                                        false,
-                                                                      ),
-
-                                                                  child: const Text(
-                                                                    'Cancel',
-                                                                    style: TextStyle(
-                                                                      color: Colors
-                                                                          .white70,
-                                                                    ),
-                                                                  ),
-                                                                ),
-
-                                                                TextButton(
-                                                                  onPressed: () =>
-                                                                      Navigator.pop(
-                                                                        context,
-                                                                        true,
-                                                                      ),
-
-                                                                  child: const Text(
-                                                                    'Delete',
-                                                                    style: TextStyle(
-                                                                      color: Colors
-                                                                          .redAccent,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          );
-                                                        },
-                                                      );
-
-                                                      if (confirmDelete ==
-                                                          true) {
-                                                        await readerNoteRepository
-                                                            .delete(noteId);
-
-                                                        await logReaderAction(
-                                                          action:
-                                                              'delete_reader_note',
-                                                          details: {
-                                                            'noteId': noteId,
-                                                            'pageNumber':
-                                                                notePage,
-                                                          },
-                                                        );
-
-                                                        if (!context.mounted)
-                                                          return;
-
-                                                        ScaffoldMessenger.of(
-                                                          context,
-                                                        ).hideCurrentSnackBar();
-                                                        ScaffoldMessenger.of(
-                                                          context,
-                                                        ).showSnackBar(
-                                                          const SnackBar(
-                                                            content: Text(
-                                                              'Note deleted',
-                                                            ),
-                                                          ),
-                                                        );
-                                                      }
-                                                    },
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () =>
-                                  Navigator.of(dialogContext).pop(),
-                              child: const Text(
-                                'Close',
-                                style: TextStyle(color: Colors.greenAccent),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                },
-              ).whenComplete(noteSearchController.dispose);
-            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'selected_narration',
+                child: ListTile(
+                  leading: Icon(
+                    Icons.text_snippet_outlined,
+                    color: Colors.greenAccent,
+                  ),
+                  title: Text(
+                    'Narrate selected passage',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'workspace',
+                child: ListTile(
+                  leading: Icon(
+                    Icons.dashboard_customize_outlined,
+                    color: Colors.greenAccent,
+                  ),
+                  title: Text(
+                    'Reader workspace',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'go_page',
+                child: ListTile(
+                  leading: Icon(Icons.input, color: Colors.greenAccent),
+                  title: Text(
+                    'Go to page',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'save_position',
+                child: ListTile(
+                  leading: Icon(Icons.bookmark_add, color: Colors.greenAccent),
+                  title: Text(
+                    'Save reading position',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'saved_positions',
+                child: ListTile(
+                  leading: Icon(Icons.history, color: Colors.greenAccent),
+                  title: Text(
+                    'Saved reading positions',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'add_bookmark',
+                child: ListTile(
+                  leading: Icon(
+                    Icons.bookmark_add_outlined,
+                    color: Colors.greenAccent,
+                  ),
+                  title: Text(
+                    'Bookmark current page',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'bookmarks',
+                child: ListTile(
+                  leading: Icon(
+                    Icons.bookmarks_outlined,
+                    color: Colors.greenAccent,
+                  ),
+                  title: Text(
+                    'Reader bookmarks',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'add_highlight',
+                child: ListTile(
+                  leading: Icon(Icons.border_color, color: Colors.greenAccent),
+                  title: Text(
+                    'Add reader highlight',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'highlights',
+                child: ListTile(
+                  leading: Icon(
+                    Icons.format_color_fill,
+                    color: Colors.greenAccent,
+                  ),
+                  title: Text(
+                    'Reader highlights',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'add_note',
+                child: ListTile(
+                  leading: Icon(Icons.note_add, color: Colors.greenAccent),
+                  title: Text(
+                    'Add reader note',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'notes',
+                child: ListTile(
+                  leading: Icon(Icons.list_alt, color: Colors.greenAccent),
+                  title: Text(
+                    'Reader notes',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
