@@ -76,6 +76,7 @@ class ReaderAccessLogDraft {
     required this.allowed,
     this.accessDecisionReason = '',
     this.deviceAuthorizationStatus = '',
+    this.deviceAuthorizationMode = '',
     this.deviceAuthorizationEnforced = false,
   });
 
@@ -88,6 +89,7 @@ class ReaderAccessLogDraft {
   final bool allowed;
   final String accessDecisionReason;
   final String deviceAuthorizationStatus;
+  final String deviceAuthorizationMode;
   final bool deviceAuthorizationEnforced;
 
   Map<String, dynamic> toMap({required Object createdAt}) {
@@ -103,6 +105,8 @@ class ReaderAccessLogDraft {
         'accessDecisionReason': accessDecisionReason.trim(),
       if (deviceAuthorizationStatus.trim().isNotEmpty)
         'deviceAuthorizationStatus': deviceAuthorizationStatus.trim(),
+      if (deviceAuthorizationMode.trim().isNotEmpty)
+        'deviceAuthorizationMode': deviceAuthorizationMode.trim(),
       'deviceAuthorizationEnforced': deviceAuthorizationEnforced,
       'createdAt': createdAt,
     };

@@ -164,13 +164,17 @@ void main() {
   });
 
   test('reads useful labels from raw log records', () {
-    final blocked = accessRecord(
-      id: 'blocked',
-      userEmail: 'guest@example.com',
-      pdfTitle: 'Protected.pdf',
-      allowed: false,
-      createdAt: 1000,
-    );
+    final blocked = ReaderActivityRecord.fromAccessLog({
+      'userEmail': 'guest@example.com',
+      'pdfTitle': 'Protected.pdf',
+      'documentAccessLevel': 'premium',
+      'openSource': 'premium_dashboard',
+      'allowed': false,
+      'deviceAuthorizationStatus': 'blocked',
+      'deviceAuthorizationMode': 'monitoring',
+      'deviceAuthorizationEnforced': false,
+      'createdAt': Timestamp.fromMillisecondsSinceEpoch(1000),
+    }, id: 'blocked');
     final action = actionRecord(
       id: 'action',
       userEmail: 'reader@example.com',
@@ -181,7 +185,12 @@ void main() {
 
     expect(blocked.activityLabel, 'Access blocked');
     expect(blocked.isBlockedAccess, isTrue);
+    expect(blocked.deviceAuthorizationStatus, 'blocked');
+    expect(blocked.deviceAuthorizationMode, 'monitoring');
+    expect(blocked.deviceAuthorizationEnforced, isFalse);
+    expect(blocked.deviceAuthorizationLabel, 'Device: blocked | monitoring');
     expect(action.activityLabel, 'save_reading_position');
+    expect(action.deviceAuthorizationLabel, isEmpty);
     expect(action.details, {'pageNumber': 3});
   });
 }

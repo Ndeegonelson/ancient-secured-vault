@@ -168,6 +168,8 @@ class UserDeviceRecord {
     this.deviceLabel = '',
     this.platform = '',
     this.country = '',
+    this.lastDocumentTitle = '',
+    this.lastOpenSource = '',
     this.createdAt,
     this.lastSeenAt,
     this.updatedAt,
@@ -187,6 +189,8 @@ class UserDeviceRecord {
       country: _readText(
         data['country'] ?? data['countryName'] ?? data['countryCode'],
       ),
+      lastDocumentTitle: _readText(data['lastDocumentTitle']),
+      lastOpenSource: _readText(data['lastOpenSource']),
       status: readUserDeviceStatus(
         data['status'],
         isTrusted: data['isTrusted'],
@@ -203,6 +207,8 @@ class UserDeviceRecord {
   final String deviceLabel;
   final String platform;
   final String country;
+  final String lastDocumentTitle;
+  final String lastOpenSource;
   final UserDeviceStatus status;
   final dynamic createdAt;
   final dynamic lastSeenAt;
@@ -221,6 +227,8 @@ class UserDeviceRecord {
         deviceLabel.toLowerCase().contains(normalizedQuery) ||
         platform.toLowerCase().contains(normalizedQuery) ||
         country.toLowerCase().contains(normalizedQuery) ||
+        lastDocumentTitle.toLowerCase().contains(normalizedQuery) ||
+        lastOpenSource.toLowerCase().contains(normalizedQuery) ||
         userDeviceStatusLabel(status).toLowerCase().contains(normalizedQuery);
   }
 
@@ -571,6 +579,10 @@ List<String> userDeviceRecordDetailParts(UserDeviceRecord device) {
     if (device.email.isNotEmpty) device.email,
     if (device.platform.trim().isNotEmpty) device.platform.trim(),
     if (device.country.trim().isNotEmpty) device.country.trim(),
+    if (device.lastDocumentTitle.trim().isNotEmpty)
+      'Last: ${device.lastDocumentTitle.trim()}',
+    if (device.lastOpenSource.trim().isNotEmpty)
+      'Source: ${device.lastOpenSource.trim().replaceAll('_', ' ')}',
     userDeviceStatusLabel(device.status),
   ]);
 }

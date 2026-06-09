@@ -17,6 +17,9 @@ class ReaderActivityRecord {
     this.action = '',
     this.event = '',
     this.allowed,
+    this.deviceAuthorizationStatus = '',
+    this.deviceAuthorizationMode = '',
+    this.deviceAuthorizationEnforced = false,
     this.details = const {},
   });
 
@@ -77,6 +80,11 @@ class ReaderActivityRecord {
       action: action,
       event: event,
       allowed: allowed,
+      deviceAuthorizationStatus:
+          data['deviceAuthorizationStatus']?.toString() ?? '',
+      deviceAuthorizationMode:
+          data['deviceAuthorizationMode']?.toString() ?? '',
+      deviceAuthorizationEnforced: data['deviceAuthorizationEnforced'] == true,
       details: _readDetails(data['details']),
       createdAt: data['createdAt'],
     );
@@ -94,6 +102,9 @@ class ReaderActivityRecord {
   final String action;
   final String event;
   final bool? allowed;
+  final String deviceAuthorizationStatus;
+  final String deviceAuthorizationMode;
+  final bool deviceAuthorizationEnforced;
   final Map<String, dynamic> details;
   final dynamic createdAt;
 
@@ -117,6 +128,26 @@ class ReaderActivityRecord {
 
   bool get isBlockedAccess =>
       type == ReaderActivityRecordType.access && allowed == false;
+
+  String get deviceAuthorizationLabel {
+    if (type != ReaderActivityRecordType.access) return '';
+
+    final parts = <String>[];
+    final normalizedStatus = deviceAuthorizationStatus.trim();
+    final normalizedMode = deviceAuthorizationMode.trim();
+
+    if (normalizedStatus.isNotEmpty) {
+      parts.add('Device: $normalizedStatus');
+    }
+    if (normalizedMode.isNotEmpty) {
+      parts.add(normalizedMode);
+    }
+    if (deviceAuthorizationEnforced) {
+      parts.add('enforced');
+    }
+
+    return parts.join(' | ');
+  }
 
   static Map<String, dynamic> _readDetails(dynamic value) {
     if (value is Map<String, dynamic>) return Map<String, dynamic>.from(value);

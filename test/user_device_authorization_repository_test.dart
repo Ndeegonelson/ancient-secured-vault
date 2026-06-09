@@ -8,6 +8,8 @@ void main() {
       'deviceName': 'Office Laptop',
       'os': 'Windows',
       'countryCode': 'Ghana',
+      'lastDocumentTitle': 'Protected Guide.pdf',
+      'lastOpenSource': 'premium_dashboard',
       'status': 'approved',
     }, id: ' device-1 ');
 
@@ -16,10 +18,14 @@ void main() {
     expect(device.deviceLabel, 'Office Laptop');
     expect(device.platform, 'Windows');
     expect(device.country, 'Ghana');
+    expect(device.lastDocumentTitle, 'Protected Guide.pdf');
+    expect(device.lastOpenSource, 'premium_dashboard');
     expect(device.status, UserDeviceStatus.trusted);
     expect(device.isTrusted, isTrue);
     expect(device.needsReview, isFalse);
     expect(device.matches('office'), isTrue);
+    expect(device.matches('protected guide'), isTrue);
+    expect(device.matches('premium_dashboard'), isTrue);
     expect(device.matches('trusted'), isTrue);
     expect(device.matches('missing'), isFalse);
   });
@@ -200,6 +206,8 @@ void main() {
       'deviceLabel': 'Reader Laptop',
       'platform': 'Chrome on Windows',
       'country': 'Ghana',
+      'lastDocumentTitle': 'Protected Guide.pdf',
+      'lastOpenSource': 'premium_dashboard',
       'status': 'blocked',
     }, id: 'device-1');
     final anonymousDevice = UserDeviceRecord.fromMap({}, id: 'device-2');
@@ -208,7 +216,7 @@ void main() {
     expect(userDeviceRecordTitle(anonymousDevice), 'device-2');
     expect(
       userDeviceRecordDetailLabel(device, timestampLabel: 'Seen today'),
-      'reader@example.com | Chrome on Windows | Ghana | Blocked | Seen today',
+      'reader@example.com | Chrome on Windows | Ghana | Last: Protected Guide.pdf | Source: premium dashboard | Blocked | Seen today',
     );
     expect(userDeviceRecordDetailParts(anonymousDevice), ['Pending']);
   });

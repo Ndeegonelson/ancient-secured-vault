@@ -26,6 +26,7 @@ void main() {
       allowed: true,
       accessDecisionReason: 'allowed',
       deviceAuthorizationStatus: 'trusted',
+      deviceAuthorizationMode: 'enforcing',
       deviceAuthorizationEnforced: true,
     );
 
@@ -48,6 +49,7 @@ void main() {
       'allowed': true,
       'accessDecisionReason': 'allowed',
       'deviceAuthorizationStatus': 'trusted',
+      'deviceAuthorizationMode': 'enforcing',
       'deviceAuthorizationEnforced': true,
       'createdAt': 'now',
     });
