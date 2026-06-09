@@ -23,11 +23,15 @@ class VaultDocumentMetadata {
   const VaultDocumentMetadata({
     required this.accessLevel,
     required this.category,
+    this.sizeBytes,
+    this.updatedAt,
   });
 
   factory VaultDocumentMetadata.fromStorageMetadata(
     Map<String, String>? customMetadata, {
     required String fallbackAccessLevel,
+    int? sizeBytes,
+    DateTime? updatedAt,
   }) {
     return VaultDocumentMetadata(
       accessLevel: normalizeVaultAccessLevel(
@@ -35,11 +39,15 @@ class VaultDocumentMetadata {
         fallback: fallbackAccessLevel,
       ),
       category: normalizeVaultDocumentCategory(customMetadata?['category']),
+      sizeBytes: sizeBytes,
+      updatedAt: updatedAt,
     );
   }
 
   final String accessLevel;
   final String category;
+  final int? sizeBytes;
+  final DateTime? updatedAt;
 }
 
 class VaultDocumentCategoryCount {
@@ -258,6 +266,51 @@ List<Map<String, dynamic>> sortVaultDocumentsForDisplay(
   });
 
   return List.unmodifiable(sortedDocuments);
+}
+
+String formatVaultDocumentSize(num? sizeBytes) {
+  if (sizeBytes == null || sizeBytes <= 0) return '';
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  var size = sizeBytes.toDouble();
+  var unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  final precision = unitIndex == 0 || size >= 10 ? 0 : 1;
+  return '${size.toStringAsFixed(precision)} ${units[unitIndex]}';
+}
+
+String formatVaultDocumentDate(DateTime? updatedAt) {
+  if (updatedAt == null) return '';
+
+  final month = updatedAt.month.toString().padLeft(2, '0');
+  final day = updatedAt.day.toString().padLeft(2, '0');
+  return '${updatedAt.year}-$month-$day';
+}
+
+String vaultDocumentListSubtitle(
+  Map<String, dynamic> document, {
+  required String accessLabel,
+}) {
+  final details = <String>[
+    accessLabel,
+    normalizeVaultDocumentCategory(document['category']?.toString()),
+  ];
+  final sizeLabel = formatVaultDocumentSize(document['sizeBytes'] as num?);
+  final updatedLabel = formatVaultDocumentDate(
+    document['updatedAt'] is DateTime
+        ? document['updatedAt'] as DateTime
+        : null,
+  );
+
+  if (sizeLabel.isNotEmpty) details.add(sizeLabel);
+  if (updatedLabel.isNotEmpty) details.add('Updated $updatedLabel');
+
+  return details.join(' | ');
 }
 
 List<List<Map<String, dynamic>>> chunkVaultSearchIndexRows(

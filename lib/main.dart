@@ -1667,6 +1667,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final documentMetadata = VaultDocumentMetadata.fromStorageMetadata(
       metadata?.customMetadata,
       fallbackAccessLevel: fallbackAccessLevel,
+      sizeBytes: metadata?.size,
+      updatedAt: metadata?.updated,
     );
 
     return {
@@ -1674,6 +1676,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       'storagePath': item.fullPath,
       'accessLevel': documentMetadata.accessLevel,
       'category': documentMetadata.category,
+      if (documentMetadata.sizeBytes != null)
+        'sizeBytes': documentMetadata.sizeBytes,
+      if (documentMetadata.updatedAt != null)
+        'updatedAt': documentMetadata.updatedAt,
     };
   }
 
@@ -2664,7 +2670,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     style: const TextStyle(color: Colors.white),
                                   ),
                                   subtitle: Text(
-                                    'Free Access PDF | ${pdfFile['category'] ?? 'General'}',
+                                    vaultDocumentListSubtitle(
+                                      pdfFile,
+                                      accessLabel: 'Free Access PDF',
+                                    ),
                                     style: const TextStyle(
                                       color: Colors.white70,
                                     ),
@@ -2764,7 +2773,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     ),
 
                                     subtitle: Text(
-                                      'Protected PDF | ${pdfFile['category'] ?? 'General'}',
+                                      vaultDocumentListSubtitle(
+                                        pdfFile,
+                                        accessLabel: 'Protected PDF',
+                                      ),
                                       style: const TextStyle(
                                         color: Colors.white70,
                                       ),

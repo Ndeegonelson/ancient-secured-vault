@@ -16,13 +16,17 @@ void main() {
   });
 
   test('reads storage metadata with fallbacks for older documents', () {
-    final metadata = VaultDocumentMetadata.fromStorageMetadata({
-      'accessLevel': 'free',
-      'category': 'Legal',
-    }, fallbackAccessLevel: 'premium');
+    final metadata = VaultDocumentMetadata.fromStorageMetadata(
+      {'accessLevel': 'free', 'category': 'Legal'},
+      fallbackAccessLevel: 'premium',
+      sizeBytes: 1536,
+      updatedAt: DateTime.utc(2026, 6, 9),
+    );
 
     expect(metadata.accessLevel, 'free');
     expect(metadata.category, 'Legal');
+    expect(metadata.sizeBytes, 1536);
+    expect(metadata.updatedAt, DateTime.utc(2026, 6, 9));
 
     final legacyMetadata = VaultDocumentMetadata.fromStorageMetadata(
       const {},
@@ -68,6 +72,22 @@ void main() {
       'z-policy.pdf',
     ]);
     expect(identical(sorted.first, documents[1]), isFalse);
+  });
+
+  test('formats vault document list details compactly', () {
+    expect(formatVaultDocumentSize(null), '');
+    expect(formatVaultDocumentSize(512), '512 B');
+    expect(formatVaultDocumentSize(1536), '1.5 KB');
+    expect(formatVaultDocumentSize(2 * 1024 * 1024), '2.0 MB');
+    expect(formatVaultDocumentDate(DateTime.utc(2026, 6, 9)), '2026-06-09');
+    expect(
+      vaultDocumentListSubtitle({
+        'category': 'Finance',
+        'sizeBytes': 1536,
+        'updatedAt': DateTime.utc(2026, 6, 9),
+      }, accessLabel: 'Protected PDF'),
+      'Protected PDF | Finance | 1.5 KB | Updated 2026-06-09',
+    );
   });
 
   test('summarizes vault inventory by access level and category', () {
