@@ -2498,15 +2498,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
 
-      if (userAccess.canAccessMainVault) {
+      try {
         final premiumResult = await FirebaseStorage.instance
             .ref('vault_pdfs')
             .listAll();
-
         for (var item in premiumResult.items) {
-          loadedPremiumFiles.add(
-            await loadVaultPdfListItem(item, fallbackAccessLevel: 'premium'),
+          final document = await loadVaultPdfListItem(
+            item,
+            fallbackAccessLevel: 'premium',
           );
+
+          if (document['accessLevel'] == 'free') {
+            loadedFreeFiles.add(document);
+          } else if (userAccess.canAccessMainVault) {
+            loadedPremiumFiles.add(document);
+          }
+        }
+      } catch (_) {
+        if (userAccess.canAccessMainVault) {
+          rethrow;
         }
       }
 
@@ -3844,6 +3854,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   StreamSubscription<html.Event>? readerWindowBlurSubscription;
   StreamSubscription<html.Event>? readerWindowFocusSubscription;
   StreamSubscription<html.MouseEvent>? readerContextMenuSubscription;
+  StreamSubscription<html.MouseEvent>? readerPdfContextMenuSubscription;
+  StreamSubscription<html.MouseEvent>? readerPdfMouseDownSubscription;
   StreamSubscription<html.KeyboardEvent>? readerKeyDownSubscription;
   late final String readerSessionId;
   late final ReaderTtsService readerTtsService;
@@ -4270,7 +4282,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         )
         ..style.border = 'none'
         ..style.width = '100%'
-        ..style.height = '100%';
+        ..style.height = '100%'
+        ..style.userSelect = 'none';
+
+      readerPdfContextMenuSubscription?.cancel();
+      readerPdfMouseDownSubscription?.cancel();
+      readerPdfContextMenuSubscription = iframe.onContextMenu.listen((event) {
+        handleProtectedReaderAction(source: 'pdf_context_menu', event: event);
+      });
+      readerPdfMouseDownSubscription = iframe.onMouseDown.listen((event) {
+        if (event.button != 2) return;
+
+        handleProtectedReaderAction(source: 'pdf_right_click', event: event);
+      });
 
       pdfIframe = iframe;
       return iframe;
@@ -8469,6 +8493,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerWindowBlurSubscription?.cancel();
     readerWindowFocusSubscription?.cancel();
     readerContextMenuSubscription?.cancel();
+    readerPdfContextMenuSubscription?.cancel();
+    readerPdfMouseDownSubscription?.cancel();
     readerKeyDownSubscription?.cancel();
     readerTtsService.removeListener(observeNarrationSession);
     narrationCloudSession.dispose();
