@@ -50,4 +50,31 @@ void main() {
     );
     expect(filterVaultDocumentsByCategory(documents, ''), documents);
   });
+
+  test('summarizes vault inventory by access level and category', () {
+    final summary = VaultDocumentInventorySummary.fromDocuments(
+      freeDocuments: [
+        {'name': 'A.pdf', 'category': 'Finance'},
+        {'name': 'B.pdf', 'category': 'finance'},
+      ],
+      premiumDocuments: [
+        {'name': 'C.pdf', 'category': 'Research'},
+        {'name': 'D.pdf', 'category': 'Finance'},
+        {'name': 'E.pdf'},
+      ],
+    );
+
+    expect(summary.freeCount, 2);
+    expect(summary.premiumCount, 3);
+    expect(summary.totalCount, 5);
+    expect(summary.hasDocuments, isTrue);
+    expect(summary.categoryCounts.map((count) => count.category), [
+      'Finance',
+      'General',
+      'Research',
+    ]);
+    expect(summary.categoryCounts.first.freeCount, 2);
+    expect(summary.categoryCounts.first.premiumCount, 1);
+    expect(summary.categoryCounts.first.totalCount, 3);
+  });
 }

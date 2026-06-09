@@ -40,6 +40,82 @@ class VaultDocumentMetadata {
   final String category;
 }
 
+class VaultDocumentCategoryCount {
+  const VaultDocumentCategoryCount({
+    required this.category,
+    required this.freeCount,
+    required this.premiumCount,
+  });
+
+  final String category;
+  final int freeCount;
+  final int premiumCount;
+
+  int get totalCount => freeCount + premiumCount;
+}
+
+class VaultDocumentInventorySummary {
+  const VaultDocumentInventorySummary({
+    required this.freeCount,
+    required this.premiumCount,
+    required this.categoryCounts,
+  });
+
+  factory VaultDocumentInventorySummary.fromDocuments({
+    required Iterable<Map<String, dynamic>> freeDocuments,
+    required Iterable<Map<String, dynamic>> premiumDocuments,
+  }) {
+    final categories = <String, ({int freeCount, int premiumCount})>{};
+
+    void countDocument(Map<String, dynamic> document, {required bool isFree}) {
+      final category = normalizeVaultDocumentCategory(
+        document['category']?.toString(),
+      );
+      final current = categories[category] ?? (freeCount: 0, premiumCount: 0);
+      categories[category] = (
+        freeCount: current.freeCount + (isFree ? 1 : 0),
+        premiumCount: current.premiumCount + (isFree ? 0 : 1),
+      );
+    }
+
+    for (final document in freeDocuments) {
+      countDocument(document, isFree: true);
+    }
+
+    for (final document in premiumDocuments) {
+      countDocument(document, isFree: false);
+    }
+
+    final categoryCounts =
+        categories.entries
+            .map(
+              (entry) => VaultDocumentCategoryCount(
+                category: entry.key,
+                freeCount: entry.value.freeCount,
+                premiumCount: entry.value.premiumCount,
+              ),
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                a.category.toLowerCase().compareTo(b.category.toLowerCase()),
+          );
+
+    return VaultDocumentInventorySummary(
+      freeCount: freeDocuments.length,
+      premiumCount: premiumDocuments.length,
+      categoryCounts: List.unmodifiable(categoryCounts),
+    );
+  }
+
+  final int freeCount;
+  final int premiumCount;
+  final List<VaultDocumentCategoryCount> categoryCounts;
+
+  int get totalCount => freeCount + premiumCount;
+  bool get hasDocuments => totalCount > 0;
+}
+
 String normalizeVaultAccessLevel(String? value, {String fallback = 'premium'}) {
   final normalized = value?.trim().toLowerCase() ?? '';
   if (normalized == 'free' || normalized == 'premium') return normalized;

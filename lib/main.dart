@@ -593,6 +593,113 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Future<void> showVaultInventory() async {
+    if (!requireVaultManagerAccess()) return;
+
+    final summary = VaultDocumentInventorySummary.fromDocuments(
+      freeDocuments: freePdfFiles,
+      premiumDocuments: premiumPdfFiles,
+    );
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Vault Inventory',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        _ReaderAnalyticsMetric(
+                          label: 'Documents',
+                          value: summary.totalCount.toString(),
+                        ),
+                        _ReaderAnalyticsMetric(
+                          label: 'Free',
+                          value: summary.freeCount.toString(),
+                        ),
+                        _ReaderAnalyticsMetric(
+                          label: 'Premium',
+                          value: summary.premiumCount.toString(),
+                        ),
+                        _ReaderAnalyticsMetric(
+                          label: 'Categories',
+                          value: summary.categoryCounts.length.toString(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'By Category',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (!summary.hasDocuments)
+                      const Text(
+                        'No vault PDFs are loaded yet.',
+                        style: TextStyle(color: Colors.white54),
+                      )
+                    else
+                      ...summary.categoryCounts.map(
+                        (count) => ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(
+                            Icons.folder_outlined,
+                            color: Colors.greenAccent,
+                          ),
+                          title: Text(
+                            count.category,
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                          subtitle: Text(
+                            '${count.freeCount} free | '
+                            '${count.premiumCount} premium',
+                            style: const TextStyle(color: Colors.white38),
+                          ),
+                          trailing: Text(
+                            count.totalCount.toString(),
+                            style: const TextStyle(
+                              color: Colors.greenAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Close',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> showUserAccessOverview() async {
     if (!requireVaultManagerAccess()) return;
 
@@ -2072,6 +2179,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 color: Colors.greenAccent,
               ),
               onPressed: showReaderAnalytics,
+            ),
+
+          if (userAccess.isAdmin)
+            IconButton(
+              tooltip: 'Vault Inventory',
+              icon: const Icon(
+                Icons.inventory_2_outlined,
+                color: Colors.greenAccent,
+              ),
+              onPressed: showVaultInventory,
             ),
 
           if (userAccess.isAdmin)
