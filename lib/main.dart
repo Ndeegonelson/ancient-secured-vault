@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -22,6 +23,7 @@ import 'services/reader_device_identity.dart';
 import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
+import 'services/reader_protection_policy.dart';
 import 'services/reader_workspace_filters.dart';
 import 'services/reader_access_decision.dart';
 import 'services/reader_activity_analytics.dart';
@@ -36,7 +38,6 @@ import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
 import 'services/reader_cloud_narration_registry.dart';
 import 'services/reader_cloud_narration_session_coordinator.dart';
-import 'firebase_options.dart';
 import 'services/reader_cloud_narration_callable_provider.dart';
 import 'services/reader_cloud_narration_http_callable_client.dart';
 import 'widgets/reader_narration_dialog.dart';
@@ -3837,7 +3838,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   UserAccessState readerUserAccess = const UserAccessState();
   bool readerSessionStarted = false;
   bool showReaderStatusOverlay = true;
+  bool readerWindowIsActive = true;
   DateTime? readerSessionStartedAt;
+  StreamSubscription<html.Event>? readerVisibilitySubscription;
+  StreamSubscription<html.Event>? readerWindowBlurSubscription;
+  StreamSubscription<html.Event>? readerWindowFocusSubscription;
   late final String readerSessionId;
   late final ReaderTtsService readerTtsService;
   late final ReaderNarrationProgressRepository narrationProgressRepository;
@@ -3892,6 +3897,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       ReaderNarrationPreferencesContext(
         userEmail: FirebaseAuth.instance.currentUser?.email,
       );
+
+  ReaderProtectionPolicy get readerProtectionPolicy => ReaderProtectionPolicy(
+    documentAccessLevel: widget.accessLevel,
+    hasActiveSubscription: readerUserAccess.hasActiveSubscription,
+    isAdmin: readerUserAccess.isAdmin,
+  );
+
+  bool get shouldShowReaderPrivacyShield {
+    return canViewDocument &&
+        readerProtectionPolicy.shouldBlurWhenInactive &&
+        !readerWindowIsActive;
+  }
 
   ReaderActivityLogContext get readerActivityLogContext =>
       ReaderActivityLogContext(
@@ -4256,6 +4273,47 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       pdfIframe = iframe;
       return iframe;
     });
+  }
+
+  void startReaderProtectionObservers() {
+    readerVisibilitySubscription = html.document.onVisibilityChange.listen((_) {
+      updateReaderWindowActivity(
+        isActive: !html.document.hidden!,
+        source: 'visibility_change',
+      );
+    });
+    readerWindowBlurSubscription = html.window.onBlur.listen((_) {
+      updateReaderWindowActivity(isActive: false, source: 'window_blur');
+    });
+    readerWindowFocusSubscription = html.window.onFocus.listen((_) {
+      updateReaderWindowActivity(isActive: true, source: 'window_focus');
+    });
+  }
+
+  void updateReaderWindowActivity({
+    required bool isActive,
+    required String source,
+  }) {
+    if (readerWindowIsActive == isActive) return;
+
+    if (mounted) {
+      setState(() {
+        readerWindowIsActive = isActive;
+      });
+    } else {
+      readerWindowIsActive = isActive;
+    }
+
+    if (!isActive && readerProtectionPolicy.shouldBlurWhenInactive) {
+      logReaderAction(
+        action: 'reader_privacy_shield_shown',
+        details: {
+          'source': source,
+          'pageNumber': currentPdfPage,
+          'accessLevel': widget.accessLevel,
+        },
+      );
+    }
   }
 
   void openPdfPage(
@@ -5935,7 +5993,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       ? emptySubtitle
                       : hasActiveWorkspaceFilter && items!.isEmpty
                       ? 'No matching items in this section.'
-                      : filledSubtitleBuilder(items);
+                      : filledSubtitleBuilder(items!);
 
                   return workspaceSummaryCard(
                     icon: icon,
@@ -7965,7 +8023,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
 
     narrationCloudSession.updateAccessPolicy(narrationAccessPolicy);
-    narrationCloudSession.refreshCatalog().catchError((_) {});
+    unawaited(narrationCloudSession.refreshCatalog().catchError((_) => false));
 
     final narrationPage = currentPdfPage;
     final isSelectedPassage = selectedText != null;
@@ -8306,7 +8364,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerActivityRepository = ReaderActivityRepository();
     readerDeviceIdentity = ReaderDeviceIdentityResolver(
       storage: const HtmlDeviceIdentityStorage(),
-      platformProvider: () => html.window.navigator.platform,
+      platformProvider: () => html.window.navigator.platform ?? '',
       deviceIdFactory: createReaderDeviceId,
     ).resolve();
     readerDeviceAuthorizationRepository = UserDeviceAuthorizationRepository();
@@ -8354,12 +8412,16 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         'pdf-viewer-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
     currentPdfPage = widget.initialPage < 1 ? 1 : widget.initialPage;
     currentSearchQuery = widget.initialSearchQuery;
+    startReaderProtectionObservers();
     checkViewerAccess();
   }
 
   @override
   void dispose() {
     saveNarrationSessionSummary(finished: true);
+    readerVisibilitySubscription?.cancel();
+    readerWindowBlurSubscription?.cancel();
+    readerWindowFocusSubscription?.cancel();
     readerTtsService.removeListener(observeNarrationSession);
     narrationCloudSession.dispose();
 
@@ -8947,6 +9009,46 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                     ),
                   ),
                 ),
+                if (shouldShowReaderPrivacyShield)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.94),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 420),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.visibility_off_outlined,
+                                color: Colors.greenAccent,
+                                size: 46,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                readerProtectionPolicy.inactiveShieldTitle,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                readerProtectionPolicy.inactiveShieldMessage,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 if (showReaderStatusOverlay)
                   Positioned(
                     left: 16,
