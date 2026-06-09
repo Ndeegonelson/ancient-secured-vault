@@ -1509,50 +1509,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await clearSearchIndexForStoragePath(storagePath);
     }
 
-    final document = PdfDocument(inputBytes: pdfBytes);
-    final extractor = PdfTextExtractor(document);
     final normalizedAccessLevel = accessLevel.trim().toLowerCase();
     final normalizedCategory = normalizeVaultDocumentCategory(category);
+    final titleKeywords = vaultSearchTerms(pdfTitle);
+    final document = PdfDocument(inputBytes: pdfBytes);
 
-    for (int i = 0; i < document.pages.count; i++) {
-      final text = extractor.extractText(startPageIndex: i, endPageIndex: i);
+    try {
+      final extractor = PdfTextExtractor(document);
+      final searchIndexRows = <Map<String, dynamic>>[];
 
-      if (text.trim().isEmpty) continue;
+      for (int i = 0; i < document.pages.count; i++) {
+        final text = extractor.extractText(startPageIndex: i, endPageIndex: i);
 
-      final lowerText = text.toLowerCase();
+        if (text.trim().isEmpty) continue;
 
-      final keywords = lowerText
-          .replaceAll(RegExp(r'[^a-zA-Z0-9 ]'), ' ')
-          .split(' ')
-          .where((word) => word.trim().length > 2)
-          .toSet()
-          .take(300)
-          .toList();
-      final titleKeywords = vaultSearchTerms(pdfTitle);
+        final lowerText = text.toLowerCase();
+        final searchIndexData = <String, dynamic>{
+          'pdfTitle': pdfTitle,
+          'storagePath': storagePath,
+          'pageNumber': i + 1,
+          'text': text.length > 1200 ? text.substring(0, 1200) : text,
+          'textLower': lowerText,
+          'keywords': vaultSearchTerms(text).take(300).toList(),
+          'titleKeywords': titleKeywords,
+          'accessLevel': normalizedAccessLevel,
+          'category': normalizedCategory,
+          'createdAt': FieldValue.serverTimestamp(),
+        };
 
-      final searchIndexData = <String, dynamic>{
-        'pdfTitle': pdfTitle,
-        'storagePath': storagePath,
-        'pageNumber': i + 1,
-        'text': text.length > 1200 ? text.substring(0, 1200) : text,
-        'textLower': lowerText,
-        'keywords': keywords,
-        'titleKeywords': titleKeywords,
-        'accessLevel': normalizedAccessLevel,
-        'category': normalizedCategory,
-        'createdAt': FieldValue.serverTimestamp(),
-      };
+        if (normalizedAccessLevel != 'premium' && pdfUrl != null) {
+          searchIndexData['pdfUrl'] = pdfUrl;
+        }
 
-      if (normalizedAccessLevel != 'premium' && pdfUrl != null) {
-        searchIndexData['pdfUrl'] = pdfUrl;
+        searchIndexRows.add(searchIndexData);
       }
 
-      await FirebaseFirestore.instance
-          .collection('pdf_search_index')
-          .add(searchIndexData);
+      final searchIndexCollection = FirebaseFirestore.instance.collection(
+        'pdf_search_index',
+      );
+      for (final chunk in chunkVaultSearchIndexRows(searchIndexRows)) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final row in chunk) {
+          batch.set(searchIndexCollection.doc(), row);
+        }
+        await batch.commit();
+      }
+    } finally {
+      document.dispose();
     }
-
-    document.dispose();
   }
 
   Future<int> clearSearchIndexForStoragePath(String storagePath) async {

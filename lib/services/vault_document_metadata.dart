@@ -7,6 +7,8 @@ const vaultDocumentCategories = [
   'Research',
 ];
 
+const vaultSearchIndexWriteBatchLimit = 450;
+
 class VaultUploadOptions {
   const VaultUploadOptions({required this.accessLevel, required this.category});
 
@@ -230,4 +232,28 @@ List<Map<String, dynamic>> filterVaultDocumentsByCategory(
           normalizedCategory;
     }),
   );
+}
+
+List<List<Map<String, dynamic>>> chunkVaultSearchIndexRows(
+  Iterable<Map<String, dynamic>> rows, {
+  int batchSize = vaultSearchIndexWriteBatchLimit,
+}) {
+  assert(batchSize > 0);
+
+  final chunks = <List<Map<String, dynamic>>>[];
+  var currentChunk = <Map<String, dynamic>>[];
+
+  for (final row in rows) {
+    if (currentChunk.length >= batchSize) {
+      chunks.add(List.unmodifiable(currentChunk));
+      currentChunk = <Map<String, dynamic>>[];
+    }
+    currentChunk.add(row);
+  }
+
+  if (currentChunk.isNotEmpty) {
+    chunks.add(List.unmodifiable(currentChunk));
+  }
+
+  return List.unmodifiable(chunks);
 }

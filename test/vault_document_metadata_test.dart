@@ -100,4 +100,15 @@ void main() {
       'No vault PDFs were found to index.',
     );
   });
+
+  test('chunks vault search index rows below Firestore write limits', () {
+    final rows = List.generate(5, (index) => {'pageNumber': index + 1});
+    final chunks = chunkVaultSearchIndexRows(rows, batchSize: 2);
+
+    expect(chunks.length, 3);
+    expect(chunks.map((chunk) => chunk.length), [2, 2, 1]);
+    expect(chunks.first.first['pageNumber'], 1);
+    expect(chunks.last.single['pageNumber'], 5);
+    expect(chunkVaultSearchIndexRows(const [], batchSize: 2), isEmpty);
+  });
 }
