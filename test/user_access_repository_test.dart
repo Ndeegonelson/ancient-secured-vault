@@ -82,4 +82,25 @@ void main() {
       'free@example.com',
     ]);
   });
+
+  test('builds Firestore updates for each admin access plan', () {
+    expect(UserAccessPlanUpdate.fromPlan(UserAccessPlan.admin).toFirestore(), {
+      'role': 'admin',
+      'subscriptionStatus': 'active',
+      'accessLevel': 'admin',
+    });
+    expect(
+      UserAccessPlanUpdate.fromPlan(UserAccessPlan.premium).toFirestore(),
+      {
+        'role': 'reader',
+        'subscriptionStatus': 'active',
+        'accessLevel': 'premium',
+      },
+    );
+    expect(UserAccessPlanUpdate.fromPlan(UserAccessPlan.free).toFirestore(), {
+      'role': 'reader',
+      'subscriptionStatus': 'inactive',
+      'accessLevel': 'free',
+    });
+  });
 }

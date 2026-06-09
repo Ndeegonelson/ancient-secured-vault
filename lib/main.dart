@@ -593,134 +593,258 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> showUserAccessOverview() async {
     if (!requireVaultManagerAccess()) return;
 
+    var summaryFuture = userAccessRepository.loadSummary(limit: 100);
+    String? busyUserEmail;
+    final currentUserEmail = UserAccessRepository.emailDocumentId(
+      FirebaseAuth.instance.currentUser?.email,
+    );
+
+    UserAccessPlan currentPlan(UserAccessRecord user) {
+      if (user.access.isAdmin) return UserAccessPlan.admin;
+      if (user.access.hasActiveSubscription) return UserAccessPlan.premium;
+      return UserAccessPlan.free;
+    }
+
+    String planActionLabel(UserAccessPlan plan) {
+      return switch (plan) {
+        UserAccessPlan.admin => 'Admin',
+        UserAccessPlan.premium => 'Premium',
+        UserAccessPlan.free => 'Free',
+      };
+    }
+
+    List<UserAccessPlan> availablePlanActions(UserAccessRecord user) {
+      final activePlan = currentPlan(user);
+      return UserAccessPlan.values
+          .where((plan) => plan != activePlan)
+          .toList(growable: false);
+    }
+
     await showDialog<void>(
       context: context,
       builder: (context) {
-        return PointerInterceptor(
-          child: AlertDialog(
-            backgroundColor: const Color(0xFF0F1117),
-            title: const Text(
-              'User Access',
-              style: TextStyle(color: Colors.greenAccent),
-            ),
-            content: SizedBox(
-              width: 520,
-              child: FutureBuilder<UserAccessSummary>(
-                future: userAccessRepository.loadSummary(limit: 100),
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Text(
-                      snapshot.error.toString(),
-                      style: const TextStyle(color: Colors.redAccent),
-                    );
-                  }
-
-                  if (!snapshot.hasData) {
-                    return const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          color: Colors.greenAccent,
-                        ),
-                      ),
-                    );
-                  }
-
-                  final summary = snapshot.data!;
-                  if (!summary.hasUsers) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text(
-                        'No user access records were found yet.',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    );
-                  }
-
-                  return SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            _ReaderAnalyticsMetric(
-                              label: 'Users',
-                              value: summary.totalCount.toString(),
-                            ),
-                            _ReaderAnalyticsMetric(
-                              label: 'Admins',
-                              value: summary.adminCount.toString(),
-                            ),
-                            _ReaderAnalyticsMetric(
-                              label: 'Premium',
-                              value: summary.premiumCount.toString(),
-                            ),
-                            _ReaderAnalyticsMetric(
-                              label: 'Free',
-                              value: summary.freeCount.toString(),
-                              color: Colors.orangeAccent,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        const Text(
-                          'Access Records',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        ...summary.users.take(12).map((user) {
-                          final timestamp = user.updatedAt ?? user.createdAt;
-
-                          return ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(
-                              user.access.isAdmin
-                                  ? Icons.admin_panel_settings_outlined
-                                  : user.access.hasActiveSubscription
-                                  ? Icons.workspace_premium_outlined
-                                  : Icons.person_outline,
-                              color: user.access.canAccessMainVault
-                                  ? Colors.greenAccent
-                                  : Colors.orangeAccent,
-                            ),
-                            title: Text(
-                              user.email.isEmpty ? 'Unknown user' : user.email,
-                              style: const TextStyle(color: Colors.white70),
-                            ),
-                            subtitle: Text(
-                              [
-                                if (user.displayName.isNotEmpty)
-                                  user.displayName,
-                                user.access.planLabel,
-                                formatDashboardTimestamp(timestamp),
-                              ].join(' | '),
-                              style: const TextStyle(color: Colors.white38),
-                            ),
-                          );
-                        }),
-                      ],
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> applyPlan(
+              UserAccessRecord user,
+              UserAccessPlan plan,
+            ) async {
+              if (user.email == currentUserEmail) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Use another admin account to change your own access.',
                     ),
+                  ),
+                );
+                return;
+              }
+
+              setDialogState(() {
+                busyUserEmail = user.email;
+              });
+
+              try {
+                await userAccessRepository.saveAccessPlan(
+                  email: user.email,
+                  plan: plan,
+                );
+
+                if (!mounted) return;
+
+                setDialogState(() {
+                  summaryFuture = userAccessRepository.loadSummary(limit: 100);
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '${user.email} moved to ${planActionLabel(plan)} access.',
+                    ),
+                  ),
+                );
+                await checkUserRole();
+              } catch (error) {
+                if (!mounted) return;
+
+                setDialogState(() {
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Access update failed: $error')),
+                );
+              }
+            }
+
+            Widget accessActions(UserAccessRecord user) {
+              final isCurrentUser = user.email == currentUserEmail;
+              final isBusy = busyUserEmail == user.email;
+
+              if (isBusy) {
+                return const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.greenAccent,
+                  ),
+                );
+              }
+
+              return Wrap(
+                spacing: 6,
+                children: availablePlanActions(user).map((plan) {
+                  return TextButton(
+                    onPressed: busyUserEmail != null || isCurrentUser
+                        ? null
+                        : () => applyPlan(user, plan),
+                    style: TextButton.styleFrom(
+                      foregroundColor: plan == UserAccessPlan.free
+                          ? Colors.orangeAccent
+                          : Colors.greenAccent,
+                      disabledForegroundColor: Colors.white24,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(planActionLabel(plan)),
                   );
-                },
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'Close',
+                }).toList(),
+              );
+            }
+
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'User Access',
                   style: TextStyle(color: Colors.greenAccent),
                 ),
+                content: SizedBox(
+                  width: 620,
+                  child: FutureBuilder<UserAccessSummary>(
+                    future: summaryFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Text(
+                          snapshot.error.toString(),
+                          style: const TextStyle(color: Colors.redAccent),
+                        );
+                      }
+
+                      if (!snapshot.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                        );
+                      }
+
+                      final summary = snapshot.data!;
+                      if (!summary.hasUsers) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'No user access records were found yet.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                _ReaderAnalyticsMetric(
+                                  label: 'Users',
+                                  value: summary.totalCount.toString(),
+                                ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Admins',
+                                  value: summary.adminCount.toString(),
+                                ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Premium',
+                                  value: summary.premiumCount.toString(),
+                                ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Free',
+                                  value: summary.freeCount.toString(),
+                                  color: Colors.orangeAccent,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            const Text(
+                              'Access Records',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            ...summary.users.take(12).map((user) {
+                              final timestamp =
+                                  user.updatedAt ?? user.createdAt;
+
+                              return ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(
+                                  user.access.isAdmin
+                                      ? Icons.admin_panel_settings_outlined
+                                      : user.access.hasActiveSubscription
+                                      ? Icons.workspace_premium_outlined
+                                      : Icons.person_outline,
+                                  color: user.access.canAccessMainVault
+                                      ? Colors.greenAccent
+                                      : Colors.orangeAccent,
+                                ),
+                                title: Text(
+                                  user.email.isEmpty
+                                      ? 'Unknown user'
+                                      : user.email,
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                                subtitle: Text(
+                                  [
+                                    if (user.displayName.isNotEmpty)
+                                      user.displayName,
+                                    user.access.planLabel,
+                                    if (user.email == currentUserEmail)
+                                      'Current admin',
+                                    formatDashboardTimestamp(timestamp),
+                                  ].join(' | '),
+                                  style: const TextStyle(color: Colors.white38),
+                                ),
+                                trailing: accessActions(user),
+                              );
+                            }),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         );
       },
     );

@@ -8,6 +8,54 @@ abstract interface class UserAccessStore {
   Future<List<UserAccessRecord>> listUsers({int limit = 100});
 
   Future<UserAccessSummary> loadSummary({int limit = 100});
+
+  Future<void> saveAccessPlan({
+    required String email,
+    required UserAccessPlan plan,
+  });
+}
+
+enum UserAccessPlan { free, premium, admin }
+
+class UserAccessPlanUpdate {
+  const UserAccessPlanUpdate({
+    required this.role,
+    required this.subscriptionStatus,
+    required this.accessLevel,
+  });
+
+  factory UserAccessPlanUpdate.fromPlan(UserAccessPlan plan) {
+    return switch (plan) {
+      UserAccessPlan.admin => const UserAccessPlanUpdate(
+        role: 'admin',
+        subscriptionStatus: 'active',
+        accessLevel: 'admin',
+      ),
+      UserAccessPlan.premium => const UserAccessPlanUpdate(
+        role: 'reader',
+        subscriptionStatus: 'active',
+        accessLevel: 'premium',
+      ),
+      UserAccessPlan.free => const UserAccessPlanUpdate(
+        role: 'reader',
+        subscriptionStatus: 'inactive',
+        accessLevel: 'free',
+      ),
+    };
+  }
+
+  final String role;
+  final String subscriptionStatus;
+  final String accessLevel;
+
+  Map<String, dynamic> toFirestore({Object? updatedAt}) {
+    return {
+      'role': role,
+      'subscriptionStatus': subscriptionStatus,
+      'accessLevel': accessLevel,
+      if (updatedAt != null) 'updatedAt': updatedAt,
+    };
+  }
 }
 
 class UserAccessRecord {
@@ -137,6 +185,24 @@ class UserAccessRepository implements UserAccessStore {
   @override
   Future<UserAccessSummary> loadSummary({int limit = 100}) async {
     return UserAccessSummary.fromUsers(await listUsers(limit: limit));
+  }
+
+  @override
+  Future<void> saveAccessPlan({
+    required String email,
+    required UserAccessPlan plan,
+  }) async {
+    final documentId = emailDocumentId(email);
+    if (documentId.isEmpty) {
+      throw ArgumentError('A user email is required to update access.');
+    }
+
+    await _firestore.collection('users').doc(documentId).set({
+      'email': documentId,
+      ...UserAccessPlanUpdate.fromPlan(
+        plan,
+      ).toFirestore(updatedAt: FieldValue.serverTimestamp()),
+    }, SetOptions(merge: true));
   }
 
   static String emailDocumentId(String? email) {
