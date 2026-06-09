@@ -76,6 +76,18 @@ class ReaderWorkspaceFilters {
     return List.unmodifiable(labels);
   }
 
+  static bool hasActiveFilters({
+    String query = '',
+    String highlightColorFilter = allFilter,
+    String noteCategoryFilter = allFilter,
+  }) {
+    return activeFilterLabels(
+      query: query,
+      highlightColorFilter: highlightColorFilter,
+      noteCategoryFilter: noteCategoryFilter,
+    ).isNotEmpty;
+  }
+
   static String _normalizeHighlightColor(String value) {
     final color = value.trim().toLowerCase();
     return switch (color) {

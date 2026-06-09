@@ -101,5 +101,10 @@ void main() {
       ],
     );
     expect(ReaderWorkspaceFilters.activeFilterLabels(), isEmpty);
+    expect(
+      ReaderWorkspaceFilters.hasActiveFilters(highlightColorFilter: 'Blue'),
+      isTrue,
+    );
+    expect(ReaderWorkspaceFilters.hasActiveFilters(), isFalse);
   });
 }

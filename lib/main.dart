@@ -4990,15 +4990,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            void clearWorkspaceSearch() {
-              if (workspaceSearchQuery.trim().isEmpty) return;
-
-              workspaceSearchController.clear();
-              setDialogState(() {
-                workspaceSearchQuery = '';
-              });
-            }
-
             void clearWorkspaceFilters() {
               workspaceSearchController.clear();
               setDialogState(() {
@@ -5144,7 +5135,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       : filterBuilder?.call(allItems) ?? allItems;
                   final count = items?.length;
                   final hasActiveWorkspaceFilter =
-                      activeWorkspaceFilterLabels().isNotEmpty;
+                      ReaderWorkspaceFilters.hasActiveFilters(
+                        query: workspaceSearchQuery,
+                        highlightColorFilter: workspaceHighlightColorFilter,
+                        noteCategoryFilter: workspaceNoteCategoryFilter,
+                      );
                   final subtitle = allItems == null
                       ? 'Checking saved items...'
                       : allItems.isEmpty
@@ -5383,8 +5378,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
                   if (positions.isEmpty) {
                     return emptyWorkspaceMessage(
-                      'No saved positions match this search.',
-                      onClearFilters: clearWorkspaceSearch,
+                      'No saved positions match these filters.',
+                      onClearFilters: clearWorkspaceFilters,
+                      clearLabel: 'Clear all filters',
                     );
                   }
 
@@ -5457,8 +5453,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
                   if (bookmarks.isEmpty) {
                     return emptyWorkspaceMessage(
-                      'No bookmarks match this search.',
-                      onClearFilters: clearWorkspaceSearch,
+                      'No bookmarks match these filters.',
+                      onClearFilters: clearWorkspaceFilters,
+                      clearLabel: 'Clear all filters',
                     );
                   }
 
