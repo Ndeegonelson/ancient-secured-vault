@@ -5008,6 +5008,47 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               });
             }
 
+            List<String> activeWorkspaceFilterLabels() {
+              return ReaderWorkspaceFilters.activeFilterLabels(
+                query: workspaceSearchQuery,
+                highlightColorFilter: workspaceHighlightColorFilter,
+                noteCategoryFilter: workspaceNoteCategoryFilter,
+              );
+            }
+
+            Widget workspaceActiveFilterBar(List<String> labels) {
+              if (labels.isEmpty) return const SizedBox.shrink();
+
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ...labels.map(
+                    (label) => Chip(
+                      label: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      backgroundColor: const Color(0xFF151821),
+                      side: const BorderSide(color: Colors.white24),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: clearWorkspaceFilters,
+                    icon: const Icon(Icons.clear_all, size: 18),
+                    label: const Text('Clear all'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              );
+            }
+
             Widget workspaceSummaryCard({
               required IconData icon,
               required String title,
@@ -5102,12 +5143,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                       ? null
                       : filterBuilder?.call(allItems) ?? allItems;
                   final count = items?.length;
-                  final hasSearch = workspaceSearchQuery.trim().isNotEmpty;
+                  final hasActiveWorkspaceFilter =
+                      activeWorkspaceFilterLabels().isNotEmpty;
                   final subtitle = allItems == null
                       ? 'Checking saved items...'
                       : allItems.isEmpty
                       ? emptySubtitle
-                      : hasSearch && items!.isEmpty
+                      : hasActiveWorkspaceFilter && items!.isEmpty
                       ? 'No matching items in this section.'
                       : filledSubtitleBuilder(items);
 
@@ -5166,6 +5208,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             }
 
             Widget overviewTab() {
+              final activeFilterLabels = activeWorkspaceFilterLabels();
+
               return SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -5205,47 +5249,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                       fontSize: 12,
                                     ),
                                   ),
-                                  if (workspaceSearchQuery.trim().isNotEmpty ||
-                                      workspaceHighlightColorFilter != 'All' ||
-                                      workspaceNoteCategoryFilter != 'All') ...[
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            [
-                                              if (workspaceSearchQuery
-                                                  .trim()
-                                                  .isNotEmpty)
-                                                'Showing matches for "${workspaceSearchQuery.trim()}"',
-                                              if (workspaceHighlightColorFilter !=
-                                                  'All')
-                                                'Highlight color: $workspaceHighlightColorFilter',
-                                              if (workspaceNoteCategoryFilter !=
-                                                  'All')
-                                                'Note category: $workspaceNoteCategoryFilter',
-                                            ].join(' | '),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Colors.greenAccent,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Clear workspace filters',
-                                          visualDensity: VisualDensity.compact,
-                                          onPressed: clearWorkspaceFilters,
-                                          icon: const Icon(
-                                            Icons.clear,
-                                            color: Colors.greenAccent,
-                                            size: 18,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
                                 ],
                               ),
                             ),
@@ -5253,6 +5256,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         ),
                       ),
                     ),
+                    if (activeFilterLabels.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      workspaceActiveFilterBar(activeFilterLabels),
+                    ],
                     const SizedBox(height: 10),
                     LayoutBuilder(
                       builder: (context, constraints) {

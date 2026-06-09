@@ -55,6 +55,27 @@ class ReaderWorkspaceFilters {
         .toList();
   }
 
+  static List<String> activeFilterLabels({
+    String query = '',
+    String highlightColorFilter = allFilter,
+    String noteCategoryFilter = allFilter,
+  }) {
+    final labels = <String>[];
+    final cleanQuery = query.trim();
+
+    if (cleanQuery.isNotEmpty) {
+      labels.add('Search: $cleanQuery');
+    }
+    if (highlightColorFilter != allFilter) {
+      labels.add('Highlight color: $highlightColorFilter');
+    }
+    if (noteCategoryFilter != allFilter) {
+      labels.add('Note category: $noteCategoryFilter');
+    }
+
+    return List.unmodifiable(labels);
+  }
+
   static String _normalizeHighlightColor(String value) {
     final color = value.trim().toLowerCase();
     return switch (color) {

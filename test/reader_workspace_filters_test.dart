@@ -86,4 +86,20 @@ void main() {
       [operations],
     );
   });
+
+  test('builds compact active workspace filter labels', () {
+    expect(
+      ReaderWorkspaceFilters.activeFilterLabels(
+        query: ' treasury ',
+        highlightColorFilter: 'Green',
+        noteCategoryFilter: 'Operations',
+      ),
+      [
+        'Search: treasury',
+        'Highlight color: Green',
+        'Note category: Operations',
+      ],
+    );
+    expect(ReaderWorkspaceFilters.activeFilterLabels(), isEmpty);
+  });
 }
