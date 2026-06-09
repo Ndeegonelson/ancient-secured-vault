@@ -18,6 +18,7 @@ import 'services/reader_narration_session_tracker.dart';
 import 'services/reader_narration_playback_coordinator.dart';
 import 'services/reader_narration_voice_catalog_presenter.dart';
 import 'services/reader_bookmark_repository.dart';
+import 'services/reader_device_identity.dart';
 import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
@@ -362,6 +363,20 @@ class _ReaderHighlightDetailsResult {
 
   final String color;
   final String note;
+}
+
+class HtmlDeviceIdentityStorage implements ReaderDeviceIdentityStorage {
+  const HtmlDeviceIdentityStorage();
+
+  @override
+  String? read(String key) {
+    return html.window.localStorage[key];
+  }
+
+  @override
+  void write(String key, String value) {
+    html.window.localStorage[key] = value;
+  }
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
@@ -3662,6 +3677,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final ReaderNoteRepository readerNoteRepository;
   late final ReaderSavedPositionRepository savedPositionRepository;
   late final ReaderActivityRepository readerActivityRepository;
+  late final ReaderDeviceIdentity readerDeviceIdentity;
   late final UserAccessRepository userAccessRepository;
   late final ReaderCloudNarrationSessionCoordinator narrationCloudSession;
   late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
@@ -3708,6 +3724,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         openSource: widget.openSource,
         documentKey: readerDocumentKey,
         storagePath: normalizedReaderStoragePath,
+        deviceId: readerDeviceIdentity.id,
+        deviceLabel: readerDeviceIdentity.label,
+        devicePlatform: readerDeviceIdentity.platform,
       );
 
   String get readerSourceLabel => widget.openSource.replaceAll('_', ' ');
@@ -8081,6 +8100,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerNoteRepository = ReaderNoteRepository();
     savedPositionRepository = ReaderSavedPositionRepository();
     readerActivityRepository = ReaderActivityRepository();
+    readerDeviceIdentity = ReaderDeviceIdentityResolver(
+      storage: const HtmlDeviceIdentityStorage(),
+      platformProvider: () => html.window.navigator.platform,
+      deviceIdFactory: createReaderDeviceId,
+    ).resolve();
     userAccessRepository = UserAccessRepository();
     final cloudNarrationRegistry = ReaderCloudNarrationRegistry(
       providers: [

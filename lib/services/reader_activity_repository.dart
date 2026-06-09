@@ -11,6 +11,9 @@ class ReaderActivityLogContext {
     required this.openSource,
     this.documentKey = '',
     this.storagePath = '',
+    this.deviceId = '',
+    this.deviceLabel = '',
+    this.devicePlatform = '',
   });
 
   final String? userEmail;
@@ -20,6 +23,9 @@ class ReaderActivityLogContext {
   final String openSource;
   final String documentKey;
   final String storagePath;
+  final String deviceId;
+  final String deviceLabel;
+  final String devicePlatform;
 
   Map<String, dynamic> toMap() {
     final data = <String, dynamic>{
@@ -38,6 +44,21 @@ class ReaderActivityLogContext {
     final normalizedStoragePath = storagePath.trim();
     if (normalizedStoragePath.isNotEmpty) {
       data['storagePath'] = normalizedStoragePath;
+    }
+
+    final normalizedDeviceId = deviceId.trim();
+    if (normalizedDeviceId.isNotEmpty) {
+      data['deviceId'] = normalizedDeviceId;
+    }
+
+    final normalizedDeviceLabel = deviceLabel.trim();
+    if (normalizedDeviceLabel.isNotEmpty) {
+      data['deviceLabel'] = normalizedDeviceLabel;
+    }
+
+    final normalizedDevicePlatform = devicePlatform.trim();
+    if (normalizedDevicePlatform.isNotEmpty) {
+      data['devicePlatform'] = normalizedDevicePlatform;
     }
 
     return data;

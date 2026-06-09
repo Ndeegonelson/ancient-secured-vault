@@ -10,6 +10,9 @@ void main() {
     openSource: 'premium_dashboard',
     documentKey: 'vault_pdfs/protected-guide.pdf',
     storagePath: 'vault_pdfs/protected-guide.pdf',
+    deviceId: 'device-123',
+    deviceLabel: 'Windows browser',
+    devicePlatform: 'Win32',
   );
 
   test('builds reader access log payloads for admin analytics', () {
@@ -34,6 +37,9 @@ void main() {
       'openSource': 'premium_dashboard',
       'documentKey': 'vault_pdfs/protected-guide.pdf',
       'storagePath': 'vault_pdfs/protected-guide.pdf',
+      'deviceId': 'device-123',
+      'deviceLabel': 'Windows browser',
+      'devicePlatform': 'Win32',
       'userAccessLevel': 'premium',
       'initialPage': 4,
       'hasInitialSearchQuery': true,
