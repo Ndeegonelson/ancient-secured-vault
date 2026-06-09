@@ -927,6 +927,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
             }
 
+            void clearAccessFilters() {
+              accessSearchController.clear();
+              setDialogState(() {
+                accessSearchQuery = '';
+                accessPlanFilter = null;
+                countryFilter = '';
+              });
+            }
+
+            Widget accessActiveFilterBar(List<String> labels) {
+              if (labels.isEmpty) return const SizedBox.shrink();
+
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ...labels.map(
+                    (label) => Chip(
+                      label: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      backgroundColor: const Color(0xFF151821),
+                      side: const BorderSide(color: Colors.white24),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: clearAccessFilters,
+                    icon: const Icon(Icons.clear_all, size: 18),
+                    label: const Text('Clear all'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              );
+            }
+
             return PointerInterceptor(
               child: AlertDialog(
                 backgroundColor: const Color(0xFF0F1117),
@@ -969,6 +1011,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       }
 
                       final visibleUsers = summary.filteredUsers(
+                        query: accessSearchQuery,
+                        plan: accessPlanFilter,
+                        country: countryFilter,
+                      );
+                      final activeFilterLabels = userAccessActiveFilterLabels(
+                        query: accessSearchQuery,
+                        plan: accessPlanFilter,
+                        country: countryFilter,
+                      );
+                      final hasActiveFilter = hasUserAccessFilters(
                         query: accessSearchQuery,
                         plan: accessPlanFilter,
                         country: countryFilter,
@@ -1070,6 +1122,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             if (summary.countryOptions.isNotEmpty) ...[
                               const SizedBox(height: 12),
                               DropdownButtonFormField<String>(
+                                key: ValueKey('access-country-$countryFilter'),
                                 initialValue: countryFilter,
                                 isExpanded: true,
                                 dropdownColor: const Color(0xFF1A1D25),
@@ -1114,6 +1167,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 },
                               ),
                             ],
+                            if (activeFilterLabels.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              accessActiveFilterBar(activeFilterLabels),
+                            ],
                             const SizedBox(height: 14),
                             const Text(
                               'Access Records',
@@ -1124,7 +1181,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              '${visibleUsers.length} of ${summary.totalCount} users shown',
+                              '${userAccessFilteredCountLabel(visibleCount: visibleUsers.length, totalCount: summary.totalCount, hasActiveFilter: hasActiveFilter)} users shown',
                               style: const TextStyle(
                                 color: Colors.white38,
                                 fontSize: 12,

@@ -134,6 +134,47 @@ void main() {
     expect(summary.filteredUsers(query: 'missing'), isEmpty);
   });
 
+  test('builds active user access filter labels', () {
+    expect(
+      userAccessActiveFilterLabels(
+        query: ' reader ',
+        plan: UserAccessPlan.premium,
+        country: ' Ghana ',
+      ),
+      ['Search: reader', 'Plan: Premium', 'Country: Ghana'],
+    );
+    expect(userAccessActiveFilterLabels(), isEmpty);
+    expect(hasUserAccessFilters(country: 'Ghana'), isTrue);
+    expect(hasUserAccessFilters(), isFalse);
+  });
+
+  test('labels filtered user access counts against total users', () {
+    expect(
+      userAccessFilteredCountLabel(
+        visibleCount: 2,
+        totalCount: 5,
+        hasActiveFilter: true,
+      ),
+      '2 of 5',
+    );
+    expect(
+      userAccessFilteredCountLabel(
+        visibleCount: 5,
+        totalCount: 5,
+        hasActiveFilter: true,
+      ),
+      '5',
+    );
+    expect(
+      userAccessFilteredCountLabel(
+        visibleCount: -1,
+        totalCount: -3,
+        hasActiveFilter: true,
+      ),
+      '0',
+    );
+  });
+
   test('builds Firestore updates for each admin access plan', () {
     expect(UserAccessPlanUpdate.fromPlan(UserAccessPlan.admin).toFirestore(), {
       'role': 'admin',

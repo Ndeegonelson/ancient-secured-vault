@@ -257,6 +257,54 @@ class UserAccessSummary {
   }
 }
 
+List<String> userAccessActiveFilterLabels({
+  String query = '',
+  UserAccessPlan? plan,
+  String country = '',
+}) {
+  final labels = <String>[];
+  final cleanQuery = query.trim();
+  final cleanCountry = country.trim();
+
+  if (cleanQuery.isNotEmpty) {
+    labels.add('Search: $cleanQuery');
+  }
+  if (plan != null) {
+    labels.add('Plan: ${userAccessPlanLabel(plan)}');
+  }
+  if (cleanCountry.isNotEmpty) {
+    labels.add('Country: $cleanCountry');
+  }
+
+  return List.unmodifiable(labels);
+}
+
+bool hasUserAccessFilters({
+  String query = '',
+  UserAccessPlan? plan,
+  String country = '',
+}) {
+  return userAccessActiveFilterLabels(
+    query: query,
+    plan: plan,
+    country: country,
+  ).isNotEmpty;
+}
+
+String userAccessFilteredCountLabel({
+  required int visibleCount,
+  required int totalCount,
+  bool hasActiveFilter = false,
+}) {
+  final safeVisibleCount = visibleCount < 0 ? 0 : visibleCount;
+  final safeTotalCount = totalCount < 0 ? 0 : totalCount;
+  if (!hasActiveFilter || safeVisibleCount == safeTotalCount) {
+    return safeVisibleCount.toString();
+  }
+
+  return '$safeVisibleCount of $safeTotalCount';
+}
+
 class UserAccessRepository implements UserAccessStore {
   UserAccessRepository({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
