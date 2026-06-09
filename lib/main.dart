@@ -1709,18 +1709,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       }
 
-      loadedFreeFiles.sort(
-        (a, b) => a['name'].toString().compareTo(b['name'].toString()),
-      );
-      loadedPremiumFiles.sort(
-        (a, b) => a['name'].toString().compareTo(b['name'].toString()),
-      );
-
       if (!mounted) return;
 
       setState(() {
-        freePdfFiles = loadedFreeFiles;
-        premiumPdfFiles = loadedPremiumFiles;
+        freePdfFiles = sortVaultDocumentsForDisplay(loadedFreeFiles);
+        premiumPdfFiles = sortVaultDocumentsForDisplay(loadedPremiumFiles);
         pdfLoadError = null;
       });
     } catch (e) {

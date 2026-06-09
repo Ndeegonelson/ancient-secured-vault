@@ -234,6 +234,32 @@ List<Map<String, dynamic>> filterVaultDocumentsByCategory(
   );
 }
 
+List<Map<String, dynamic>> sortVaultDocumentsForDisplay(
+  Iterable<Map<String, dynamic>> documents,
+) {
+  final sortedDocuments = documents
+      .map((document) => Map<String, dynamic>.from(document))
+      .toList();
+
+  sortedDocuments.sort((left, right) {
+    final categoryComparison =
+        normalizeVaultDocumentCategory(
+          left['category']?.toString(),
+        ).toLowerCase().compareTo(
+          normalizeVaultDocumentCategory(
+            right['category']?.toString(),
+          ).toLowerCase(),
+        );
+    if (categoryComparison != 0) return categoryComparison;
+
+    final leftName = left['name']?.toString().trim().toLowerCase() ?? '';
+    final rightName = right['name']?.toString().trim().toLowerCase() ?? '';
+    return leftName.compareTo(rightName);
+  });
+
+  return List.unmodifiable(sortedDocuments);
+}
+
 List<List<Map<String, dynamic>>> chunkVaultSearchIndexRows(
   Iterable<Map<String, dynamic>> rows, {
   int batchSize = vaultSearchIndexWriteBatchLimit,

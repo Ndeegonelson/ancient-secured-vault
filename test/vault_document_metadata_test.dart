@@ -51,6 +51,25 @@ void main() {
     expect(filterVaultDocumentsByCategory(documents, ''), documents);
   });
 
+  test('sorts dashboard documents by category then name', () {
+    final documents = [
+      {'name': 'z-policy.pdf', 'category': 'Research'},
+      {'name': 'Budget.pdf', 'category': 'Finance'},
+      {'name': 'audit.pdf', 'category': 'finance'},
+      {'name': 'welcome.pdf'},
+    ];
+
+    final sorted = sortVaultDocumentsForDisplay(documents);
+
+    expect(sorted.map((document) => document['name']), [
+      'audit.pdf',
+      'Budget.pdf',
+      'welcome.pdf',
+      'z-policy.pdf',
+    ]);
+    expect(identical(sorted.first, documents[1]), isFalse);
+  });
+
   test('summarizes vault inventory by access level and category', () {
     final summary = VaultDocumentInventorySummary.fromDocuments(
       freeDocuments: [
