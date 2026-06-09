@@ -55,6 +55,50 @@ void main() {
     expect(filterVaultDocumentsByCategory(documents, ''), documents);
   });
 
+  test('filters dashboard documents by category and search text', () {
+    final documents = [
+      {
+        'name': 'Loan Proposal.pdf',
+        'category': 'Finance',
+        'storagePath': 'free_pdfs/loan.pdf',
+        'sizeBytes': 1536,
+        'updatedAt': DateTime.utc(2026, 6, 9),
+      },
+      {
+        'name': 'Staff Meeting.pdf',
+        'category': 'Operations',
+        'storagePath': 'vault_pdfs/staff.pdf',
+      },
+    ];
+
+    expect(
+      filterVaultDocumentsForDashboard(
+        documents,
+        category: 'Finance',
+        query: 'loan',
+      ).map((document) => document['name']),
+      ['Loan Proposal.pdf'],
+    );
+    expect(
+      filterVaultDocumentsForDashboard(
+        documents,
+        query: '2026-06-09',
+      ).map((document) => document['name']),
+      ['Loan Proposal.pdf'],
+    );
+    expect(
+      filterVaultDocumentsForDashboard(
+        documents,
+        query: 'operations',
+      ).map((document) => document['name']),
+      ['Staff Meeting.pdf'],
+    );
+    expect(
+      filterVaultDocumentsForDashboard(documents, query: 'missing'),
+      isEmpty,
+    );
+  });
+
   test('sorts dashboard documents by category then name', () {
     final documents = [
       {'name': 'z-policy.pdf', 'category': 'Research'},

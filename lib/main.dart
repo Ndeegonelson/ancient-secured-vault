@@ -371,8 +371,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? pdfLoadError;
   String searchMode = 'all';
   String accessFilter = 'all';
+  String dashboardDocumentSearchQuery = '';
   String freeDocumentCategoryFilter = '';
   String premiumDocumentCategoryFilter = '';
+  final TextEditingController dashboardDocumentSearchController =
+      TextEditingController();
   List<Map<String, dynamic>> userNotes = [];
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
   final ReaderActivityRepository readerActivityRepository =
@@ -388,6 +391,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> loadDashboardData() async {
     await checkUserRole();
     await loadPDFs();
+  }
+
+  @override
+  void dispose() {
+    dashboardDocumentSearchController.dispose();
+    super.dispose();
   }
 
   bool requireVaultManagerAccess() {
@@ -2449,17 +2458,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget buildDashboardDocumentSearch() {
+    return TextField(
+      controller: dashboardDocumentSearchController,
+      textInputAction: TextInputAction.search,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        prefixIcon: const Icon(Icons.search, color: Colors.greenAccent),
+        labelText: 'Filter dashboard PDFs',
+        hintText: 'Title, category, date, or path',
+        labelStyle: const TextStyle(color: Colors.white70),
+        hintStyle: const TextStyle(color: Colors.white38),
+        filled: true,
+        fillColor: const Color(0xFF151821),
+        border: const OutlineInputBorder(),
+        enabledBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.white24),
+        ),
+        focusedBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.greenAccent),
+        ),
+        suffixIcon: dashboardDocumentSearchQuery.trim().isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Clear PDF filter',
+                icon: const Icon(Icons.clear, color: Colors.white70),
+                onPressed: () {
+                  dashboardDocumentSearchController.clear();
+                  setState(() {
+                    dashboardDocumentSearchQuery = '';
+                  });
+                },
+              ),
+      ),
+      onChanged: (value) {
+        setState(() {
+          dashboardDocumentSearchQuery = value;
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canAccessMainVault = userAccess.canAccessMainVault;
-    final filteredFreePdfFiles = filterVaultDocumentsByCategory(
+    final filteredFreePdfFiles = filterVaultDocumentsForDashboard(
       freePdfFiles,
-      freeDocumentCategoryFilter,
+      category: freeDocumentCategoryFilter,
+      query: dashboardDocumentSearchQuery,
     );
-    final filteredPremiumPdfFiles = filterVaultDocumentsByCategory(
+    final filteredPremiumPdfFiles = filterVaultDocumentsForDashboard(
       premiumPdfFiles,
-      premiumDocumentCategoryFilter,
+      category: premiumDocumentCategoryFilter,
+      query: dashboardDocumentSearchQuery,
     );
+    final hasDashboardDocumentSearch = dashboardDocumentSearchQuery
+        .trim()
+        .isNotEmpty;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
@@ -2613,6 +2668,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(height: 20),
                         ],
 
+                        buildDashboardDocumentSearch(),
+
+                        const SizedBox(height: 20),
+
                         const Text(
                           'FREE ACCESS ZONE',
                           style: TextStyle(
@@ -2643,11 +2702,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           )
                         else if (filteredFreePdfFiles.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(
-                              'No free PDFs match this category.',
-                              style: TextStyle(color: Colors.white70),
+                              hasDashboardDocumentSearch
+                                  ? 'No free PDFs match these filters.'
+                                  : 'No free PDFs match this category.',
+                              style: const TextStyle(color: Colors.white70),
                             ),
                           )
                         else
@@ -2741,11 +2802,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             )
                           else if (filteredPremiumPdfFiles.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                               child: Text(
-                                'No protected PDFs match this category.',
-                                style: TextStyle(color: Colors.white70),
+                                hasDashboardDocumentSearch
+                                    ? 'No protected PDFs match these filters.'
+                                    : 'No protected PDFs match this category.',
+                                style: const TextStyle(color: Colors.white70),
                               ),
                             )
                           else

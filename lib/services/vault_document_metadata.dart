@@ -242,6 +242,34 @@ List<Map<String, dynamic>> filterVaultDocumentsByCategory(
   );
 }
 
+List<Map<String, dynamic>> filterVaultDocumentsForDashboard(
+  Iterable<Map<String, dynamic>> documents, {
+  String category = '',
+  String query = '',
+}) {
+  final normalizedQuery = query.trim().toLowerCase();
+  final categoryMatches = filterVaultDocumentsByCategory(documents, category);
+  if (normalizedQuery.isEmpty) return categoryMatches;
+
+  return List.unmodifiable(
+    categoryMatches.where((document) {
+      final searchableText = [
+        document['name']?.toString() ?? '',
+        document['storagePath']?.toString() ?? '',
+        normalizeVaultDocumentCategory(document['category']?.toString()),
+        formatVaultDocumentSize(document['sizeBytes'] as num?),
+        formatVaultDocumentDate(
+          document['updatedAt'] is DateTime
+              ? document['updatedAt'] as DateTime
+              : null,
+        ),
+      ].join(' ').toLowerCase();
+
+      return searchableText.contains(normalizedQuery);
+    }),
+  );
+}
+
 List<Map<String, dynamic>> sortVaultDocumentsForDisplay(
   Iterable<Map<String, dynamic>> documents,
 ) {
