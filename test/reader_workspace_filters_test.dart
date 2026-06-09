@@ -107,4 +107,30 @@ void main() {
     );
     expect(ReaderWorkspaceFilters.hasActiveFilters(), isFalse);
   });
+
+  test('labels filtered workspace counts against total saved items', () {
+    expect(
+      ReaderWorkspaceFilters.filteredCountLabel(
+        visibleCount: 2,
+        totalCount: 5,
+        hasActiveFilter: true,
+      ),
+      '2 of 5',
+    );
+    expect(
+      ReaderWorkspaceFilters.filteredCountLabel(
+        visibleCount: 5,
+        totalCount: 5,
+        hasActiveFilter: true,
+      ),
+      '5',
+    );
+    expect(
+      ReaderWorkspaceFilters.filteredCountLabel(
+        visibleCount: -1,
+        totalCount: 5,
+      ),
+      '0',
+    );
+  });
 }

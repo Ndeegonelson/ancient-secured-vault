@@ -88,6 +88,20 @@ class ReaderWorkspaceFilters {
     ).isNotEmpty;
   }
 
+  static String filteredCountLabel({
+    required int visibleCount,
+    required int totalCount,
+    bool hasActiveFilter = false,
+  }) {
+    final safeVisibleCount = visibleCount < 0 ? 0 : visibleCount;
+    final safeTotalCount = totalCount < 0 ? 0 : totalCount;
+    if (!hasActiveFilter || safeVisibleCount == safeTotalCount) {
+      return safeVisibleCount.toString();
+    }
+
+    return '$safeVisibleCount of $safeTotalCount';
+  }
+
   static String _normalizeHighlightColor(String value) {
     final color = value.trim().toLowerCase();
     return switch (color) {

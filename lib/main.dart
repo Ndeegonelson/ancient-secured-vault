@@ -5125,6 +5125,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               required String Function(List<T> items) filledSubtitleBuilder,
               required int tabIndex,
               List<T> Function(List<T> items)? filterBuilder,
+              bool hasActiveFilter = false,
             }) {
               return StreamBuilder<List<T>>(
                 stream: stream,
@@ -5151,7 +5152,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   return workspaceSummaryCard(
                     icon: icon,
                     title: title,
-                    countLabel: count == null ? '...' : count.toString(),
+                    countLabel: count == null
+                        ? '...'
+                        : ReaderWorkspaceFilters.filteredCountLabel(
+                            visibleCount: count,
+                            totalCount: allItems?.length ?? count,
+                            hasActiveFilter: hasActiveFilter,
+                          ),
                     subtitle: subtitle,
                     tabIndex: tabIndex,
                   );
@@ -5287,6 +5294,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                           positions,
                                           workspaceSearchQuery,
                                         ),
+                                    hasActiveFilter: workspaceSearchQuery
+                                        .trim()
+                                        .isNotEmpty,
                                     tabIndex: 1,
                                   ),
                             ),
@@ -5308,6 +5318,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                       bookmarks,
                                       workspaceSearchQuery,
                                     ),
+                                hasActiveFilter: workspaceSearchQuery
+                                    .trim()
+                                    .isNotEmpty,
                                 tabIndex: 2,
                               ),
                             ),
@@ -5325,6 +5338,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 filledSubtitleBuilder: (highlights) =>
                                     'Latest: ${workspacePreview(highlights.first.selectedText)}',
                                 filterBuilder: filterWorkspaceHighlights,
+                                hasActiveFilter:
+                                    workspaceSearchQuery.trim().isNotEmpty ||
+                                    workspaceHighlightColorFilter != 'All',
                                 tabIndex: 3,
                               ),
                             ),
@@ -5341,6 +5357,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 filledSubtitleBuilder: (notes) =>
                                     'Latest: ${workspacePreview(notes.first.note)}',
                                 filterBuilder: filterWorkspaceNotes,
+                                hasActiveFilter:
+                                    workspaceSearchQuery.trim().isNotEmpty ||
+                                    workspaceNoteCategoryFilter != 'All',
                                 tabIndex: 4,
                               ),
                             ),
