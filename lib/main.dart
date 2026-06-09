@@ -25,6 +25,7 @@ import 'services/reader_workspace_filters.dart';
 import 'services/reader_activity_analytics.dart';
 import 'services/reader_activity_repository.dart';
 import 'services/user_access_repository.dart';
+import 'services/user_device_authorization_repository.dart';
 import 'services/user_access_state.dart';
 import 'services/vault_document_metadata.dart';
 import 'services/vault_search_snippet.dart';
@@ -381,6 +382,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final ReaderActivityRepository readerActivityRepository =
       ReaderActivityRepository();
   final UserAccessRepository userAccessRepository = UserAccessRepository();
+  final UserDeviceAuthorizationRepository deviceAuthorizationRepository =
+      UserDeviceAuthorizationRepository();
 
   @override
   void initState() {
@@ -1316,6 +1319,481 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     ).whenComplete(accessSearchController.dispose);
+  }
+
+  Future<void> showDeviceAuthorizationOverview() async {
+    if (!requireVaultManagerAccess()) return;
+
+    var summaryFuture = deviceAuthorizationRepository.loadSummary(limit: 100);
+    String? busyDeviceId;
+    var deviceSearchQuery = '';
+    UserDeviceStatus? deviceStatusFilter;
+    var countryFilter = '';
+    final deviceSearchController = TextEditingController();
+    final currentUserEmail = UserAccessRepository.emailDocumentId(
+      FirebaseAuth.instance.currentUser?.email,
+    );
+
+    List<UserDeviceStatus> availableStatusActions(UserDeviceRecord device) {
+      return UserDeviceStatus.values
+          .where((status) => status != device.status)
+          .toList(growable: false);
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> applyDeviceStatus(
+              UserDeviceRecord device,
+              UserDeviceStatus status,
+            ) async {
+              setDialogState(() {
+                busyDeviceId = device.id;
+              });
+
+              try {
+                await deviceAuthorizationRepository.saveDeviceStatus(
+                  deviceId: device.id,
+                  status: status,
+                  changedByEmail: currentUserEmail,
+                  previousStatus: device.status,
+                );
+
+                if (!mounted) return;
+
+                setDialogState(() {
+                  summaryFuture = deviceAuthorizationRepository.loadSummary(
+                    limit: 100,
+                  );
+                  busyDeviceId = null;
+                });
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '${userDeviceRecordTitle(device)} marked ${userDeviceStatusLabel(status)}.',
+                    ),
+                  ),
+                );
+              } catch (error) {
+                if (!mounted) return;
+
+                setDialogState(() {
+                  busyDeviceId = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Device authorization update failed: $error'),
+                  ),
+                );
+              }
+            }
+
+            Widget deviceActions(UserDeviceRecord device) {
+              final isBusy = busyDeviceId == device.id;
+
+              if (isBusy) {
+                return const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.greenAccent,
+                  ),
+                );
+              }
+
+              return Wrap(
+                spacing: 6,
+                children: availableStatusActions(device).map((status) {
+                  return TextButton(
+                    onPressed: busyDeviceId != null
+                        ? null
+                        : () => applyDeviceStatus(device, status),
+                    style: TextButton.styleFrom(
+                      foregroundColor: status == UserDeviceStatus.blocked
+                          ? Colors.orangeAccent
+                          : Colors.greenAccent,
+                      disabledForegroundColor: Colors.white24,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(userDeviceStatusLabel(status)),
+                  );
+                }).toList(),
+              );
+            }
+
+            ChoiceChip statusFilterChip({
+              required String label,
+              required UserDeviceStatus? status,
+            }) {
+              final selected = deviceStatusFilter == status;
+              return ChoiceChip(
+                label: Text(label),
+                selected: selected,
+                onSelected: (_) {
+                  setDialogState(() {
+                    deviceStatusFilter = status;
+                  });
+                },
+                selectedColor: Colors.greenAccent,
+                backgroundColor: const Color(0xFF151821),
+                labelStyle: TextStyle(
+                  color: selected ? Colors.black : Colors.white70,
+                ),
+                side: const BorderSide(color: Colors.white24),
+              );
+            }
+
+            void clearDeviceFilters() {
+              deviceSearchController.clear();
+              setDialogState(() {
+                deviceSearchQuery = '';
+                deviceStatusFilter = null;
+                countryFilter = '';
+              });
+            }
+
+            Widget deviceActiveFilterBar(List<String> labels) {
+              if (labels.isEmpty) return const SizedBox.shrink();
+
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ...labels.map(
+                    (label) => Chip(
+                      label: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      backgroundColor: const Color(0xFF151821),
+                      side: const BorderSide(color: Colors.white24),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: clearDeviceFilters,
+                    icon: const Icon(Icons.clear_all, size: 18),
+                    label: const Text('Clear all'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Device Authorization',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 620,
+                  child: FutureBuilder<UserDeviceSummary>(
+                    future: summaryFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Text(
+                          snapshot.error.toString(),
+                          style: const TextStyle(color: Colors.redAccent),
+                        );
+                      }
+
+                      if (!snapshot.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                        );
+                      }
+
+                      final summary = snapshot.data!;
+                      if (!summary.hasDevices) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'No device authorization records were found yet.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        );
+                      }
+
+                      final visibleDevices = summary.filteredDevices(
+                        query: deviceSearchQuery,
+                        status: deviceStatusFilter,
+                        country: countryFilter,
+                      );
+                      final activeFilterLabels = userDeviceActiveFilterLabels(
+                        query: deviceSearchQuery,
+                        status: deviceStatusFilter,
+                        country: countryFilter,
+                      );
+                      final hasActiveFilter = hasUserDeviceFilters(
+                        query: deviceSearchQuery,
+                        status: deviceStatusFilter,
+                        country: countryFilter,
+                      );
+                      final displayedDevices = visibleDevices
+                          .take(userDeviceDefaultDisplayLimit)
+                          .toList(growable: false);
+                      final listLimitMessage = userDeviceListLimitMessage(
+                        visibleCount: visibleDevices.length,
+                      );
+
+                      return SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                _ReaderAnalyticsMetric(
+                                  label: 'Devices',
+                                  value: summary.totalCount.toString(),
+                                ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Pending',
+                                  value: summary.pendingCount.toString(),
+                                  color: Colors.orangeAccent,
+                                ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Trusted',
+                                  value: summary.trustedCount.toString(),
+                                ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Blocked',
+                                  value: summary.blockedCount.toString(),
+                                  color: Colors.redAccent,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            TextField(
+                              controller: deviceSearchController,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                labelText: 'Search devices',
+                                hintText: 'Email, device, platform, country',
+                                labelStyle: const TextStyle(
+                                  color: Colors.white70,
+                                ),
+                                hintStyle: const TextStyle(
+                                  color: Colors.white38,
+                                ),
+                                prefixIcon: const Icon(
+                                  Icons.search,
+                                  color: Colors.greenAccent,
+                                ),
+                                suffixIcon: deviceSearchQuery.trim().isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: 'Clear search',
+                                        icon: const Icon(Icons.clear),
+                                        color: Colors.white70,
+                                        onPressed: () {
+                                          deviceSearchController.clear();
+                                          setDialogState(() {
+                                            deviceSearchQuery = '';
+                                          });
+                                        },
+                                      ),
+                                enabledBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.white24),
+                                ),
+                                focusedBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: Colors.greenAccent,
+                                  ),
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  deviceSearchQuery = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                statusFilterChip(label: 'All', status: null),
+                                statusFilterChip(
+                                  label: 'Pending',
+                                  status: UserDeviceStatus.pending,
+                                ),
+                                statusFilterChip(
+                                  label: 'Trusted',
+                                  status: UserDeviceStatus.trusted,
+                                ),
+                                statusFilterChip(
+                                  label: 'Blocked',
+                                  status: UserDeviceStatus.blocked,
+                                ),
+                              ],
+                            ),
+                            if (summary.countryOptions.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                key: ValueKey('device-country-$countryFilter'),
+                                initialValue: countryFilter,
+                                isExpanded: true,
+                                dropdownColor: const Color(0xFF1A1D25),
+                                iconEnabledColor: Colors.greenAccent,
+                                style: const TextStyle(color: Colors.white70),
+                                decoration: const InputDecoration(
+                                  labelText: 'Filter by country',
+                                  labelStyle: TextStyle(color: Colors.white70),
+                                  floatingLabelStyle: TextStyle(
+                                    color: Colors.greenAccent,
+                                  ),
+                                  filled: true,
+                                  fillColor: Color(0xFF151821),
+                                  border: OutlineInputBorder(),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderSide: BorderSide(
+                                      color: Colors.white24,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderSide: BorderSide(
+                                      color: Colors.greenAccent,
+                                    ),
+                                  ),
+                                ),
+                                items: [
+                                  const DropdownMenuItem<String>(
+                                    value: '',
+                                    child: Text('All countries'),
+                                  ),
+                                  ...summary.countryOptions.map(
+                                    (country) => DropdownMenuItem<String>(
+                                      value: country,
+                                      child: Text(country),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (country) {
+                                  setDialogState(() {
+                                    countryFilter = country ?? '';
+                                  });
+                                },
+                              ),
+                            ],
+                            if (activeFilterLabels.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              deviceActiveFilterBar(activeFilterLabels),
+                            ],
+                            const SizedBox(height: 14),
+                            const Text(
+                              'Device Records',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${userDeviceFilteredCountLabel(visibleCount: visibleDevices.length, totalCount: summary.totalCount, hasActiveFilter: hasActiveFilter)} devices shown',
+                              style: const TextStyle(
+                                color: Colors.white38,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            if (visibleDevices.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: Text(
+                                  'No devices match this search.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              ),
+                            ...displayedDevices.map((device) {
+                              final timestamp =
+                                  device.lastSeenAt ??
+                                  device.updatedAt ??
+                                  device.createdAt;
+
+                              return ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(
+                                  switch (device.status) {
+                                    UserDeviceStatus.pending =>
+                                      Icons.device_unknown_outlined,
+                                    UserDeviceStatus.trusted =>
+                                      Icons.verified_user_outlined,
+                                    UserDeviceStatus.blocked =>
+                                      Icons.block_outlined,
+                                  },
+                                  color: device.isBlocked
+                                      ? Colors.redAccent
+                                      : device.isTrusted
+                                      ? Colors.greenAccent
+                                      : Colors.orangeAccent,
+                                ),
+                                title: Text(
+                                  userDeviceRecordTitle(device),
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                                subtitle: Text(
+                                  userDeviceRecordDetailLabel(
+                                    device,
+                                    timestampLabel: formatDashboardTimestamp(
+                                      timestamp,
+                                    ),
+                                  ),
+                                  style: const TextStyle(color: Colors.white38),
+                                ),
+                                trailing: deviceActions(device),
+                              );
+                            }),
+                            if (listLimitMessage != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                listLimitMessage,
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(deviceSearchController.dispose);
   }
 
   Future<void> saveUserNote({
@@ -2763,6 +3241,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 color: Colors.greenAccent,
               ),
               onPressed: showUserAccessOverview,
+            ),
+
+          if (userAccess.isAdmin)
+            IconButton(
+              tooltip: 'Device Authorization',
+              icon: const Icon(
+                Icons.important_devices_outlined,
+                color: Colors.greenAccent,
+              ),
+              onPressed: showDeviceAuthorizationOverview,
             ),
 
           IconButton(
