@@ -79,4 +79,23 @@ void main() {
     expect(summary.countForCategory('finance')?.totalCount, 3);
     expect(summary.countForCategory('Unknown'), isNull);
   });
+
+  test('summarizes vault indexing results for admin feedback', () {
+    final summary = const VaultDocumentIndexingSummary()
+        .addIndexed()
+        .addSkipped()
+        .merge(const VaultDocumentIndexingSummary(indexedCount: 2));
+
+    expect(summary.indexedCount, 3);
+    expect(summary.skippedCount, 1);
+    expect(summary.inspectedCount, 4);
+    expect(
+      summary.displayMessage,
+      'Vault indexing complete: 3 indexed, 1 skipped.',
+    );
+    expect(
+      const VaultDocumentIndexingSummary().displayMessage,
+      'No vault PDFs were found to index.',
+    );
+  });
 }

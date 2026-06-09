@@ -128,6 +128,46 @@ class VaultDocumentInventorySummary {
   }
 }
 
+class VaultDocumentIndexingSummary {
+  const VaultDocumentIndexingSummary({
+    this.indexedCount = 0,
+    this.skippedCount = 0,
+  });
+
+  final int indexedCount;
+  final int skippedCount;
+
+  int get inspectedCount => indexedCount + skippedCount;
+
+  VaultDocumentIndexingSummary addIndexed() {
+    return VaultDocumentIndexingSummary(
+      indexedCount: indexedCount + 1,
+      skippedCount: skippedCount,
+    );
+  }
+
+  VaultDocumentIndexingSummary addSkipped() {
+    return VaultDocumentIndexingSummary(
+      indexedCount: indexedCount,
+      skippedCount: skippedCount + 1,
+    );
+  }
+
+  VaultDocumentIndexingSummary merge(VaultDocumentIndexingSummary other) {
+    return VaultDocumentIndexingSummary(
+      indexedCount: indexedCount + other.indexedCount,
+      skippedCount: skippedCount + other.skippedCount,
+    );
+  }
+
+  String get displayMessage {
+    if (inspectedCount == 0) return 'No vault PDFs were found to index.';
+
+    return 'Vault indexing complete: $indexedCount indexed, '
+        '$skippedCount skipped.';
+  }
+}
+
 String normalizeVaultAccessLevel(String? value, {String fallback = 'premium'}) {
   final normalized = value?.trim().toLowerCase() ?? '';
   if (normalized == 'free' || normalized == 'premium') return normalized;

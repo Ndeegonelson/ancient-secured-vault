@@ -1554,8 +1554,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!requireVaultManagerAccess()) return;
 
     try {
-      Future<void> indexFolder(String folderName, String level) async {
+      Future<VaultDocumentIndexingSummary> indexFolder(
+        String folderName,
+        String level,
+      ) async {
         final result = await FirebaseStorage.instance.ref(folderName).listAll();
+        var summary = const VaultDocumentIndexingSummary();
 
         for (final item in result.items) {
           final existing = await FirebaseFirestore.instance
@@ -1565,6 +1569,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               .get();
 
           if (existing.docs.isNotEmpty) {
+            summary = summary.addSkipped();
             continue;
           }
 
@@ -1592,17 +1597,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
             storagePath: item.fullPath,
             category: documentMetadata.category,
           );
+          summary = summary.addIndexed();
         }
+
+        return summary;
       }
 
-      await indexFolder('free_pdfs', 'free');
-      await indexFolder('vault_pdfs', 'premium');
+      final summary = (await indexFolder(
+        'free_pdfs',
+        'free',
+      )).merge(await indexFolder('vault_pdfs', 'premium'));
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All vault PDFs indexed successfully')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(summary.displayMessage)));
     } catch (e) {
       if (!mounted) return;
 
