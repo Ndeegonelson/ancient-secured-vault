@@ -17,6 +17,32 @@ void main() {
     expect(vaultPrimarySearchTerm(' ? '), '');
   });
 
+  test('builds a bounded list of searched vault terms', () {
+    expect(vaultSearchQueryTerms('new loan proposal for school'), [
+      'proposal',
+      'school',
+      'loan',
+      'for',
+    ]);
+    expect(vaultSearchQueryTerms('AI'), ['ai']);
+    expect(vaultSearchQueryTerms(' ? '), isEmpty);
+  });
+
+  test('describes searched terms and visible results', () {
+    expect(
+      vaultSearchTermsLabel('school improvement loan'),
+      'Matching: improvement, school, loan',
+    );
+    expect(
+      vaultSearchResultsLabel(visibleCount: 3, totalCount: 3),
+      '3 matches',
+    );
+    expect(
+      vaultSearchResultsLabel(visibleCount: 1, totalCount: 4),
+      '1 of 4 matches',
+    );
+  });
+
   test('matches document titles through normalized search terms', () {
     expect(
       vaultTextMatchesSearchTerm('Loan Proposal 2026.pdf', 'proposal'),

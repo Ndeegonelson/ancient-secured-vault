@@ -35,6 +35,38 @@ String vaultPrimarySearchTerm(String query) {
   return '';
 }
 
+List<String> vaultSearchQueryTerms(String query, {int limit = 4}) {
+  assert(limit > 0);
+
+  final terms = vaultSearchTerms(query).take(limit).toList();
+  if (terms.isNotEmpty) return List.unmodifiable(terms);
+
+  final fallbackTerm = vaultPrimarySearchTerm(query);
+  return fallbackTerm.isEmpty ? const [] : [fallbackTerm];
+}
+
+String vaultSearchTermsLabel(String query, {int limit = 4}) {
+  final terms = vaultSearchQueryTerms(query, limit: limit);
+  if (terms.isEmpty) return 'No searchable terms';
+
+  return 'Matching: ${terms.join(', ')}';
+}
+
+String vaultSearchResultsLabel({
+  required int visibleCount,
+  required int totalCount,
+}) {
+  final safeVisibleCount = visibleCount < 0 ? 0 : visibleCount;
+  final safeTotalCount = totalCount < 0 ? 0 : totalCount;
+  final matchLabel = safeVisibleCount == 1 ? 'match' : 'matches';
+
+  if (safeVisibleCount == safeTotalCount) {
+    return '$safeVisibleCount $matchLabel';
+  }
+
+  return '$safeVisibleCount of $safeTotalCount matches';
+}
+
 bool vaultTextMatchesSearchTerm(String text, String searchTerm) {
   final normalizedSearchTerm = vaultPrimarySearchTerm(searchTerm);
   if (normalizedSearchTerm.isEmpty) return false;

@@ -1910,10 +1910,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> showGlobalSearchResults(String keyword) async {
     final searchTerm = vaultPrimarySearchTerm(keyword);
-    final searchTerms = vaultSearchTerms(keyword).take(4).toList();
-    if (searchTerms.isEmpty && searchTerm.isNotEmpty) {
-      searchTerms.add(searchTerm);
-    }
+    final searchTerms = vaultSearchQueryTerms(keyword);
     String accessFilter = 'all';
     String categoryFilter = '';
 
@@ -1996,6 +1993,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ]),
 
                         builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return const Center(
+                              child: Text(
+                                'Vault search could not load results right now.',
+                                style: TextStyle(color: Colors.redAccent),
+                                textAlign: TextAlign.center,
+                              ),
+                            );
+                          }
+
                           if (!snapshot.hasData) {
                             return const Center(
                               child: CircularProgressIndicator(),
@@ -2066,6 +2073,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   'premium';
                             }).toList();
                           }
+
+                          final accessibleMatchCount = filteredDocs.length;
 
                           filteredDocs.sort((left, right) {
                             final leftData =
@@ -2147,6 +2156,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                           return Column(
                             children: [
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  '${vaultSearchTermsLabel(keyword)} | '
+                                  '${vaultSearchResultsLabel(visibleCount: filteredDocs.length, totalCount: accessibleMatchCount)}',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
                               if (categoryOptions.isNotEmpty) ...[
                                 DropdownButtonFormField<String>(
                                   key: ValueKey(
