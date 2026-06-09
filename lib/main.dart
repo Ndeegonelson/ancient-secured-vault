@@ -1523,6 +1523,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           .toSet()
           .take(300)
           .toList();
+      final titleKeywords = vaultSearchTerms(pdfTitle);
 
       final searchIndexData = <String, dynamic>{
         'pdfTitle': pdfTitle,
@@ -1531,6 +1532,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'text': text.length > 1200 ? text.substring(0, 1200) : text,
         'textLower': lowerText,
         'keywords': keywords,
+        'titleKeywords': titleKeywords,
         'accessLevel': normalizedAccessLevel,
         'category': normalizedCategory,
         'createdAt': FieldValue.serverTimestamp(),
@@ -1920,12 +1922,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 15),
 
                     Expanded(
-                      child: FutureBuilder<QuerySnapshot>(
-                        future: FirebaseFirestore.instance
-                            .collection('pdf_search_index')
-                            .where('keywords', arrayContains: searchTerm)
-                            .limit(30)
-                            .get(),
+                      child: FutureBuilder<List<QuerySnapshot>>(
+                        future: Future.wait([
+                          FirebaseFirestore.instance
+                              .collection('pdf_search_index')
+                              .where('keywords', arrayContains: searchTerm)
+                              .limit(30)
+                              .get(),
+                          FirebaseFirestore.instance
+                              .collection('pdf_search_index')
+                              .where('titleKeywords', arrayContains: searchTerm)
+                              .limit(30)
+                              .get(),
+                        ]),
 
                         builder: (context, snapshot) {
                           if (!snapshot.hasData) {
@@ -1934,11 +1943,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             );
                           }
 
-                          final docs = snapshot.data!.docs;
+                          final docsById =
+                              <String, QueryDocumentSnapshot<Object?>>{};
+                          for (final result in snapshot.data!) {
+                            for (final doc in result.docs) {
+                              docsById[doc.id] = doc;
+                            }
+                          }
+
+                          final docs = docsById.values.toList();
 
                           List<QueryDocumentSnapshot> filteredDocs = docs.where(
                             (doc) {
                               final data = doc.data() as Map<String, dynamic>;
+                              final titleKeywords = data['titleKeywords'];
+                              final hasIndexedTitleMatch =
+                                  titleKeywords is Iterable &&
+                                  titleKeywords
+                                      .map((value) => value.toString())
+                                      .contains(searchTerm);
+                              final hasLegacyTitleMatch =
+                                  titleKeywords == null &&
+                                  vaultTextMatchesSearchTerm(
+                                    data['pdfTitle']?.toString() ?? '',
+                                    searchTerm,
+                                  );
+                              final hasPageMatch =
+                                  data['keywords'] is Iterable &&
+                                  (data['keywords'] as Iterable)
+                                      .map((value) => value.toString())
+                                      .contains(searchTerm);
+
+                              if (!hasPageMatch &&
+                                  !hasIndexedTitleMatch &&
+                                  !hasLegacyTitleMatch) {
+                                return false;
+                              }
+
                               final documentAccessLevel =
                                   data['accessLevel']?.toString() ?? 'free';
 

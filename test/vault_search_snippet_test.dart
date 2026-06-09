@@ -17,6 +17,14 @@ void main() {
     expect(vaultPrimarySearchTerm(' ? '), '');
   });
 
+  test('matches document titles through normalized search terms', () {
+    expect(
+      vaultTextMatchesSearchTerm('Loan Proposal 2026.pdf', 'proposal'),
+      isTrue,
+    );
+    expect(vaultTextMatchesSearchTerm('Staff Meeting.pdf', 'loan'), isFalse);
+  });
+
   test('builds a focused snippet around the matching keyword', () {
     final snippet = buildVaultSearchSnippet(
       'Ancient Secure Docs protects files and helps readers find scholarship records quickly.',

@@ -35,6 +35,13 @@ String vaultPrimarySearchTerm(String query) {
   return '';
 }
 
+bool vaultTextMatchesSearchTerm(String text, String searchTerm) {
+  final normalizedSearchTerm = vaultPrimarySearchTerm(searchTerm);
+  if (normalizedSearchTerm.isEmpty) return false;
+
+  return vaultSearchTerms(text).contains(normalizedSearchTerm);
+}
+
 String buildVaultSearchSnippet(
   String text,
   String keyword, {
