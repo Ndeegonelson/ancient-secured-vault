@@ -4,6 +4,8 @@ import 'user_access_state.dart';
 
 enum UserAccessPlan { free, premium, admin }
 
+const int userAccessDefaultDisplayLimit = 20;
+
 abstract interface class UserAccessStore {
   Future<UserAccessState> loadForEmail(String? email);
 
@@ -303,6 +305,44 @@ String userAccessFilteredCountLabel({
   }
 
   return '$safeVisibleCount of $safeTotalCount';
+}
+
+List<String> userAccessRecordDetailParts(
+  UserAccessRecord user, {
+  bool isCurrentUser = false,
+}) {
+  return List.unmodifiable([
+    if (user.displayName.trim().isNotEmpty) user.displayName.trim(),
+    if (user.country.trim().isNotEmpty) user.country.trim(),
+    user.access.planLabel,
+    user.access.canAccessMainVault ? 'Vault enabled' : 'Free vault only',
+    if (isCurrentUser) 'Current admin',
+  ]);
+}
+
+String userAccessRecordDetailLabel(
+  UserAccessRecord user, {
+  bool isCurrentUser = false,
+  String timestampLabel = '',
+}) {
+  final parts = [
+    ...userAccessRecordDetailParts(user, isCurrentUser: isCurrentUser),
+    if (timestampLabel.trim().isNotEmpty) timestampLabel.trim(),
+  ];
+
+  return parts.join(' | ');
+}
+
+String? userAccessListLimitMessage({
+  required int visibleCount,
+  int displayLimit = userAccessDefaultDisplayLimit,
+}) {
+  final safeVisibleCount = visibleCount < 0 ? 0 : visibleCount;
+  final safeDisplayLimit = displayLimit < 1 ? 1 : displayLimit;
+  if (safeVisibleCount <= safeDisplayLimit) return null;
+
+  final userLabel = safeDisplayLimit == 1 ? 'user' : 'users';
+  return 'Showing first $safeDisplayLimit $userLabel. Narrow filters to review the rest.';
 }
 
 class UserAccessRepository implements UserAccessStore {

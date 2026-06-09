@@ -1025,6 +1025,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         plan: accessPlanFilter,
                         country: countryFilter,
                       );
+                      final displayedUsers = visibleUsers
+                          .take(userAccessDefaultDisplayLimit)
+                          .toList(growable: false);
+                      final listLimitMessage = userAccessListLimitMessage(
+                        visibleCount: visibleUsers.length,
+                      );
 
                       return SingleChildScrollView(
                         child: Column(
@@ -1196,7 +1202,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   style: TextStyle(color: Colors.white70),
                                 ),
                               ),
-                            ...visibleUsers.take(20).map((user) {
+                            ...displayedUsers.map((user) {
                               final timestamp =
                                   user.updatedAt ?? user.createdAt;
 
@@ -1220,20 +1226,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   style: const TextStyle(color: Colors.white70),
                                 ),
                                 subtitle: Text(
-                                  [
-                                    if (user.displayName.isNotEmpty)
-                                      user.displayName,
-                                    if (user.country.isNotEmpty) user.country,
-                                    user.access.planLabel,
-                                    if (user.email == currentUserEmail)
-                                      'Current admin',
-                                    formatDashboardTimestamp(timestamp),
-                                  ].join(' | '),
+                                  userAccessRecordDetailLabel(
+                                    user,
+                                    isCurrentUser:
+                                        user.email == currentUserEmail,
+                                    timestampLabel: formatDashboardTimestamp(
+                                      timestamp,
+                                    ),
+                                  ),
                                   style: const TextStyle(color: Colors.white38),
                                 ),
                                 trailing: accessActions(user),
                               );
                             }),
+                            if (listLimitMessage != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                listLimitMessage,
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                             if (summary.hasRecentChanges) ...[
                               const SizedBox(height: 18),
                               const Text(

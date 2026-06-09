@@ -175,6 +175,44 @@ void main() {
     );
   });
 
+  test('builds compact access record detail labels', () {
+    final premium = UserAccessRecord.fromMap({
+      'displayName': 'Ama Reader',
+      'country': 'Ghana',
+      'role': 'reader',
+      'subscriptionStatus': 'active',
+    }, email: 'ama@example.com');
+    final free = UserAccessRecord.fromMap({
+      'role': 'reader',
+      'subscriptionStatus': 'inactive',
+    }, email: 'free@example.com');
+
+    expect(
+      userAccessRecordDetailLabel(
+        premium,
+        isCurrentUser: true,
+        timestampLabel: 'Updated today',
+      ),
+      'Ama Reader | Ghana | Premium | Vault enabled | Current admin | Updated today',
+    );
+    expect(userAccessRecordDetailParts(free), ['Free', 'Free vault only']);
+  });
+
+  test('describes when the access list is capped for display', () {
+    expect(
+      userAccessListLimitMessage(visibleCount: 25, displayLimit: 20),
+      'Showing first 20 users. Narrow filters to review the rest.',
+    );
+    expect(
+      userAccessListLimitMessage(visibleCount: 20, displayLimit: 20),
+      isNull,
+    );
+    expect(
+      userAccessListLimitMessage(visibleCount: 2, displayLimit: 0),
+      'Showing first 1 user. Narrow filters to review the rest.',
+    );
+  });
+
   test('builds Firestore updates for each admin access plan', () {
     expect(UserAccessPlanUpdate.fromPlan(UserAccessPlan.admin).toFirestore(), {
       'role': 'admin',
