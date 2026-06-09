@@ -4510,13 +4510,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         final availableWidth = math.max(320, containerWidth - 48);
         final displayScale = (availableWidth / baseWidth).clamp(0.6, 1.8);
         final targetPixelRatio = pageCount <= 12
-            ? 2.0
+            ? 2.35
             : pageCount <= 60
-            ? 1.5
+            ? 1.65
             : 1.25;
         final pixelRatio = math.min(
           math.max(html.window.devicePixelRatio, targetPixelRatio),
-          2.25,
+          2.6,
         );
         final renderScale = displayScale * pixelRatio;
         final displayViewport = js_util.callMethod<Object>(
@@ -4570,6 +4570,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               ..style.width = '${displayWidth}px'
               ..style.height = '${displayHeight}px'
               ..style.display = 'block'
+              ..style.filter = 'contrast(1.12) brightness(0.98)'
               ..style.imageRendering = 'auto'
               ..style.userSelect = 'none';
 
