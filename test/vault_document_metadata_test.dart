@@ -17,7 +17,15 @@ void main() {
 
   test('reads storage metadata with fallbacks for older documents', () {
     final metadata = VaultDocumentMetadata.fromStorageMetadata(
-      {'accessLevel': 'free', 'category': 'Legal'},
+      {
+        'accessLevel': 'free',
+        'category': 'Legal',
+        'readerMode': 'standard-pdf',
+        'deliveryMode': 'direct-storage',
+        'protectionMode': 'standard',
+        'searchMode': 'full-text-index',
+        'schemaVersion': '2',
+      },
       fallbackAccessLevel: 'premium',
       sizeBytes: 1536,
       updatedAt: DateTime.utc(2026, 6, 9),
@@ -25,6 +33,12 @@ void main() {
 
     expect(metadata.accessLevel, 'free');
     expect(metadata.category, 'Legal');
+    expect(metadata.readerMode, vaultReaderModeStandardPdf);
+    expect(metadata.deliveryMode, vaultDeliveryModeDirectStorage);
+    expect(metadata.protectionMode, vaultProtectionModeStandard);
+    expect(metadata.searchMode, vaultSearchModeFullTextIndex);
+    expect(metadata.schemaVersion, '2');
+    expect(metadata.usesProtectedImageReader, isFalse);
     expect(metadata.sizeBytes, 1536);
     expect(metadata.updatedAt, DateTime.utc(2026, 6, 9));
 
@@ -35,6 +49,54 @@ void main() {
 
     expect(legacyMetadata.accessLevel, 'premium');
     expect(legacyMetadata.category, 'General');
+    expect(legacyMetadata.readerMode, vaultReaderModeProtectedImage);
+    expect(legacyMetadata.deliveryMode, vaultDeliveryModeProtectedStorage);
+    expect(legacyMetadata.protectionMode, vaultProtectionModeCopyDeterred);
+    expect(legacyMetadata.searchMode, vaultSearchModeFullTextIndex);
+    expect(legacyMetadata.schemaVersion, '1');
+    expect(legacyMetadata.usesProtectedImageReader, isTrue);
+  });
+
+  test('builds future upload profiles for the correct reader path', () {
+    final freeProfile = const VaultUploadOptions(
+      accessLevel: 'free',
+      category: ' education ',
+    ).profile;
+    final premiumProfile = const VaultUploadOptions(
+      accessLevel: 'premium',
+      category: 'Finance',
+    ).profile;
+
+    expect(freeProfile.storageFolder, 'free_pdfs');
+    expect(freeProfile.readerMode, vaultReaderModeStandardPdf);
+    expect(freeProfile.deliveryMode, vaultDeliveryModeDirectStorage);
+    expect(freeProfile.protectionMode, vaultProtectionModeStandard);
+    expect(freeProfile.usesProtectedImageReader, isFalse);
+    expect(freeProfile.category, 'Education');
+
+    expect(premiumProfile.storageFolder, 'vault_pdfs');
+    expect(premiumProfile.readerMode, vaultReaderModeProtectedImage);
+    expect(premiumProfile.deliveryMode, vaultDeliveryModeProtectedStorage);
+    expect(premiumProfile.protectionMode, vaultProtectionModeCopyDeterred);
+    expect(premiumProfile.usesProtectedImageReader, isTrue);
+
+    expect(
+      premiumProfile.toStorageMetadata(
+        uploadedBy: ' admin@example.com ',
+        originalFileName: ' Guide.pdf ',
+      ),
+      {
+        'schemaVersion': vaultDocumentMetadataSchemaVersion,
+        'accessLevel': 'premium',
+        'category': 'Finance',
+        'readerMode': vaultReaderModeProtectedImage,
+        'deliveryMode': vaultDeliveryModeProtectedStorage,
+        'protectionMode': vaultProtectionModeCopyDeterred,
+        'searchMode': vaultSearchModeFullTextIndex,
+        'uploadedBy': 'admin@example.com',
+        'originalFileName': 'Guide.pdf',
+      },
+    );
   });
 
   test('builds and applies category filters for dashboard documents', () {

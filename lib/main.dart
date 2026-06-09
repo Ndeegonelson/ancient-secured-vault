@@ -2234,7 +2234,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return;
         }
 
-        final storagePath = '${uploadOptions.storageFolder}/$fileName';
+        final uploadProfile = uploadOptions.profile;
+        final storagePath = '${uploadProfile.storageFolder}/$fileName';
         final ref = FirebaseStorage.instance.ref(storagePath);
 
         final alreadyExists = await storageObjectExists(ref);
@@ -2256,21 +2257,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
           fileBytes,
           SettableMetadata(
             contentType: 'application/pdf',
-            customMetadata: {
-              'accessLevel': uploadOptions.accessLevel,
-              'category': uploadOptions.category,
-              'uploadedBy': FirebaseAuth.instance.currentUser?.email ?? '',
-              'originalFileName': fileName,
-            },
+            customMetadata: uploadProfile.toStorageMetadata(
+              uploadedBy: FirebaseAuth.instance.currentUser?.email ?? '',
+              originalFileName: fileName,
+            ),
           ),
         );
 
         await indexPdfForSearch(
           pdfBytes: fileBytes,
           pdfTitle: fileName,
-          accessLevel: uploadOptions.accessLevel,
+          accessLevel: uploadProfile.accessLevel,
           storagePath: storagePath,
-          category: uploadOptions.category,
+          category: uploadProfile.category,
         );
 
         await loadPDFs();
@@ -2307,6 +2306,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final normalizedAccessLevel = accessLevel.trim().toLowerCase();
     final normalizedCategory = normalizeVaultDocumentCategory(category);
+    final documentProfile = VaultDocumentProfile.forAccessLevel(
+      accessLevel: normalizedAccessLevel,
+      category: normalizedCategory,
+    );
     final titleKeywords = vaultSearchTerms(pdfTitle);
     final document = PdfDocument(inputBytes: pdfBytes);
 
@@ -2328,12 +2331,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           'textLower': lowerText,
           'keywords': vaultSearchTerms(text).take(300).toList(),
           'titleKeywords': titleKeywords,
-          'accessLevel': normalizedAccessLevel,
-          'category': normalizedCategory,
+          ...documentProfile.toDocumentMap(),
           'createdAt': FieldValue.serverTimestamp(),
         };
 
-        if (normalizedAccessLevel != 'premium' && pdfUrl != null) {
+        if (documentProfile.accessLevel == 'free' && pdfUrl != null) {
           searchIndexData['pdfUrl'] = pdfUrl;
         }
 
@@ -2470,12 +2472,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return {
       'name': item.name,
       'storagePath': item.fullPath,
-      'accessLevel': documentMetadata.accessLevel,
-      'category': documentMetadata.category,
-      if (documentMetadata.sizeBytes != null)
-        'sizeBytes': documentMetadata.sizeBytes,
-      if (documentMetadata.updatedAt != null)
-        'updatedAt': documentMetadata.updatedAt,
+      ...documentMetadata.toDocumentMap(),
     };
   }
 

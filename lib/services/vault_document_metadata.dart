@@ -8,6 +8,14 @@ const vaultDocumentCategories = [
 ];
 
 const vaultSearchIndexWriteBatchLimit = 450;
+const vaultDocumentMetadataSchemaVersion = '2';
+const vaultReaderModeStandardPdf = 'standard-pdf';
+const vaultReaderModeProtectedImage = 'protected-image';
+const vaultDeliveryModeDirectStorage = 'direct-storage';
+const vaultDeliveryModeProtectedStorage = 'protected-storage';
+const vaultProtectionModeStandard = 'standard';
+const vaultProtectionModeCopyDeterred = 'copy-deterred-watermarked';
+const vaultSearchModeFullTextIndex = 'full-text-index';
 
 class VaultUploadOptions {
   const VaultUploadOptions({required this.accessLevel, required this.category});
@@ -15,14 +23,103 @@ class VaultUploadOptions {
   final String accessLevel;
   final String category;
 
+  VaultDocumentProfile get profile => VaultDocumentProfile.forAccessLevel(
+    accessLevel: accessLevel,
+    category: category,
+  );
+
+  String get storageFolder => profile.storageFolder;
+}
+
+class VaultDocumentProfile {
+  const VaultDocumentProfile({
+    required this.accessLevel,
+    required this.category,
+    required this.readerMode,
+    required this.deliveryMode,
+    required this.protectionMode,
+    required this.searchMode,
+    this.schemaVersion = vaultDocumentMetadataSchemaVersion,
+  });
+
+  factory VaultDocumentProfile.forAccessLevel({
+    required String accessLevel,
+    required String category,
+  }) {
+    final normalizedAccessLevel = normalizeVaultAccessLevel(accessLevel);
+    final normalizedCategory = normalizeVaultDocumentCategory(category);
+    final isFree = normalizedAccessLevel == 'free';
+
+    return VaultDocumentProfile(
+      accessLevel: normalizedAccessLevel,
+      category: normalizedCategory,
+      readerMode: isFree
+          ? vaultReaderModeStandardPdf
+          : vaultReaderModeProtectedImage,
+      deliveryMode: isFree
+          ? vaultDeliveryModeDirectStorage
+          : vaultDeliveryModeProtectedStorage,
+      protectionMode: isFree
+          ? vaultProtectionModeStandard
+          : vaultProtectionModeCopyDeterred,
+      searchMode: vaultSearchModeFullTextIndex,
+    );
+  }
+
+  final String schemaVersion;
+  final String accessLevel;
+  final String category;
+  final String readerMode;
+  final String deliveryMode;
+  final String protectionMode;
+  final String searchMode;
+
   String get storageFolder =>
       accessLevel == 'free' ? 'free_pdfs' : 'vault_pdfs';
+
+  bool get usesProtectedImageReader =>
+      readerMode == vaultReaderModeProtectedImage;
+
+  Map<String, String> toStorageMetadata({
+    String uploadedBy = '',
+    String originalFileName = '',
+  }) {
+    return {
+      'schemaVersion': schemaVersion,
+      'accessLevel': accessLevel,
+      'category': category,
+      'readerMode': readerMode,
+      'deliveryMode': deliveryMode,
+      'protectionMode': protectionMode,
+      'searchMode': searchMode,
+      if (uploadedBy.trim().isNotEmpty) 'uploadedBy': uploadedBy.trim(),
+      if (originalFileName.trim().isNotEmpty)
+        'originalFileName': originalFileName.trim(),
+    };
+  }
+
+  Map<String, dynamic> toDocumentMap() {
+    return {
+      'schemaVersion': schemaVersion,
+      'accessLevel': accessLevel,
+      'category': category,
+      'readerMode': readerMode,
+      'deliveryMode': deliveryMode,
+      'protectionMode': protectionMode,
+      'searchMode': searchMode,
+    };
+  }
 }
 
 class VaultDocumentMetadata {
   const VaultDocumentMetadata({
     required this.accessLevel,
     required this.category,
+    required this.readerMode,
+    required this.deliveryMode,
+    required this.protectionMode,
+    required this.searchMode,
+    required this.schemaVersion,
     this.sizeBytes,
     this.updatedAt,
   });
@@ -33,12 +130,40 @@ class VaultDocumentMetadata {
     int? sizeBytes,
     DateTime? updatedAt,
   }) {
+    final accessLevel = normalizeVaultAccessLevel(
+      customMetadata?['accessLevel'],
+      fallback: fallbackAccessLevel,
+    );
+    final category = normalizeVaultDocumentCategory(
+      customMetadata?['category'],
+    );
+    final defaultProfile = VaultDocumentProfile.forAccessLevel(
+      accessLevel: accessLevel,
+      category: category,
+    );
+
     return VaultDocumentMetadata(
-      accessLevel: normalizeVaultAccessLevel(
-        customMetadata?['accessLevel'],
-        fallback: fallbackAccessLevel,
+      accessLevel: accessLevel,
+      category: category,
+      readerMode: normalizeVaultReaderMode(
+        customMetadata?['readerMode'],
+        fallback: defaultProfile.readerMode,
       ),
-      category: normalizeVaultDocumentCategory(customMetadata?['category']),
+      deliveryMode: normalizeVaultDeliveryMode(
+        customMetadata?['deliveryMode'],
+        fallback: defaultProfile.deliveryMode,
+      ),
+      protectionMode: normalizeVaultProtectionMode(
+        customMetadata?['protectionMode'],
+        fallback: defaultProfile.protectionMode,
+      ),
+      searchMode: normalizeVaultSearchMode(
+        customMetadata?['searchMode'],
+        fallback: defaultProfile.searchMode,
+      ),
+      schemaVersion: normalizeVaultMetadataSchemaVersion(
+        customMetadata?['schemaVersion'],
+      ),
       sizeBytes: sizeBytes,
       updatedAt: updatedAt,
     );
@@ -46,8 +171,30 @@ class VaultDocumentMetadata {
 
   final String accessLevel;
   final String category;
+  final String readerMode;
+  final String deliveryMode;
+  final String protectionMode;
+  final String searchMode;
+  final String schemaVersion;
   final int? sizeBytes;
   final DateTime? updatedAt;
+
+  bool get usesProtectedImageReader =>
+      readerMode == vaultReaderModeProtectedImage;
+
+  Map<String, dynamic> toDocumentMap() {
+    return {
+      'schemaVersion': schemaVersion,
+      'accessLevel': accessLevel,
+      'category': category,
+      'readerMode': readerMode,
+      'deliveryMode': deliveryMode,
+      'protectionMode': protectionMode,
+      'searchMode': searchMode,
+      if (sizeBytes != null) 'sizeBytes': sizeBytes,
+      if (updatedAt != null) 'updatedAt': updatedAt,
+    };
+  }
 }
 
 class VaultDocumentCategoryCount {
@@ -231,6 +378,48 @@ String normalizeVaultAccessLevel(String? value, {String fallback = 'premium'}) {
   if (normalized == 'free' || normalized == 'premium') return normalized;
 
   return fallback.trim().toLowerCase() == 'free' ? 'free' : 'premium';
+}
+
+String normalizeVaultMetadataSchemaVersion(String? value) {
+  final normalized = value?.trim();
+  return normalized == null || normalized.isEmpty ? '1' : normalized;
+}
+
+String normalizeVaultReaderMode(String? value, {required String fallback}) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  if (normalized == vaultReaderModeStandardPdf ||
+      normalized == vaultReaderModeProtectedImage) {
+    return normalized;
+  }
+
+  return fallback;
+}
+
+String normalizeVaultDeliveryMode(String? value, {required String fallback}) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  if (normalized == vaultDeliveryModeDirectStorage ||
+      normalized == vaultDeliveryModeProtectedStorage) {
+    return normalized;
+  }
+
+  return fallback;
+}
+
+String normalizeVaultProtectionMode(String? value, {required String fallback}) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  if (normalized == vaultProtectionModeStandard ||
+      normalized == vaultProtectionModeCopyDeterred) {
+    return normalized;
+  }
+
+  return fallback;
+}
+
+String normalizeVaultSearchMode(String? value, {required String fallback}) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  if (normalized == vaultSearchModeFullTextIndex) return normalized;
+
+  return fallback;
 }
 
 String normalizeVaultDocumentCategory(String? value) {
