@@ -26,6 +26,7 @@ import 'services/reader_activity_analytics.dart';
 import 'services/reader_activity_repository.dart';
 import 'services/user_access_repository.dart';
 import 'services/user_access_state.dart';
+import 'services/vault_document_metadata.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
@@ -369,6 +370,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? pdfLoadError;
   String searchMode = 'all';
   String accessFilter = 'all';
+  String freeDocumentCategoryFilter = '';
+  String premiumDocumentCategoryFilter = '';
   List<Map<String, dynamic>> userNotes = [];
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
   final ReaderActivityRepository readerActivityRepository =
@@ -1117,10 +1120,137 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<VaultUploadOptions?> chooseVaultUploadOptions() {
+    var selectedAccessLevel = 'premium';
+    var selectedCategory = vaultDocumentCategories.first;
+
+    return showDialog<VaultUploadOptions>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Classify Upload',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedAccessLevel,
+                        dropdownColor: const Color(0xFF1A1D25),
+                        iconEnabledColor: Colors.greenAccent,
+                        style: const TextStyle(color: Colors.white70),
+                        decoration: const InputDecoration(
+                          labelText: 'Vault access',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          floatingLabelStyle: TextStyle(
+                            color: Colors.greenAccent,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem<String>(
+                            value: 'premium',
+                            child: Text('Premium vault'),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'free',
+                            child: Text('Free access zone'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedAccessLevel = value ?? 'premium';
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedCategory,
+                        dropdownColor: const Color(0xFF1A1D25),
+                        iconEnabledColor: Colors.greenAccent,
+                        style: const TextStyle(color: Colors.white70),
+                        decoration: const InputDecoration(
+                          labelText: 'Document category',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          floatingLabelStyle: TextStyle(
+                            color: Colors.greenAccent,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
+                          ),
+                        ),
+                        items: vaultDocumentCategories
+                            .map(
+                              (category) => DropdownMenuItem<String>(
+                                value: category,
+                                child: Text(category),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedCategory =
+                                value ?? vaultDocumentCategories.first;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(
+                        context,
+                        VaultUploadOptions(
+                          accessLevel: selectedAccessLevel,
+                          category: selectedCategory,
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Continue',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> uploadPDF() async {
     if (!requireVaultManagerAccess()) return;
 
     try {
+      final uploadOptions = await chooseVaultUploadOptions();
+      if (uploadOptions == null) return;
+
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
@@ -1166,7 +1296,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return;
         }
 
-        final storagePath = 'vault_pdfs/$fileName';
+        final storagePath = '${uploadOptions.storageFolder}/$fileName';
         final ref = FirebaseStorage.instance.ref(storagePath);
 
         final alreadyExists = await storageObjectExists(ref);
@@ -1189,7 +1319,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           SettableMetadata(
             contentType: 'application/pdf',
             customMetadata: {
-              'accessLevel': 'premium',
+              'accessLevel': uploadOptions.accessLevel,
+              'category': uploadOptions.category,
               'uploadedBy': FirebaseAuth.instance.currentUser?.email ?? '',
               'originalFileName': fileName,
             },
@@ -1199,8 +1330,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         await indexPdfForSearch(
           pdfBytes: fileBytes,
           pdfTitle: fileName,
-          accessLevel: 'premium',
+          accessLevel: uploadOptions.accessLevel,
           storagePath: storagePath,
+          category: uploadOptions.category,
         );
 
         await loadPDFs();
@@ -1227,11 +1359,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String pdfTitle,
     required String accessLevel,
     required String storagePath,
+    String category = 'General',
     String? pdfUrl,
   }) async {
     final document = PdfDocument(inputBytes: pdfBytes);
     final extractor = PdfTextExtractor(document);
     final normalizedAccessLevel = accessLevel.trim().toLowerCase();
+    final normalizedCategory = normalizeVaultDocumentCategory(category);
 
     for (int i = 0; i < document.pages.count; i++) {
       final text = extractor.extractText(startPageIndex: i, endPageIndex: i);
@@ -1256,6 +1390,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'textLower': lowerText,
         'keywords': keywords,
         'accessLevel': normalizedAccessLevel,
+        'category': normalizedCategory,
         'createdAt': FieldValue.serverTimestamp(),
       };
 
@@ -1289,6 +1424,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             continue;
           }
 
+          FullMetadata? metadata;
+          try {
+            metadata = await item.getMetadata();
+          } catch (_) {
+            metadata = null;
+          }
+          final documentMetadata = VaultDocumentMetadata.fromStorageMetadata(
+            metadata?.customMetadata,
+            fallbackAccessLevel: level,
+          );
+
           final url = await item.getDownloadURL();
           final response = await http
               .get(Uri.parse(url))
@@ -1298,8 +1444,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             pdfBytes: response.bodyBytes,
             pdfUrl: url,
             pdfTitle: item.name,
-            accessLevel: level,
+            accessLevel: documentMetadata.accessLevel,
             storagePath: item.fullPath,
+            category: documentMetadata.category,
           );
         }
       }
@@ -1321,6 +1468,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<Map<String, dynamic>> loadVaultPdfListItem(
+    Reference item, {
+    required String fallbackAccessLevel,
+  }) async {
+    FullMetadata? metadata;
+    try {
+      metadata = await item.getMetadata();
+    } catch (_) {
+      metadata = null;
+    }
+
+    final documentMetadata = VaultDocumentMetadata.fromStorageMetadata(
+      metadata?.customMetadata,
+      fallbackAccessLevel: fallbackAccessLevel,
+    );
+
+    return {
+      'name': item.name,
+      'storagePath': item.fullPath,
+      'accessLevel': documentMetadata.accessLevel,
+      'category': documentMetadata.category,
+    };
+  }
+
   Future<void> loadPDFs() async {
     setState(() {
       isLoading = true;
@@ -1336,7 +1507,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final loadedPremiumFiles = <Map<String, dynamic>>[];
 
       for (var item in freeResult.items) {
-        loadedFreeFiles.add({'name': item.name, 'storagePath': item.fullPath});
+        loadedFreeFiles.add(
+          await loadVaultPdfListItem(item, fallbackAccessLevel: 'free'),
+        );
       }
 
       if (userAccess.canAccessMainVault) {
@@ -1345,10 +1518,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .listAll();
 
         for (var item in premiumResult.items) {
-          loadedPremiumFiles.add({
-            'name': item.name,
-            'storagePath': item.fullPath,
-          });
+          loadedPremiumFiles.add(
+            await loadVaultPdfListItem(item, fallbackAccessLevel: 'premium'),
+          );
         }
       }
 
@@ -1675,7 +1847,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                                     children: [
                                       Text(
-                                        'Page ${data['pageNumber']}',
+                                        'Page ${data['pageNumber']} | ${data['category'] ?? 'General'}',
                                         style: const TextStyle(
                                           color: Colors.white70,
                                         ),
@@ -1781,9 +1953,67 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget buildDocumentCategoryFilter({
+    required List<Map<String, dynamic>> documents,
+    required String selectedCategory,
+    required ValueChanged<String> onChanged,
+  }) {
+    final categories = vaultDocumentCategoryOptions(documents);
+    if (categories.isEmpty) return const SizedBox.shrink();
+    final safeSelectedCategory = categories.contains(selectedCategory)
+        ? selectedCategory
+        : '';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DropdownButtonFormField<String>(
+        initialValue: safeSelectedCategory,
+        isExpanded: true,
+        dropdownColor: const Color(0xFF1A1D25),
+        iconEnabledColor: Colors.greenAccent,
+        style: const TextStyle(color: Colors.white70),
+        decoration: const InputDecoration(
+          labelText: 'Filter by category',
+          labelStyle: TextStyle(color: Colors.white70),
+          floatingLabelStyle: TextStyle(color: Colors.greenAccent),
+          filled: true,
+          fillColor: Color(0xFF151821),
+          border: OutlineInputBorder(),
+          enabledBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.white24),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: Colors.greenAccent),
+          ),
+        ),
+        items: [
+          const DropdownMenuItem<String>(
+            value: '',
+            child: Text('All categories'),
+          ),
+          ...categories.map(
+            (category) => DropdownMenuItem<String>(
+              value: category,
+              child: Text(category),
+            ),
+          ),
+        ],
+        onChanged: (category) => onChanged(category ?? ''),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canAccessMainVault = userAccess.canAccessMainVault;
+    final filteredFreePdfFiles = filterVaultDocumentsByCategory(
+      freePdfFiles,
+      freeDocumentCategoryFilter,
+    );
+    final filteredPremiumPdfFiles = filterVaultDocumentsByCategory(
+      premiumPdfFiles,
+      premiumDocumentCategoryFilter,
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
@@ -1938,6 +2168,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                         const SizedBox(height: 15),
 
+                        buildDocumentCategoryFilter(
+                          documents: freePdfFiles,
+                          selectedCategory: freeDocumentCategoryFilter,
+                          onChanged: (category) {
+                            setState(() {
+                              freeDocumentCategoryFilter = category;
+                            });
+                          },
+                        ),
+
                         if (freePdfFiles.isEmpty)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
@@ -1946,12 +2186,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               style: TextStyle(color: Colors.white70),
                             ),
                           )
+                        else if (filteredFreePdfFiles.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text(
+                              'No free PDFs match this category.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          )
                         else
                           ListView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
-                            itemCount: freePdfFiles.length,
+                            itemCount: filteredFreePdfFiles.length,
                             itemBuilder: (context, index) {
+                              final pdfFile = filteredFreePdfFiles[index];
+
                               return Card(
                                 color: Colors.orange.withValues(alpha: 0.12),
                                 child: ListTile(
@@ -1960,17 +2210,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     color: Colors.orangeAccent,
                                   ),
                                   title: Text(
-                                    freePdfFiles[index]['name'],
+                                    pdfFile['name'],
                                     style: const TextStyle(color: Colors.white),
                                   ),
-                                  subtitle: const Text(
-                                    'Free Access PDF',
-                                    style: TextStyle(color: Colors.white70),
+                                  subtitle: Text(
+                                    'Free Access PDF | ${pdfFile['category'] ?? 'General'}',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
                                   ),
                                   onTap: () async {
                                     final pdfUrl =
                                         await resolveSearchResultPdfUrl(
-                                          freePdfFiles[index],
+                                          pdfFile,
                                         );
 
                                     if (pdfUrl == null) return;
@@ -1982,11 +2234,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       MaterialPageRoute(
                                         builder: (context) => PDFViewerScreen(
                                           pdfUrl: pdfUrl,
-                                          title: freePdfFiles[index]['name'],
+                                          title: pdfFile['name'],
                                           accessLevel: 'free',
                                           openSource: 'free_dashboard',
                                           storagePath:
-                                              freePdfFiles[index]['storagePath']
+                                              pdfFile['storagePath']
                                                   ?.toString() ??
                                               '',
                                         ),
@@ -2011,6 +2263,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                           const SizedBox(height: 15),
 
+                          buildDocumentCategoryFilter(
+                            documents: premiumPdfFiles,
+                            selectedCategory: premiumDocumentCategoryFilter,
+                            onChanged: (category) {
+                              setState(() {
+                                premiumDocumentCategoryFilter = category;
+                              });
+                            },
+                          ),
+
                           if (premiumPdfFiles.isEmpty)
                             const Padding(
                               padding: EdgeInsets.symmetric(vertical: 12),
@@ -2019,12 +2281,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 style: TextStyle(color: Colors.white70),
                               ),
                             )
+                          else if (filteredPremiumPdfFiles.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'No protected PDFs match this category.',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            )
                           else
                             ListView.builder(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
-                              itemCount: premiumPdfFiles.length,
+                              itemCount: filteredPremiumPdfFiles.length,
                               itemBuilder: (context, index) {
+                                final pdfFile = filteredPremiumPdfFiles[index];
+
                                 return Card(
                                   color: Colors.green.withValues(alpha: 0.12),
 
@@ -2035,21 +2307,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     ),
 
                                     title: Text(
-                                      premiumPdfFiles[index]['name'],
+                                      pdfFile['name'],
                                       style: const TextStyle(
                                         color: Colors.white,
                                       ),
                                     ),
 
-                                    subtitle: const Text(
-                                      'Protected PDF',
-                                      style: TextStyle(color: Colors.white70),
+                                    subtitle: Text(
+                                      'Protected PDF | ${pdfFile['category'] ?? 'General'}',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
                                     ),
 
                                     onTap: () async {
                                       final pdfUrl =
                                           await resolveSearchResultPdfUrl(
-                                            premiumPdfFiles[index],
+                                            pdfFile,
                                           );
 
                                       if (pdfUrl == null) return;
@@ -2062,12 +2336,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         MaterialPageRoute(
                                           builder: (context) => PDFViewerScreen(
                                             pdfUrl: pdfUrl,
-                                            title:
-                                                premiumPdfFiles[index]['name'],
+                                            title: pdfFile['name'],
                                             accessLevel: 'premium',
                                             openSource: 'premium_dashboard',
                                             storagePath:
-                                                premiumPdfFiles[index]['storagePath']
+                                                pdfFile['storagePath']
                                                     ?.toString() ??
                                                 '',
                                           ),
