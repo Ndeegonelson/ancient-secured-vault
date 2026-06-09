@@ -64,11 +64,28 @@ class VaultDocumentCategoryCount {
   int get totalCount => freeCount + premiumCount;
 }
 
+class VaultRecentDocument {
+  const VaultRecentDocument({
+    required this.name,
+    required this.accessLevel,
+    required this.category,
+    required this.updatedAt,
+  });
+
+  final String name;
+  final String accessLevel;
+  final String category;
+  final DateTime updatedAt;
+
+  String get accessLabel => accessLevel == 'free' ? 'Free' : 'Protected';
+}
+
 class VaultDocumentInventorySummary {
   const VaultDocumentInventorySummary({
     required this.freeCount,
     required this.premiumCount,
     required this.categoryCounts,
+    required this.latestDocument,
   });
 
   factory VaultDocumentInventorySummary.fromDocuments({
@@ -76,6 +93,7 @@ class VaultDocumentInventorySummary {
     required Iterable<Map<String, dynamic>> premiumDocuments,
   }) {
     final categories = <String, ({int freeCount, int premiumCount})>{};
+    VaultRecentDocument? latestDocument;
 
     void countDocument(Map<String, dynamic> document, {required bool isFree}) {
       final category = normalizeVaultDocumentCategory(
@@ -86,6 +104,20 @@ class VaultDocumentInventorySummary {
         freeCount: current.freeCount + (isFree ? 1 : 0),
         premiumCount: current.premiumCount + (isFree ? 0 : 1),
       );
+
+      final updatedAt = document['updatedAt'];
+      if (updatedAt is DateTime &&
+          (latestDocument == null ||
+              updatedAt.isAfter(latestDocument!.updatedAt))) {
+        latestDocument = VaultRecentDocument(
+          name: document['name']?.toString().trim().isEmpty ?? true
+              ? 'Untitled PDF'
+              : document['name'].toString().trim(),
+          accessLevel: isFree ? 'free' : 'premium',
+          category: category,
+          updatedAt: updatedAt,
+        );
+      }
     }
 
     for (final document in freeDocuments) {
@@ -115,15 +147,18 @@ class VaultDocumentInventorySummary {
       freeCount: freeDocuments.length,
       premiumCount: premiumDocuments.length,
       categoryCounts: List.unmodifiable(categoryCounts),
+      latestDocument: latestDocument,
     );
   }
 
   final int freeCount;
   final int premiumCount;
   final List<VaultDocumentCategoryCount> categoryCounts;
+  final VaultRecentDocument? latestDocument;
 
   int get totalCount => freeCount + premiumCount;
   bool get hasDocuments => totalCount > 0;
+  bool get hasDatedDocument => latestDocument != null;
 
   VaultDocumentCategoryCount? countForCategory(String category) {
     final normalizedCategory = normalizeVaultDocumentCategory(

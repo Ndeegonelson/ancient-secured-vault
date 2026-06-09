@@ -651,6 +651,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                     const SizedBox(height: 18),
+                    if (summary.latestDocument != null) ...[
+                      const Text(
+                        'Latest Update',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(
+                          Icons.update,
+                          color: Colors.greenAccent,
+                        ),
+                        title: Text(
+                          summary.latestDocument!.name,
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        subtitle: Text(
+                          '${summary.latestDocument!.accessLabel} | '
+                          '${summary.latestDocument!.category} | '
+                          'Updated ${formatVaultDocumentDate(summary.latestDocument!.updatedAt)}',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                    ] else if (summary.hasDocuments) ...[
+                      const Text(
+                        'Latest Update',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Upload dates will appear after documents include update metadata.',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                      const SizedBox(height: 18),
+                    ],
                     const Text(
                       'By Category',
                       style: TextStyle(

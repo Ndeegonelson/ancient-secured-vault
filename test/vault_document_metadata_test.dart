@@ -181,12 +181,20 @@ void main() {
   test('summarizes vault inventory by access level and category', () {
     final summary = VaultDocumentInventorySummary.fromDocuments(
       freeDocuments: [
-        {'name': 'A.pdf', 'category': 'Finance'},
+        {
+          'name': 'A.pdf',
+          'category': 'Finance',
+          'updatedAt': DateTime.utc(2026, 6, 7),
+        },
         {'name': 'B.pdf', 'category': 'finance'},
       ],
       premiumDocuments: [
         {'name': 'C.pdf', 'category': 'Research'},
-        {'name': 'D.pdf', 'category': 'Finance'},
+        {
+          'name': 'D.pdf',
+          'category': 'Finance',
+          'updatedAt': DateTime.utc(2026, 6, 9),
+        },
         {'name': 'E.pdf'},
       ],
     );
@@ -195,6 +203,7 @@ void main() {
     expect(summary.premiumCount, 3);
     expect(summary.totalCount, 5);
     expect(summary.hasDocuments, isTrue);
+    expect(summary.hasDatedDocument, isTrue);
     expect(summary.categoryCounts.map((count) => count.category), [
       'Finance',
       'General',
@@ -205,6 +214,23 @@ void main() {
     expect(summary.categoryCounts.first.totalCount, 3);
     expect(summary.countForCategory('finance')?.totalCount, 3);
     expect(summary.countForCategory('Unknown'), isNull);
+    expect(summary.latestDocument?.name, 'D.pdf');
+    expect(summary.latestDocument?.accessLabel, 'Protected');
+    expect(summary.latestDocument?.category, 'Finance');
+    expect(summary.latestDocument?.updatedAt, DateTime.utc(2026, 6, 9));
+  });
+
+  test('keeps inventory latest document empty without update dates', () {
+    final summary = VaultDocumentInventorySummary.fromDocuments(
+      freeDocuments: [
+        {'name': 'A.pdf', 'category': 'Finance'},
+      ],
+      premiumDocuments: const [],
+    );
+
+    expect(summary.hasDocuments, isTrue);
+    expect(summary.hasDatedDocument, isFalse);
+    expect(summary.latestDocument, isNull);
   });
 
   test('summarizes vault indexing results for admin feedback', () {
