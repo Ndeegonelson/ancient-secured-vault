@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -42,8 +43,8 @@ import 'services/reader_cloud_narration_callable_provider.dart';
 import 'services/reader_cloud_narration_http_callable_client.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:html' as html;
+import 'dart:js_util' as js_util;
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:ui_web' as ui;
@@ -3828,18 +3829,32 @@ class PDFViewerScreen extends StatefulWidget {
   State<PDFViewerScreen> createState() => _PDFViewerScreenState();
 }
 
+class _ProtectedPdfPageRenderJob {
+  const _ProtectedPdfPageRenderJob({
+    required this.page,
+    required this.canvas,
+    required this.renderViewport,
+    required this.placeholder,
+  });
+
+  final Object page;
+  final html.CanvasElement canvas;
+  final Object renderViewport;
+  final html.HtmlElement placeholder;
+}
+
 class _PDFViewerScreenState extends State<PDFViewerScreen> {
+  static Future<void>? _pdfJsReady;
+
   final TextEditingController searchController = TextEditingController();
 
   String accessFilter = 'all';
-
-  final PdfViewerController pdfViewerController = PdfViewerController();
-  final PdfTextSearchResult pdfSearchResult = PdfTextSearchResult();
 
   String searchQuery = '';
   ReaderSavedPosition? latestReadingPosition;
   late final String viewId;
   html.IFrameElement? pdfIframe;
+  html.DivElement? protectedPdfImageContainer;
   int currentPdfPage = 1;
   int? pdfPageCount;
   String currentSearchQuery = '';
@@ -3856,7 +3871,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   StreamSubscription<html.MouseEvent>? readerContextMenuSubscription;
   StreamSubscription<html.MouseEvent>? readerPdfContextMenuSubscription;
   StreamSubscription<html.MouseEvent>? readerPdfMouseDownSubscription;
+  StreamSubscription<html.Event>? protectedPdfScrollSubscription;
+  StreamSubscription<html.MouseEvent>? protectedPdfContextMenuSubscription;
+  StreamSubscription<html.MouseEvent>? protectedPdfMouseDownSubscription;
   StreamSubscription<html.KeyboardEvent>? readerKeyDownSubscription;
+  int protectedPdfRenderGeneration = 0;
+  bool protectedPdfRenderStarted = false;
   late final String readerSessionId;
   late final ReaderTtsService readerTtsService;
   late final ReaderNarrationProgressRepository narrationProgressRepository;
@@ -4079,6 +4099,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         'Opened: ${formatReaderTimestamp(readerSessionStartedAt)}';
   }
 
+  Widget buildPdfDocumentSurface() {
+    return IgnorePointer(
+      ignoring: shouldShowReaderPrivacyShield,
+      child: HtmlElementView(viewType: viewId),
+    );
+  }
+
+  Widget buildProtectedPdfLoadingSurface() {
+    return Container(
+      color: const Color(0xFF111217),
+      alignment: Alignment.center,
+      child: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(color: Colors.greenAccent),
+          SizedBox(height: 16),
+          Text(
+            'Preparing protected page images...',
+            style: TextStyle(color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<UserAccessState> loadCurrentUserAccess() async {
     final user = FirebaseAuth.instance.currentUser;
     return userAccessRepository.loadForEmail(user?.email);
@@ -4275,15 +4320,61 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   void registerPdfViewer() {
     ui.platformViewRegistry.registerViewFactory(viewId, (int viewId) {
+      if (readerProtectionPolicy.shouldDeterCopying) {
+        final container = html.DivElement()
+          ..style.width = '100%'
+          ..style.height = '100%'
+          ..style.overflowY = 'auto'
+          ..style.overflowX = 'hidden'
+          ..style.background = '#202124'
+          ..style.padding = '18px 0 96px'
+          ..style.boxSizing = 'border-box'
+          ..style.userSelect = 'none';
+
+        container.children.add(
+          html.DivElement()
+            ..text = 'Preparing protected page images...'
+            ..style.color = '#C8C8C8'
+            ..style.fontFamily = 'Arial, sans-serif'
+            ..style.fontSize = '15px'
+            ..style.padding = '32px'
+            ..style.textAlign = 'center',
+        );
+
+        protectedPdfContextMenuSubscription = container.onContextMenu.listen((
+          event,
+        ) {
+          handleProtectedReaderAction(
+            source: 'protected_image_context_menu',
+            event: event,
+          );
+        });
+        protectedPdfMouseDownSubscription = container.onMouseDown.listen((
+          event,
+        ) {
+          if (event.button != 2) return;
+
+          handleProtectedReaderAction(
+            source: 'protected_image_right_click',
+            event: event,
+          );
+        });
+        protectedPdfScrollSubscription = container.onScroll.listen(
+          handleProtectedPdfImageScroll,
+        );
+
+        pdfIframe = null;
+        protectedPdfImageContainer = container;
+        scheduleMicrotask(renderProtectedPdfImages);
+        return container;
+      }
+
       final iframe = html.IFrameElement()
-        ..src = buildPdfViewerUrl(
-          pageNumber: currentPdfPage,
-          searchQuery: currentSearchQuery,
-        )
         ..style.border = 'none'
         ..style.width = '100%'
         ..style.height = '100%'
-        ..style.userSelect = 'none';
+        ..style.userSelect = 'none'
+        ..style.pointerEvents = 'auto';
 
       readerPdfContextMenuSubscription?.cancel();
       readerPdfMouseDownSubscription?.cancel();
@@ -4297,8 +4388,284 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       });
 
       pdfIframe = iframe;
+      protectedPdfImageContainer = null;
+      updatePdfIframeSource(
+        pageNumber: currentPdfPage,
+        searchQuery: currentSearchQuery,
+      );
       return iframe;
     });
+  }
+
+  void updatePdfIframeSource({
+    required int pageNumber,
+    required String searchQuery,
+  }) {
+    final iframe = pdfIframe;
+    if (iframe == null) return;
+
+    final url = buildPdfViewerUrl(
+      pageNumber: pageNumber,
+      searchQuery: searchQuery,
+    );
+    iframe.src = url;
+  }
+
+  Future<void> ensurePdfJsReady() {
+    final existing = _pdfJsReady;
+    if (existing != null) return existing;
+
+    final completer = Completer<void>();
+    _pdfJsReady = completer.future;
+
+    if (js_util.getProperty<Object?>(html.window, 'pdfjsLib') != null) {
+      configurePdfJsWorker();
+      completer.complete();
+      return completer.future;
+    }
+
+    final script = html.ScriptElement()
+      ..src =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js'
+      ..async = true;
+
+    script.onLoad.first.then((_) {
+      configurePdfJsWorker();
+      completer.complete();
+    });
+    script.onError.first.then((_) {
+      _pdfJsReady = null;
+      completer.completeError(
+        StateError('Protected PDF image renderer could not load.'),
+      );
+    });
+
+    html.document.head?.append(script);
+    return completer.future;
+  }
+
+  void configurePdfJsWorker() {
+    final pdfJs = js_util.getProperty<Object?>(html.window, 'pdfjsLib');
+    if (pdfJs == null) return;
+
+    final workerOptions = js_util.getProperty<Object>(
+      pdfJs,
+      'GlobalWorkerOptions',
+    );
+    js_util.setProperty(
+      workerOptions,
+      'workerSrc',
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js',
+    );
+  }
+
+  Future<void> renderProtectedPdfImages() async {
+    final container = protectedPdfImageContainer;
+    if (container == null || protectedPdfRenderStarted) return;
+
+    protectedPdfRenderStarted = true;
+    final renderGeneration = ++protectedPdfRenderGeneration;
+
+    try {
+      await ensurePdfJsReady();
+      if (renderGeneration != protectedPdfRenderGeneration) return;
+
+      final pdfJs = js_util.getProperty<Object>(html.window, 'pdfjsLib');
+      final loadingTask = js_util.callMethod<Object>(pdfJs, 'getDocument', [
+        js_util.jsify({
+          'url': widget.pdfUrl,
+          'disableAutoFetch': false,
+          'disableStream': false,
+        }),
+      ]);
+      final document = await js_util.promiseToFuture<Object>(
+        js_util.getProperty<Object>(loadingTask, 'promise'),
+      );
+      if (renderGeneration != protectedPdfRenderGeneration) return;
+
+      final pageCount = (js_util.getProperty<num>(
+        document,
+        'numPages',
+      )).toInt();
+      pdfPageCount = pageCount;
+      if (mounted) setState(() {});
+
+      container.children.clear();
+      container.style.background = '#2A2A2A';
+      final renderJobs = <_ProtectedPdfPageRenderJob>[];
+
+      for (var pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+        if (renderGeneration != protectedPdfRenderGeneration) return;
+
+        final page = await js_util.promiseToFuture<Object>(
+          js_util.callMethod<Object>(document, 'getPage', [pageNumber]),
+        );
+        final baseViewport = js_util.callMethod<Object>(page, 'getViewport', [
+          js_util.jsify({'scale': 1}),
+        ]);
+        final baseWidth = js_util.getProperty<num>(baseViewport, 'width');
+        final containerWidth = container.clientWidth == 0
+            ? 900
+            : container.clientWidth;
+        final availableWidth = math.max(320, containerWidth - 48);
+        final displayScale = (availableWidth / baseWidth).clamp(0.6, 1.8);
+        final pixelRatio = math.min(html.window.devicePixelRatio, 1.5);
+        final renderScale = displayScale * pixelRatio;
+        final displayViewport = js_util.callMethod<Object>(
+          page,
+          'getViewport',
+          [
+            js_util.jsify({'scale': displayScale}),
+          ],
+        );
+        final renderViewport = js_util.callMethod<Object>(page, 'getViewport', [
+          js_util.jsify({'scale': renderScale}),
+        ]);
+
+        final displayWidth = js_util.getProperty<num>(displayViewport, 'width');
+        final displayHeight = js_util.getProperty<num>(
+          displayViewport,
+          'height',
+        );
+        final renderWidth = js_util.getProperty<num>(renderViewport, 'width');
+        final renderHeight = js_util.getProperty<num>(renderViewport, 'height');
+
+        final wrapper = html.DivElement()
+          ..dataset['readerPageNumber'] = pageNumber.toString()
+          ..style.width = '${displayWidth}px'
+          ..style.margin = '0 auto 18px'
+          ..style.background = '#FFFFFF'
+          ..style.boxShadow = '0 2px 14px rgba(0,0,0,0.35)'
+          ..style.position = 'relative'
+          ..style.userSelect = 'none';
+        final placeholder = html.DivElement()
+          ..text = 'Preparing protected page $pageNumber...'
+          ..style.width = '${displayWidth}px'
+          ..style.height = '${displayHeight}px'
+          ..style.display = 'flex'
+          ..style.alignItems = 'center'
+          ..style.justifyContent = 'center'
+          ..style.color = '#8B8F99'
+          ..style.fontFamily = 'Arial, sans-serif'
+          ..style.fontSize = '14px'
+          ..style.position = 'absolute'
+          ..style.left = '0'
+          ..style.top = '0'
+          ..style.zIndex = '1'
+          ..style.pointerEvents = 'none'
+          ..style.userSelect = 'none';
+        final canvas =
+            html.CanvasElement(
+                width: renderWidth.ceil(),
+                height: renderHeight.ceil(),
+              )
+              ..style.width = '${displayWidth}px'
+              ..style.height = '${displayHeight}px'
+              ..style.display = 'block'
+              ..style.userSelect = 'none';
+
+        wrapper.children.add(placeholder);
+        wrapper.children.add(canvas);
+        container.children.add(wrapper);
+        renderJobs.add(
+          _ProtectedPdfPageRenderJob(
+            page: page,
+            canvas: canvas,
+            renderViewport: renderViewport,
+            placeholder: placeholder,
+          ),
+        );
+      }
+
+      scrollProtectedPdfImageReaderToPage(currentPdfPage);
+
+      for (final job in renderJobs) {
+        if (renderGeneration != protectedPdfRenderGeneration) return;
+
+        final context = job.canvas.context2D;
+        final renderTask = js_util.callMethod<Object>(job.page, 'render', [
+          js_util.jsify({
+            'canvasContext': context,
+            'viewport': job.renderViewport,
+          }),
+        ]);
+        await js_util.promiseToFuture<Object>(
+          js_util.getProperty<Object>(renderTask, 'promise'),
+        );
+
+        if (renderGeneration != protectedPdfRenderGeneration) return;
+
+        job.placeholder.remove();
+      }
+    } catch (error) {
+      if (renderGeneration != protectedPdfRenderGeneration) return;
+
+      container.children.clear();
+      container.children.add(
+        html.DivElement()
+          ..text =
+              'Protected PDF image reader could not prepare this document. '
+              'Please try again.'
+          ..style.color = '#FF8A80'
+          ..style.fontFamily = 'Arial, sans-serif'
+          ..style.fontSize = '15px'
+          ..style.padding = '32px'
+          ..style.textAlign = 'center',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Protected PDF image reader could not load.'),
+          ),
+        );
+      }
+    }
+  }
+
+  void handleProtectedPdfImageScroll(html.Event event) {
+    final container = protectedPdfImageContainer;
+    if (container == null || pdfPageCount == null) return;
+
+    final viewportAnchor =
+        container.scrollTop + (container.clientHeight * 0.35);
+    var visiblePage = currentPdfPage;
+
+    for (final child in container.children) {
+      final pageElement = child as html.HtmlElement;
+      final pageNumber = int.tryParse(
+        pageElement.dataset['readerPageNumber'] ?? '',
+      );
+      if (pageNumber == null) continue;
+
+      if (pageElement.offsetTop <= viewportAnchor) {
+        visiblePage = pageNumber;
+      } else {
+        break;
+      }
+    }
+
+    if (visiblePage == currentPdfPage) return;
+
+    if (mounted) {
+      setState(() {
+        currentPdfPage = visiblePage;
+      });
+    } else {
+      currentPdfPage = visiblePage;
+    }
+    preloadNarrationTextForPage(visiblePage);
+  }
+
+  void scrollProtectedPdfImageReaderToPage(int pageNumber) {
+    final container = protectedPdfImageContainer;
+    if (container == null) return;
+
+    final pageElement = container.querySelector(
+      '[data-reader-page-number="$pageNumber"]',
+    );
+    if (pageElement is! html.HtmlElement) return;
+
+    container.scrollTop = math.max(0, pageElement.offsetTop - 12);
   }
 
   void startReaderProtectionObservers() {
@@ -4358,6 +4725,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
   }
 
+  void restoreReaderPrivacyShield(String source) {
+    if (!shouldShowReaderPrivacyShield) return;
+
+    updateReaderWindowActivity(isActive: true, source: source);
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Read mode restored.')));
+    logReaderAction(
+      action: 'reader_privacy_shield_restored',
+      details: {
+        'source': source,
+        'currentPdfPage': currentPdfPage,
+        'accessLevel': widget.accessLevel,
+      },
+    );
+  }
+
   void handleProtectedReaderAction({
     required String source,
     required html.Event event,
@@ -4413,10 +4798,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       },
     );
 
-    pdfIframe?.src = buildPdfViewerUrl(
-      pageNumber: currentPdfPage,
-      searchQuery: currentSearchQuery,
-    );
+    if (readerProtectionPolicy.shouldDeterCopying) {
+      scrollProtectedPdfImageReaderToPage(currentPdfPage);
+    } else {
+      updatePdfIframeSource(
+        pageNumber: currentPdfPage,
+        searchQuery: currentSearchQuery,
+      );
+    }
     preloadNarrationTextForPage(safePageNumber);
   }
 
@@ -8495,7 +8884,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerContextMenuSubscription?.cancel();
     readerPdfContextMenuSubscription?.cancel();
     readerPdfMouseDownSubscription?.cancel();
+    protectedPdfScrollSubscription?.cancel();
+    protectedPdfContextMenuSubscription?.cancel();
+    protectedPdfMouseDownSubscription?.cancel();
     readerKeyDownSubscription?.cancel();
+    protectedPdfRenderGeneration++;
     readerTtsService.removeListener(observeNarrationSession);
     narrationCloudSession.dispose();
 
@@ -8758,15 +9151,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             onPressed: showReaderNarrationDialog,
           ),
           IconButton(
-            tooltip: showReaderStatusOverlay
+            tooltip: shouldShowReaderPrivacyShield
+                ? 'Return to read mode'
+                : showReaderStatusOverlay
                 ? 'Hide reader status'
                 : 'Show reader status',
             icon: Icon(
-              showReaderStatusOverlay ? Icons.visibility_off : Icons.visibility,
+              shouldShowReaderPrivacyShield || !showReaderStatusOverlay
+                  ? Icons.visibility
+                  : Icons.visibility_off,
               size: 20,
               color: Colors.greenAccent,
             ),
             onPressed: () {
+              if (shouldShowReaderPrivacyShield) {
+                restoreReaderPrivacyShield('reader_top_eye_restore');
+                return;
+              }
+
               final nextVisible = !showReaderStatusOverlay;
 
               setState(() {
@@ -9060,7 +9462,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             )
           : Stack(
               children: [
-                HtmlElementView(viewType: viewId),
+                buildPdfDocumentSurface(),
 
                 Positioned.fill(
                   child: IgnorePointer(
@@ -9085,39 +9487,70 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 ),
                 if (shouldShowReaderPrivacyShield)
                   Positioned.fill(
-                    child: Container(
-                      color: Colors.black.withValues(alpha: 0.94),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 420),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.visibility_off_outlined,
-                                color: Colors.greenAccent,
-                                size: 46,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                readerProtectionPolicy.inactiveShieldTitle,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
+                    child: PointerInterceptor(
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () =>
+                              restoreReaderPrivacyShield('reader_shield_tap'),
+                          child: Container(
+                            color: Colors.black.withValues(alpha: 0.94),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 420,
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Return to read mode',
+                                      iconSize: 56,
+                                      color: Colors.greenAccent,
+                                      onPressed: () =>
+                                          restoreReaderPrivacyShield(
+                                            'reader_shield_eye_button',
+                                          ),
+                                      icon: const Icon(
+                                        Icons.visibility_outlined,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      readerProtectionPolicy
+                                          .inactiveShieldTitle,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      readerProtectionPolicy
+                                          .inactiveShieldMessage,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    const Text(
+                                      'Click to continue reading',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Colors.greenAccent,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                readerProtectionPolicy.inactiveShieldMessage,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
