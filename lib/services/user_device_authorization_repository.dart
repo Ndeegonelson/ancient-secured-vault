@@ -11,7 +11,7 @@ abstract interface class UserDeviceAuthorizationStore {
 
   Future<UserDeviceSummary> loadSummary({int limit = 100});
 
-  Future<void> recordSeenDevice(UserDeviceSeenDraft draft);
+  Future<UserDeviceStatus?> recordSeenDevice(UserDeviceSeenDraft draft);
 
   Future<void> saveDeviceStatus({
     required String deviceId,
@@ -351,13 +351,19 @@ class UserDeviceAuthorizationRepository
   }
 
   @override
-  Future<void> recordSeenDevice(UserDeviceSeenDraft draft) async {
-    if (!draft.hasDeviceId) return;
+  Future<UserDeviceStatus?> recordSeenDevice(UserDeviceSeenDraft draft) async {
+    if (!draft.hasDeviceId) return null;
 
     final deviceDoc = _firestore
         .collection('user_device_authorizations')
         .doc(draft.deviceId.trim());
     final existingDevice = await deviceDoc.get();
+    final existingStatus = existingDevice.exists
+        ? UserDeviceRecord.fromMap(
+            existingDevice.data() ?? const {},
+            id: existingDevice.id,
+          ).status
+        : null;
 
     await deviceDoc.set(
       draft.toFirestore(
@@ -367,6 +373,8 @@ class UserDeviceAuthorizationRepository
       ),
       SetOptions(merge: true),
     );
+
+    return existingStatus ?? UserDeviceStatus.pending;
   }
 
   @override

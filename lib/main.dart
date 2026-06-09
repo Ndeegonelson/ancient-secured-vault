@@ -3879,15 +3879,16 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   Future<void> checkViewerAccess() async {
     final access = await loadCurrentUserAccess();
+    final deviceStatus = await recordReaderDeviceSeen();
     final accessDecision = ReaderAccessDecision.evaluate(
       userAccess: access,
       documentAccessLevel: widget.accessLevel,
+      deviceStatus: deviceStatus,
     );
 
     if (!mounted) return;
 
     await logReaderAccessAttempt(decision: accessDecision, userAccess: access);
-    await recordReaderDeviceSeen();
 
     if (!mounted) return;
 
@@ -3942,9 +3943,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
   }
 
-  Future<void> recordReaderDeviceSeen() async {
+  Future<UserDeviceStatus?> recordReaderDeviceSeen() async {
     try {
-      await readerDeviceAuthorizationRepository.recordSeenDevice(
+      return readerDeviceAuthorizationRepository.recordSeenDevice(
         UserDeviceSeenDraft(
           deviceId: readerDeviceIdentity.id,
           email: FirebaseAuth.instance.currentUser?.email,
@@ -3956,6 +3957,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       );
     } catch (_) {
       // Device monitoring must not block the reader while rules are being prepared.
+      return null;
     }
   }
 
