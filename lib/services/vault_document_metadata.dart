@@ -287,6 +287,29 @@ String vaultDocumentSectionTitle({
   return '$title ($safeVisibleCount of $safeTotalCount PDFs)';
 }
 
+List<String> vaultDocumentActiveFilterLabels({
+  String query = '',
+  String freeCategory = '',
+  String premiumCategory = '',
+}) {
+  final labels = <String>[];
+  final cleanQuery = query.trim();
+  final cleanFreeCategory = freeCategory.trim();
+  final cleanPremiumCategory = premiumCategory.trim();
+
+  if (cleanQuery.isNotEmpty) {
+    labels.add('Search: $cleanQuery');
+  }
+  if (cleanFreeCategory.isNotEmpty) {
+    labels.add('Free category: $cleanFreeCategory');
+  }
+  if (cleanPremiumCategory.isNotEmpty) {
+    labels.add('Protected category: $cleanPremiumCategory');
+  }
+
+  return List.unmodifiable(labels);
+}
+
 List<Map<String, dynamic>> sortVaultDocumentsForDisplay(
   Iterable<Map<String, dynamic>> documents,
 ) {

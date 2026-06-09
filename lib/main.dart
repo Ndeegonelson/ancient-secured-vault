@@ -2409,6 +2409,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget buildDocumentCategoryFilter({
+    required String filterId,
     required List<Map<String, dynamic>> documents,
     required String selectedCategory,
     required ValueChanged<String> onChanged,
@@ -2422,6 +2423,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: DropdownButtonFormField<String>(
+        key: ValueKey(
+          'dashboard-document-category-$filterId-$safeSelectedCategory-${categories.join('|')}',
+        ),
         initialValue: safeSelectedCategory,
         isExpanded: true,
         dropdownColor: const Color(0xFF1A1D25),
@@ -2499,6 +2503,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void clearDashboardDocumentFilters() {
+    dashboardDocumentSearchController.clear();
+    setState(() {
+      dashboardDocumentSearchQuery = '';
+      freeDocumentCategoryFilter = '';
+      premiumDocumentCategoryFilter = '';
+    });
+  }
+
+  Widget buildDashboardActiveFilterBar(List<String> labels) {
+    if (labels.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ...labels.map(
+            (label) => Chip(
+              label: Text(
+                label,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              backgroundColor: const Color(0xFF151821),
+              side: const BorderSide(color: Colors.white24),
+            ),
+          ),
+          TextButton.icon(
+            onPressed: clearDashboardDocumentFilters,
+            icon: const Icon(Icons.clear_all, size: 18),
+            label: const Text('Clear all'),
+            style: TextButton.styleFrom(foregroundColor: Colors.greenAccent),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canAccessMainVault = userAccess.canAccessMainVault;
@@ -2521,6 +2565,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final hasPremiumDocumentFilter =
         hasDashboardDocumentSearch ||
         premiumDocumentCategoryFilter.trim().isNotEmpty;
+    final dashboardFilterLabels = vaultDocumentActiveFilterLabels(
+      query: dashboardDocumentSearchQuery,
+      freeCategory: freeDocumentCategoryFilter,
+      premiumCategory: premiumDocumentCategoryFilter,
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
@@ -2675,6 +2724,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
 
                         buildDashboardDocumentSearch(),
+                        buildDashboardActiveFilterBar(dashboardFilterLabels),
 
                         const SizedBox(height: 20),
 
@@ -2695,6 +2745,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: 15),
 
                         buildDocumentCategoryFilter(
+                          filterId: 'free',
                           documents: freePdfFiles,
                           selectedCategory: freeDocumentCategoryFilter,
                           onChanged: (category) {
@@ -2800,6 +2851,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(height: 15),
 
                           buildDocumentCategoryFilter(
+                            filterId: 'premium',
                             documents: premiumPdfFiles,
                             selectedCategory: premiumDocumentCategoryFilter,
                             onChanged: (category) {

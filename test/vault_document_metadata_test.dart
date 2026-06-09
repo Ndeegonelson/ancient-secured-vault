@@ -127,6 +127,22 @@ void main() {
     );
   });
 
+  test('builds compact active dashboard filter labels', () {
+    expect(
+      vaultDocumentActiveFilterLabels(
+        query: ' loan ',
+        freeCategory: 'Finance',
+        premiumCategory: ' Research ',
+      ),
+      [
+        'Search: loan',
+        'Free category: Finance',
+        'Protected category: Research',
+      ],
+    );
+    expect(vaultDocumentActiveFilterLabels(), isEmpty);
+  });
+
   test('sorts dashboard documents by category then name', () {
     final documents = [
       {'name': 'z-policy.pdf', 'category': 'Research'},
