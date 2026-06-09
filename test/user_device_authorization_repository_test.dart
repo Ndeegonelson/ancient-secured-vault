@@ -95,34 +95,47 @@ void main() {
   });
 
   test('summarizes and filters device authorization records', () {
-    final summary = UserDeviceSummary.fromDevices([
-      UserDeviceRecord.fromMap({
-        'email': 'ama@example.com',
-        'deviceLabel': 'Ama Phone',
-        'platform': 'Android',
-        'country': 'Ghana',
-        'status': 'pending',
-      }, id: 'phone'),
-      UserDeviceRecord.fromMap({
-        'email': 'kwame@example.com',
-        'deviceLabel': 'Kwame Laptop',
-        'platform': 'Windows',
-        'country': 'Nigeria',
-        'status': 'trusted',
-      }, id: 'laptop'),
-      UserDeviceRecord.fromMap({
-        'email': 'blocked@example.com',
-        'deviceLabel': 'Blocked Tablet',
-        'platform': 'Android',
-        'country': 'Ghana',
-        'status': 'blocked',
-      }, id: 'tablet'),
-    ]);
+    const recentChange = UserDeviceStatusChangeRecord(
+      id: 'change-1',
+      deviceId: 'tablet',
+      changedByEmail: 'admin@example.com',
+      previousStatus: UserDeviceStatus.pending,
+      nextStatus: UserDeviceStatus.blocked,
+      createdAt: 'now',
+    );
+    final summary = UserDeviceSummary.fromDevices(
+      [
+        UserDeviceRecord.fromMap({
+          'email': 'ama@example.com',
+          'deviceLabel': 'Ama Phone',
+          'platform': 'Android',
+          'country': 'Ghana',
+          'status': 'pending',
+        }, id: 'phone'),
+        UserDeviceRecord.fromMap({
+          'email': 'kwame@example.com',
+          'deviceLabel': 'Kwame Laptop',
+          'platform': 'Windows',
+          'country': 'Nigeria',
+          'status': 'trusted',
+        }, id: 'laptop'),
+        UserDeviceRecord.fromMap({
+          'email': 'blocked@example.com',
+          'deviceLabel': 'Blocked Tablet',
+          'platform': 'Android',
+          'country': 'Ghana',
+          'status': 'blocked',
+        }, id: 'tablet'),
+      ],
+      recentChanges: const [recentChange],
+    );
 
     expect(summary.totalCount, 3);
     expect(summary.pendingCount, 1);
     expect(summary.trustedCount, 1);
     expect(summary.blockedCount, 1);
+    expect(summary.hasRecentChanges, isTrue);
+    expect(summary.recentChanges, const [recentChange]);
     expect(summary.countryOptions, ['Ghana', 'Nigeria']);
     expect(
       summary
@@ -267,6 +280,40 @@ void main() {
       'nextStatus': 'trusted',
       'createdAt': 'now',
     });
+
+    final change = UserDeviceStatusChangeRecord.fromMap({
+      'deviceId': ' device-1 ',
+      'changedByEmail': ' Admin@Example.COM ',
+      'previousStatus': 'pending',
+      'nextStatus': 'blocked',
+      'createdAt': 'later',
+    }, id: ' change-1 ');
+
+    expect(change.id, 'change-1');
+    expect(change.deviceId, 'device-1');
+    expect(change.changedByEmail, 'admin@example.com');
+    expect(change.previousStatus, UserDeviceStatus.pending);
+    expect(change.nextStatus, UserDeviceStatus.blocked);
+    expect(change.createdAt, 'later');
+    expect(readUserDeviceStatusOrNull('approved'), UserDeviceStatus.trusted);
+    expect(readUserDeviceStatusOrNull('missing'), isNull);
+    expect(userDeviceStatusChangeTitle(change), 'device-1');
+    expect(
+      userDeviceStatusChangeDetailLabel(change, timestampLabel: 'Today'),
+      'Pending to Blocked | by admin@example.com | Today',
+    );
+    expect(
+      userDeviceStatusChangeTitle(
+        const UserDeviceStatusChangeRecord(
+          id: 'empty',
+          deviceId: '',
+          changedByEmail: '',
+          previousStatus: null,
+          nextStatus: UserDeviceStatus.pending,
+        ),
+      ),
+      'Unknown device',
+    );
   });
 
   test('builds pending seen-device payloads from reader visits', () {

@@ -1927,6 +1927,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                               ),
                             ],
+                            if (summary.hasRecentChanges) ...[
+                              const SizedBox(height: 18),
+                              const Text(
+                                'Recent Device Decisions',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              ...summary.recentChanges.map((change) {
+                                return ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(
+                                    Icons.manage_history_outlined,
+                                    color: Colors.greenAccent,
+                                  ),
+                                  title: Text(
+                                    userDeviceStatusChangeTitle(change),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    userDeviceStatusChangeDetailLabel(
+                                      change,
+                                      timestampLabel: formatDashboardTimestamp(
+                                        change.createdAt,
+                                      ),
+                                    ),
+                                    style: const TextStyle(
+                                      color: Colors.white38,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
                           ],
                         ),
                       );

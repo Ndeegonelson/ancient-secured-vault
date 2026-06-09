@@ -11,6 +11,10 @@ const int userDeviceDefaultDisplayLimit = 20;
 abstract interface class UserDeviceAuthorizationStore {
   Future<List<UserDeviceRecord>> listDevices({int limit = 100});
 
+  Future<List<UserDeviceStatusChangeRecord>> listRecentDeviceChanges({
+    int limit = 8,
+  });
+
   Future<UserDeviceSummary> loadSummary({int limit = 100});
 
   Future<UserDeviceStatus?> recordSeenDevice(UserDeviceSeenDraft draft);
@@ -160,6 +164,38 @@ class UserDeviceStatusChangeDraft {
   }
 }
 
+class UserDeviceStatusChangeRecord {
+  const UserDeviceStatusChangeRecord({
+    required this.id,
+    required this.deviceId,
+    required this.changedByEmail,
+    required this.previousStatus,
+    required this.nextStatus,
+    this.createdAt,
+  });
+
+  factory UserDeviceStatusChangeRecord.fromMap(
+    Map<String, dynamic> data, {
+    required String id,
+  }) {
+    return UserDeviceStatusChangeRecord(
+      id: id.trim(),
+      deviceId: data['deviceId']?.toString().trim() ?? '',
+      changedByEmail: emailDocumentId(data['changedByEmail']?.toString()),
+      previousStatus: readUserDeviceStatusOrNull(data['previousStatus']),
+      nextStatus: readUserDeviceStatus(data['nextStatus']),
+      createdAt: data['createdAt'],
+    );
+  }
+
+  final String id;
+  final String deviceId;
+  final String changedByEmail;
+  final UserDeviceStatus? previousStatus;
+  final UserDeviceStatus nextStatus;
+  final dynamic createdAt;
+}
+
 class UserDeviceRecord {
   const UserDeviceRecord({
     required this.id,
@@ -270,9 +306,13 @@ class UserDeviceSummary {
     required this.pendingCount,
     required this.trustedCount,
     required this.blockedCount,
+    this.recentChanges = const [],
   });
 
-  factory UserDeviceSummary.fromDevices(Iterable<UserDeviceRecord> devices) {
+  factory UserDeviceSummary.fromDevices(
+    Iterable<UserDeviceRecord> devices, {
+    List<UserDeviceStatusChangeRecord> recentChanges = const [],
+  }) {
     final sortedDevices = UserDeviceRecord.sortForAdminList(devices);
     var pendingCount = 0;
     var trustedCount = 0;
@@ -294,6 +334,7 @@ class UserDeviceSummary {
       pendingCount: pendingCount,
       trustedCount: trustedCount,
       blockedCount: blockedCount,
+      recentChanges: List.unmodifiable(recentChanges),
     );
   }
 
@@ -301,9 +342,11 @@ class UserDeviceSummary {
   final int pendingCount;
   final int trustedCount;
   final int blockedCount;
+  final List<UserDeviceStatusChangeRecord> recentChanges;
 
   int get totalCount => devices.length;
   bool get hasDevices => devices.isNotEmpty;
+  bool get hasRecentChanges => recentChanges.isNotEmpty;
   List<String> get countryOptions {
     final countries = devices
         .map((device) => device.country.trim())
@@ -359,7 +402,13 @@ class UserDeviceAuthorizationRepository
 
   @override
   Future<UserDeviceSummary> loadSummary({int limit = 100}) async {
-    return UserDeviceSummary.fromDevices(await listDevices(limit: limit));
+    final devices = listDevices(limit: limit);
+    final recentChanges = listRecentDeviceChanges();
+
+    return UserDeviceSummary.fromDevices(
+      await devices,
+      recentChanges: await recentChanges,
+    );
   }
 
   @override
@@ -431,6 +480,24 @@ class UserDeviceAuthorizationRepository
     }
 
     await batch.commit();
+  }
+
+  @override
+  Future<List<UserDeviceStatusChangeRecord>> listRecentDeviceChanges({
+    int limit = 8,
+  }) async {
+    final safeLimit = limit < 1 ? 1 : limit;
+    final snapshot = await _firestore
+        .collection('user_device_authorization_audit_logs')
+        .orderBy('createdAt', descending: true)
+        .limit(safeLimit)
+        .get();
+
+    return List.unmodifiable(
+      snapshot.docs.map(
+        (doc) => UserDeviceStatusChangeRecord.fromMap(doc.data(), id: doc.id),
+      ),
+    );
   }
 }
 
@@ -516,6 +583,15 @@ UserDeviceStatus readUserDeviceStatus(
     'trusted' || 'approved' || 'allowed' => UserDeviceStatus.trusted,
     'blocked' || 'denied' || 'rejected' => UserDeviceStatus.blocked,
     _ => UserDeviceStatus.pending,
+  };
+}
+
+UserDeviceStatus? readUserDeviceStatusOrNull(dynamic value) {
+  return switch (value?.toString().trim().toLowerCase()) {
+    'pending' => UserDeviceStatus.pending,
+    'trusted' || 'approved' || 'allowed' => UserDeviceStatus.trusted,
+    'blocked' || 'denied' || 'rejected' => UserDeviceStatus.blocked,
+    _ => null,
   };
 }
 
@@ -609,4 +685,25 @@ String? userDeviceListLimitMessage({
 
   final deviceLabel = safeDisplayLimit == 1 ? 'device' : 'devices';
   return 'Showing first $safeDisplayLimit $deviceLabel. Narrow filters to review the rest.';
+}
+
+String userDeviceStatusChangeTitle(UserDeviceStatusChangeRecord change) {
+  if (change.deviceId.trim().isNotEmpty) return change.deviceId.trim();
+  return 'Unknown device';
+}
+
+String userDeviceStatusChangeDetailLabel(
+  UserDeviceStatusChangeRecord change, {
+  String timestampLabel = '',
+}) {
+  final previousStatus = change.previousStatus == null
+      ? 'Unknown'
+      : userDeviceStatusLabel(change.previousStatus!);
+  final parts = [
+    '$previousStatus to ${userDeviceStatusLabel(change.nextStatus)}',
+    if (change.changedByEmail.isNotEmpty) 'by ${change.changedByEmail}',
+    if (timestampLabel.trim().isNotEmpty) timestampLabel.trim(),
+  ];
+
+  return parts.join(' | ');
 }
