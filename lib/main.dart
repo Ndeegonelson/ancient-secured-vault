@@ -454,6 +454,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return label[0].toUpperCase() + label.substring(1);
   }
 
+  String formatActivitySubtitle(ReaderActivityRecord record) {
+    final parts = [
+      record.pdfTitle,
+      record.userEmail.isEmpty ? 'Unknown reader' : record.userEmail,
+      if (record.deviceAuthorizationLabel.isNotEmpty)
+        record.deviceAuthorizationLabel,
+      formatDashboardTimestamp(record.createdAt),
+    ].where((part) => part.trim().isNotEmpty);
+
+    return parts.join(' | ');
+  }
+
   Future<void> showReaderAnalytics() async {
     if (!requireVaultManagerAccess()) return;
 
@@ -597,9 +609,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               style: const TextStyle(color: Colors.white70),
                             ),
                             subtitle: Text(
-                              '${record.pdfTitle} | '
-                              '${record.userEmail.isEmpty ? 'Unknown reader' : record.userEmail} | '
-                              '${formatDashboardTimestamp(record.createdAt)}',
+                              formatActivitySubtitle(record),
                               style: const TextStyle(color: Colors.white38),
                             ),
                           ),
@@ -4066,6 +4076,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           allowed: decision.allowed,
           accessDecisionReason: decision.reasonKey,
           deviceAuthorizationStatus: decision.deviceStatusKey,
+          deviceAuthorizationMode: userDeviceAuthorizationModeKey(
+            readerDeviceAuthorizationMode,
+          ),
           deviceAuthorizationEnforced: decision.deviceAuthorizationEnforced,
         ),
       );
