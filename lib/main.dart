@@ -27,6 +27,7 @@ import 'services/reader_activity_repository.dart';
 import 'services/user_access_repository.dart';
 import 'services/user_access_state.dart';
 import 'services/vault_document_metadata.dart';
+import 'services/vault_search_snippet.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
@@ -1792,6 +1793,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   List<TextSpan> highlightSearchText(String text, String keyword) {
+    if (keyword.trim().isEmpty) {
+      return [
+        TextSpan(
+          text: text,
+          style: const TextStyle(color: Colors.white70),
+        ),
+      ];
+    }
+
     final lowerText = text.toLowerCase();
     final lowerKeyword = keyword.toLowerCase();
 
@@ -2037,6 +2047,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           final data =
                                               filteredDocs[index].data()
                                                   as Map<String, dynamic>;
+                                          final snippet =
+                                              buildVaultSearchSnippet(
+                                                data['text']?.toString() ?? '',
+                                                keyword,
+                                              );
 
                                           return Card(
                                             color: const Color(0xFF1A1D26),
@@ -2073,22 +2088,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                                                   const SizedBox(height: 6),
 
-                                                  Text(
-                                                    data['text']
-                                                        .toString()
-                                                        .substring(
-                                                          0,
-                                                          data['text']
-                                                                      .toString()
-                                                                      .length >
-                                                                  150
-                                                              ? 150
-                                                              : data['text']
-                                                                    .toString()
-                                                                    .length,
-                                                        ),
-                                                    style: const TextStyle(
-                                                      color: Colors.white70,
+                                                  RichText(
+                                                    maxLines: 3,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    text: TextSpan(
+                                                      children:
+                                                          highlightSearchText(
+                                                            snippet,
+                                                            keyword,
+                                                          ),
                                                     ),
                                                   ),
                                                 ],
