@@ -3843,6 +3843,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   StreamSubscription<html.Event>? readerVisibilitySubscription;
   StreamSubscription<html.Event>? readerWindowBlurSubscription;
   StreamSubscription<html.Event>? readerWindowFocusSubscription;
+  StreamSubscription<html.MouseEvent>? readerContextMenuSubscription;
+  StreamSubscription<html.KeyboardEvent>? readerKeyDownSubscription;
   late final String readerSessionId;
   late final ReaderTtsService readerTtsService;
   late final ReaderNarrationProgressRepository narrationProgressRepository;
@@ -4288,6 +4290,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerWindowFocusSubscription = html.window.onFocus.listen((_) {
       updateReaderWindowActivity(isActive: true, source: 'window_focus');
     });
+    readerContextMenuSubscription = html.document.onContextMenu.listen((event) {
+      handleProtectedReaderAction(source: 'context_menu', event: event);
+    });
+    readerKeyDownSubscription = html.document.onKeyDown.listen((event) {
+      final shouldBlock = readerProtectionPolicy.shouldBlockShortcut(
+        event.key ?? '',
+        controlOrMetaPressed: event.ctrlKey || event.metaKey,
+      );
+
+      if (!shouldBlock) return;
+
+      handleProtectedReaderAction(
+        source: 'keyboard_${event.key?.toLowerCase() ?? 'shortcut'}',
+        event: event,
+      );
+    });
   }
 
   void updateReaderWindowActivity({
@@ -4314,6 +4332,34 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         },
       );
     }
+  }
+
+  void handleProtectedReaderAction({
+    required String source,
+    required html.Event event,
+  }) {
+    if (!canViewDocument || !readerProtectionPolicy.shouldDeterCopying) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(readerProtectionPolicy.protectedActionMessage)),
+      );
+    }
+
+    logReaderAction(
+      action: 'protected_reader_action_blocked',
+      details: {
+        'source': source,
+        'pageNumber': currentPdfPage,
+        'accessLevel': widget.accessLevel,
+      },
+    );
   }
 
   void openPdfPage(
@@ -8422,6 +8468,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerVisibilitySubscription?.cancel();
     readerWindowBlurSubscription?.cancel();
     readerWindowFocusSubscription?.cancel();
+    readerContextMenuSubscription?.cancel();
+    readerKeyDownSubscription?.cancel();
     readerTtsService.removeListener(observeNarrationSession);
     narrationCloudSession.dispose();
 

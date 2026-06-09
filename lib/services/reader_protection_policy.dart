@@ -19,6 +19,10 @@ class ReaderProtectionPolicy {
 
   bool get shouldDeterCopying => isProtectedDocument;
 
+  bool get shouldBlockContextMenu => isProtectedDocument;
+
+  bool get shouldBlockClipboardShortcuts => isProtectedDocument;
+
   bool get hasElevatedAccess => isAdmin || hasActiveSubscription;
 
   String get protectionLabel {
@@ -32,5 +36,18 @@ class ReaderProtectionPolicy {
 
   String get inactiveShieldMessage {
     return 'Return to this window to continue reading securely.';
+  }
+
+  String get protectedActionMessage {
+    return 'Protected reader mode keeps this document inside Ancient Secure Docs.';
+  }
+
+  bool shouldBlockShortcut(String key, {required bool controlOrMetaPressed}) {
+    if (!shouldBlockClipboardShortcuts || !controlOrMetaPressed) return false;
+
+    return switch (key.trim().toLowerCase()) {
+      'c' || 'x' || 's' || 'p' => true,
+      _ => false,
+    };
   }
 }

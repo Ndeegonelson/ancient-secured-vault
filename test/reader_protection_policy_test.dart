@@ -13,7 +13,13 @@ void main() {
     expect(policy.shouldShowWatermark, isFalse);
     expect(policy.shouldBlurWhenInactive, isFalse);
     expect(policy.shouldDeterCopying, isFalse);
+    expect(policy.shouldBlockContextMenu, isFalse);
+    expect(policy.shouldBlockClipboardShortcuts, isFalse);
     expect(policy.protectionLabel, 'Standard reader');
+    expect(
+      policy.shouldBlockShortcut('c', controlOrMetaPressed: true),
+      isFalse,
+    );
   });
 
   test('protects premium documents for subscribed readers', () {
@@ -27,12 +33,28 @@ void main() {
     expect(policy.shouldShowWatermark, isTrue);
     expect(policy.shouldBlurWhenInactive, isTrue);
     expect(policy.shouldDeterCopying, isTrue);
+    expect(policy.shouldBlockContextMenu, isTrue);
+    expect(policy.shouldBlockClipboardShortcuts, isTrue);
     expect(policy.hasElevatedAccess, isTrue);
     expect(policy.protectionLabel, 'Premium protected reader');
     expect(policy.inactiveShieldTitle, 'Protected document hidden');
     expect(
       policy.inactiveShieldMessage,
       'Return to this window to continue reading securely.',
+    );
+    expect(
+      policy.protectedActionMessage,
+      'Protected reader mode keeps this document inside Ancient Secure Docs.',
+    );
+    expect(policy.shouldBlockShortcut('c', controlOrMetaPressed: true), isTrue);
+    expect(policy.shouldBlockShortcut('P', controlOrMetaPressed: true), isTrue);
+    expect(
+      policy.shouldBlockShortcut('a', controlOrMetaPressed: true),
+      isFalse,
+    );
+    expect(
+      policy.shouldBlockShortcut('c', controlOrMetaPressed: false),
+      isFalse,
     );
   });
 
