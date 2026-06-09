@@ -1503,7 +1503,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String storagePath,
     String category = 'General',
     String? pdfUrl,
+    bool replaceExisting = false,
   }) async {
+    if (replaceExisting) {
+      await clearSearchIndexForStoragePath(storagePath);
+    }
+
     final document = PdfDocument(inputBytes: pdfBytes);
     final extractor = PdfTextExtractor(document);
     final normalizedAccessLevel = accessLevel.trim().toLowerCase();
@@ -1550,6 +1555,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
     document.dispose();
   }
 
+  Future<int> clearSearchIndexForStoragePath(String storagePath) async {
+    final normalizedStoragePath = storagePath.trim();
+    if (normalizedStoragePath.isEmpty) return 0;
+
+    final existing = await FirebaseFirestore.instance
+        .collection('pdf_search_index')
+        .where('storagePath', isEqualTo: normalizedStoragePath)
+        .get();
+
+    var deletedCount = 0;
+    for (var i = 0; i < existing.docs.length; i += 450) {
+      final batch = FirebaseFirestore.instance.batch();
+      final chunk = existing.docs.skip(i).take(450);
+      for (final doc in chunk) {
+        batch.delete(doc.reference);
+        deletedCount++;
+      }
+      await batch.commit();
+    }
+
+    return deletedCount;
+  }
+
   Future<void> indexExistingVaultPdfs() async {
     if (!requireVaultManagerAccess()) return;
 
@@ -1564,14 +1592,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         for (final item in result.items) {
           final existing = await FirebaseFirestore.instance
               .collection('pdf_search_index')
-              .where('pdfTitle', isEqualTo: item.name)
+              .where('storagePath', isEqualTo: item.fullPath)
               .limit(1)
               .get();
-
-          if (existing.docs.isNotEmpty) {
-            summary = summary.addSkipped();
-            continue;
-          }
+          final hasExistingIndex = existing.docs.isNotEmpty;
 
           FullMetadata? metadata;
           try {
@@ -1596,8 +1620,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             accessLevel: documentMetadata.accessLevel,
             storagePath: item.fullPath,
             category: documentMetadata.category,
+            replaceExisting: hasExistingIndex,
           );
-          summary = summary.addIndexed();
+          summary = hasExistingIndex
+              ? summary.addRefreshed()
+              : summary.addIndexed();
         }
 
         return summary;

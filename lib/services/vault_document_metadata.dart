@@ -131,17 +131,28 @@ class VaultDocumentInventorySummary {
 class VaultDocumentIndexingSummary {
   const VaultDocumentIndexingSummary({
     this.indexedCount = 0,
+    this.refreshedCount = 0,
     this.skippedCount = 0,
   });
 
   final int indexedCount;
+  final int refreshedCount;
   final int skippedCount;
 
-  int get inspectedCount => indexedCount + skippedCount;
+  int get inspectedCount => indexedCount + refreshedCount + skippedCount;
 
   VaultDocumentIndexingSummary addIndexed() {
     return VaultDocumentIndexingSummary(
       indexedCount: indexedCount + 1,
+      refreshedCount: refreshedCount,
+      skippedCount: skippedCount,
+    );
+  }
+
+  VaultDocumentIndexingSummary addRefreshed() {
+    return VaultDocumentIndexingSummary(
+      indexedCount: indexedCount,
+      refreshedCount: refreshedCount + 1,
       skippedCount: skippedCount,
     );
   }
@@ -149,6 +160,7 @@ class VaultDocumentIndexingSummary {
   VaultDocumentIndexingSummary addSkipped() {
     return VaultDocumentIndexingSummary(
       indexedCount: indexedCount,
+      refreshedCount: refreshedCount,
       skippedCount: skippedCount + 1,
     );
   }
@@ -156,6 +168,7 @@ class VaultDocumentIndexingSummary {
   VaultDocumentIndexingSummary merge(VaultDocumentIndexingSummary other) {
     return VaultDocumentIndexingSummary(
       indexedCount: indexedCount + other.indexedCount,
+      refreshedCount: refreshedCount + other.refreshedCount,
       skippedCount: skippedCount + other.skippedCount,
     );
   }
@@ -164,7 +177,7 @@ class VaultDocumentIndexingSummary {
     if (inspectedCount == 0) return 'No vault PDFs were found to index.';
 
     return 'Vault indexing complete: $indexedCount indexed, '
-        '$skippedCount skipped.';
+        '$refreshedCount refreshed, $skippedCount skipped.';
   }
 }
 

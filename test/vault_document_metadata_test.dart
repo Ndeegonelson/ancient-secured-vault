@@ -83,15 +83,17 @@ void main() {
   test('summarizes vault indexing results for admin feedback', () {
     final summary = const VaultDocumentIndexingSummary()
         .addIndexed()
+        .addRefreshed()
         .addSkipped()
         .merge(const VaultDocumentIndexingSummary(indexedCount: 2));
 
     expect(summary.indexedCount, 3);
+    expect(summary.refreshedCount, 1);
     expect(summary.skippedCount, 1);
-    expect(summary.inspectedCount, 4);
+    expect(summary.inspectedCount, 5);
     expect(
       summary.displayMessage,
-      'Vault indexing complete: 3 indexed, 1 skipped.',
+      'Vault indexing complete: 3 indexed, 1 refreshed, 1 skipped.',
     );
     expect(
       const VaultDocumentIndexingSummary().displayMessage,
