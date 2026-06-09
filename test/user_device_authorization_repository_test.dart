@@ -36,6 +36,31 @@ void main() {
     expect(readUserDeviceStatus('unknown'), UserDeviceStatus.pending);
   });
 
+  test('describes device authorization modes for admin review', () {
+    expect(
+      userDeviceAuthorizationModeKey(UserDeviceAuthorizationMode.monitoring),
+      'monitoring',
+    );
+    expect(
+      userDeviceAuthorizationModeTitle(UserDeviceAuthorizationMode.monitoring),
+      'Monitoring mode',
+    );
+    expect(
+      userDeviceAuthorizationModeDescription(
+        UserDeviceAuthorizationMode.monitoring,
+      ),
+      contains('logged for admin review'),
+    );
+    expect(
+      userDeviceAuthorizationIsEnforced(UserDeviceAuthorizationMode.monitoring),
+      isFalse,
+    );
+    expect(
+      userDeviceAuthorizationIsEnforced(UserDeviceAuthorizationMode.enforcing),
+      isTrue,
+    );
+  });
+
   test('sorts pending then blocked then trusted devices for admin review', () {
     final trusted = UserDeviceRecord.fromMap({
       'email': 'trusted@example.com',

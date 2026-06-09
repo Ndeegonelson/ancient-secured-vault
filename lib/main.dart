@@ -49,6 +49,9 @@ import 'dart:ui_web' as ui;
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+const UserDeviceAuthorizationMode readerDeviceAuthorizationMode =
+    UserDeviceAuthorizationMode.monitoring;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -1472,6 +1475,65 @@ class _DashboardScreenState extends State<DashboardScreen> {
               });
             }
 
+            Widget deviceAuthorizationModeBanner() {
+              final isEnforced = userDeviceAuthorizationIsEnforced(
+                readerDeviceAuthorizationMode,
+              );
+
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF151821),
+                  border: Border.all(
+                    color: isEnforced ? Colors.greenAccent : Colors.white24,
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      isEnforced
+                          ? Icons.verified_user_outlined
+                          : Icons.visibility_outlined,
+                      color: isEnforced
+                          ? Colors.greenAccent
+                          : Colors.orangeAccent,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            userDeviceAuthorizationModeTitle(
+                              readerDeviceAuthorizationMode,
+                            ),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            userDeviceAuthorizationModeDescription(
+                              readerDeviceAuthorizationMode,
+                            ),
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
             Widget deviceActiveFilterBar(List<String> labels) {
               if (labels.isEmpty) return const SizedBox.shrink();
 
@@ -1537,12 +1599,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                       final summary = snapshot.data!;
                       if (!summary.hasDevices) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text(
-                            'No device authorization records were found yet.',
-                            style: TextStyle(color: Colors.white70),
-                          ),
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            deviceAuthorizationModeBanner(),
+                            const SizedBox(height: 14),
+                            const Text(
+                              'No device authorization records were found yet.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ],
                         );
                       }
 
@@ -1573,6 +1640,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            deviceAuthorizationModeBanner(),
+                            const SizedBox(height: 18),
                             Wrap(
                               spacing: 10,
                               runSpacing: 10,
@@ -3884,6 +3953,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       userAccess: access,
       documentAccessLevel: widget.accessLevel,
       deviceStatus: deviceStatus,
+      enforceDeviceAuthorization: userDeviceAuthorizationIsEnforced(
+        readerDeviceAuthorizationMode,
+      ),
     );
 
     if (!mounted) return;

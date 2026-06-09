@@ -4,6 +4,8 @@ import 'user_access_repository.dart';
 
 enum UserDeviceStatus { pending, trusted, blocked }
 
+enum UserDeviceAuthorizationMode { monitoring, enforcing }
+
 const int userDeviceDefaultDisplayLimit = 20;
 
 abstract interface class UserDeviceAuthorizationStore {
@@ -436,6 +438,35 @@ String userDeviceStatusLabel(UserDeviceStatus status) {
     UserDeviceStatus.trusted => 'Trusted',
     UserDeviceStatus.blocked => 'Blocked',
   };
+}
+
+String userDeviceAuthorizationModeKey(UserDeviceAuthorizationMode mode) {
+  return switch (mode) {
+    UserDeviceAuthorizationMode.monitoring => 'monitoring',
+    UserDeviceAuthorizationMode.enforcing => 'enforcing',
+  };
+}
+
+String userDeviceAuthorizationModeTitle(UserDeviceAuthorizationMode mode) {
+  return switch (mode) {
+    UserDeviceAuthorizationMode.monitoring => 'Monitoring mode',
+    UserDeviceAuthorizationMode.enforcing => 'Enforcement mode',
+  };
+}
+
+String userDeviceAuthorizationModeDescription(
+  UserDeviceAuthorizationMode mode,
+) {
+  return switch (mode) {
+    UserDeviceAuthorizationMode.monitoring =>
+      'Devices are logged for admin review, but blocked or pending devices can still open documents.',
+    UserDeviceAuthorizationMode.enforcing =>
+      'Only trusted devices can open protected documents.',
+  };
+}
+
+bool userDeviceAuthorizationIsEnforced(UserDeviceAuthorizationMode mode) {
+  return mode == UserDeviceAuthorizationMode.enforcing;
 }
 
 UserDeviceStatus readUserDeviceStatus(
