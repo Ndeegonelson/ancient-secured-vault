@@ -1764,6 +1764,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 final keyword = keywordController.text.trim();
 
                 if (keyword.isEmpty) return;
+                if (vaultPrimarySearchTerm(keyword).isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Enter a searchable word.')),
+                  );
+                  return;
+                }
 
                 Navigator.pop(context);
 
@@ -1848,6 +1854,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> showGlobalSearchResults(String keyword) async {
+    final searchTerm = vaultPrimarySearchTerm(keyword);
     String accessFilter = 'all';
     String categoryFilter = '';
 
@@ -1916,10 +1923,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: FutureBuilder<QuerySnapshot>(
                         future: FirebaseFirestore.instance
                             .collection('pdf_search_index')
-                            .where(
-                              'keywords',
-                              arrayContains: keyword.toLowerCase(),
-                            )
+                            .where('keywords', arrayContains: searchTerm)
                             .limit(30)
                             .get(),
 
@@ -2050,7 +2054,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           final snippet =
                                               buildVaultSearchSnippet(
                                                 data['text']?.toString() ?? '',
-                                                keyword,
+                                                searchTerm,
                                               );
 
                                           return Card(
@@ -2096,7 +2100,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                       children:
                                                           highlightSearchText(
                                                             snippet,
-                                                            keyword,
+                                                            searchTerm,
                                                           ),
                                                     ),
                                                   ),
