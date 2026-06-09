@@ -132,6 +132,38 @@ void main() {
     );
   });
 
+  test('describes readiness before device enforcement is enabled', () {
+    final emptySummary = UserDeviceSummary.fromDevices(const []);
+    final pendingSummary = UserDeviceSummary.fromDevices([
+      UserDeviceRecord.fromMap({'status': 'pending'}, id: 'pending-device'),
+      UserDeviceRecord.fromMap({'status': 'trusted'}, id: 'trusted-device'),
+    ]);
+    final readySummary = UserDeviceSummary.fromDevices([
+      UserDeviceRecord.fromMap({'status': 'trusted'}, id: 'trusted-device'),
+      UserDeviceRecord.fromMap({'status': 'blocked'}, id: 'blocked-device'),
+    ]);
+
+    expect(emptySummary.isReadyForEnforcement, isFalse);
+    expect(
+      userDeviceAuthorizationReadinessTitle(emptySummary),
+      'Waiting for device records',
+    );
+    expect(pendingSummary.isReadyForEnforcement, isFalse);
+    expect(
+      userDeviceAuthorizationReadinessDescription(pendingSummary),
+      '1 pending device should be trusted or blocked before enforcement is enabled.',
+    );
+    expect(readySummary.isReadyForEnforcement, isTrue);
+    expect(
+      userDeviceAuthorizationReadinessTitle(readySummary),
+      'Ready for enforcement trial',
+    );
+    expect(
+      userDeviceAuthorizationReadinessDescription(readySummary),
+      '1 trusted device and 1 blocked device are classified.',
+    );
+  });
+
   test('builds active device filter labels and filtered count labels', () {
     expect(
       userDeviceActiveFilterLabels(

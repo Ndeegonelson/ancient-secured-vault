@@ -323,6 +323,8 @@ class UserDeviceSummary {
       }),
     );
   }
+
+  bool get isReadyForEnforcement => hasDevices && pendingCount == 0;
 }
 
 class UserDeviceAuthorizationRepository
@@ -467,6 +469,31 @@ String userDeviceAuthorizationModeDescription(
 
 bool userDeviceAuthorizationIsEnforced(UserDeviceAuthorizationMode mode) {
   return mode == UserDeviceAuthorizationMode.enforcing;
+}
+
+String userDeviceAuthorizationReadinessTitle(UserDeviceSummary summary) {
+  if (!summary.hasDevices) return 'Waiting for device records';
+  if (summary.pendingCount > 0) return 'Review pending devices first';
+  return 'Ready for enforcement trial';
+}
+
+String userDeviceAuthorizationReadinessDescription(UserDeviceSummary summary) {
+  if (!summary.hasDevices) {
+    return 'Open a document from at least one browser to create the first reviewable device record.';
+  }
+
+  if (summary.pendingCount > 0) {
+    final deviceLabel = summary.pendingCount == 1 ? 'device' : 'devices';
+    return '${summary.pendingCount} pending $deviceLabel should be trusted or blocked before enforcement is enabled.';
+  }
+
+  final trustedLabel = summary.trustedCount == 1
+      ? 'trusted device'
+      : 'trusted devices';
+  final blockedLabel = summary.blockedCount == 1
+      ? 'blocked device'
+      : 'blocked devices';
+  return '${summary.trustedCount} $trustedLabel and ${summary.blockedCount} $blockedLabel are classified.';
 }
 
 UserDeviceStatus readUserDeviceStatus(

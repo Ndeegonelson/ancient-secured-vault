@@ -1534,6 +1534,61 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
             }
 
+            Widget deviceAuthorizationReadinessBanner(
+              UserDeviceSummary summary,
+            ) {
+              final isReady = summary.isReadyForEnforcement;
+
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF151821),
+                  border: Border.all(
+                    color: isReady ? Colors.greenAccent : Colors.orangeAccent,
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      isReady
+                          ? Icons.check_circle_outline
+                          : Icons.pending_actions_outlined,
+                      color: isReady ? Colors.greenAccent : Colors.orangeAccent,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            userDeviceAuthorizationReadinessTitle(summary),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            userDeviceAuthorizationReadinessDescription(
+                              summary,
+                            ),
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
             Widget deviceActiveFilterBar(List<String> labels) {
               if (labels.isEmpty) return const SizedBox.shrink();
 
@@ -1604,6 +1659,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             deviceAuthorizationModeBanner(),
+                            const SizedBox(height: 10),
+                            deviceAuthorizationReadinessBanner(summary),
                             const SizedBox(height: 14),
                             const Text(
                               'No device authorization records were found yet.',
@@ -1641,6 +1698,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             deviceAuthorizationModeBanner(),
+                            const SizedBox(height: 10),
+                            deviceAuthorizationReadinessBanner(summary),
                             const SizedBox(height: 18),
                             Wrap(
                               spacing: 10,
