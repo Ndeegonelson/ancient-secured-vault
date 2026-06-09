@@ -99,6 +99,34 @@ void main() {
     );
   });
 
+  test('labels vault document sections with visible counts', () {
+    expect(
+      vaultDocumentSectionTitle(
+        title: 'FREE ACCESS ZONE',
+        visibleCount: 3,
+        totalCount: 3,
+      ),
+      'FREE ACCESS ZONE (3 PDFs)',
+    );
+    expect(
+      vaultDocumentSectionTitle(
+        title: 'MAIN VAULT PDFs',
+        visibleCount: 1,
+        totalCount: 4,
+        hasActiveFilter: true,
+      ),
+      'MAIN VAULT PDFs (1 of 4 PDFs)',
+    );
+    expect(
+      vaultDocumentSectionTitle(
+        title: 'MAIN VAULT PDFs',
+        visibleCount: -1,
+        totalCount: -1,
+      ),
+      'MAIN VAULT PDFs (0 PDFs)',
+    );
+  });
+
   test('sorts dashboard documents by category then name', () {
     final documents = [
       {'name': 'z-policy.pdf', 'category': 'Research'},

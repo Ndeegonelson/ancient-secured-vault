@@ -270,6 +270,23 @@ List<Map<String, dynamic>> filterVaultDocumentsForDashboard(
   );
 }
 
+String vaultDocumentSectionTitle({
+  required String title,
+  required int visibleCount,
+  required int totalCount,
+  bool hasActiveFilter = false,
+}) {
+  final safeVisibleCount = visibleCount < 0 ? 0 : visibleCount;
+  final safeTotalCount = totalCount < 0 ? 0 : totalCount;
+  final visibleLabel = safeVisibleCount == 1 ? 'PDF' : 'PDFs';
+
+  if (!hasActiveFilter || safeVisibleCount == safeTotalCount) {
+    return '$title ($safeVisibleCount $visibleLabel)';
+  }
+
+  return '$title ($safeVisibleCount of $safeTotalCount PDFs)';
+}
+
 List<Map<String, dynamic>> sortVaultDocumentsForDisplay(
   Iterable<Map<String, dynamic>> documents,
 ) {

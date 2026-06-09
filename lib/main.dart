@@ -2515,6 +2515,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final hasDashboardDocumentSearch = dashboardDocumentSearchQuery
         .trim()
         .isNotEmpty;
+    final hasFreeDocumentFilter =
+        hasDashboardDocumentSearch ||
+        freeDocumentCategoryFilter.trim().isNotEmpty;
+    final hasPremiumDocumentFilter =
+        hasDashboardDocumentSearch ||
+        premiumDocumentCategoryFilter.trim().isNotEmpty;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
@@ -2672,9 +2678,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                         const SizedBox(height: 20),
 
-                        const Text(
-                          'FREE ACCESS ZONE',
-                          style: TextStyle(
+                        Text(
+                          vaultDocumentSectionTitle(
+                            title: 'FREE ACCESS ZONE',
+                            visibleCount: filteredFreePdfFiles.length,
+                            totalCount: freePdfFiles.length,
+                            hasActiveFilter: hasFreeDocumentFilter,
+                          ),
+                          style: const TextStyle(
                             color: Colors.orangeAccent,
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -2772,9 +2783,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                         const SizedBox(height: 30),
                         if (canAccessMainVault) ...[
-                          const Text(
-                            'MAIN VAULT PDFs',
-                            style: TextStyle(
+                          Text(
+                            vaultDocumentSectionTitle(
+                              title: 'MAIN VAULT PDFs',
+                              visibleCount: filteredPremiumPdfFiles.length,
+                              totalCount: premiumPdfFiles.length,
+                              hasActiveFilter: hasPremiumDocumentFilter,
+                            ),
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
