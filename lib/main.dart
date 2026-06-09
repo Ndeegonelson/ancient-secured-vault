@@ -605,14 +605,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return UserAccessPlan.free;
     }
 
-    String planActionLabel(UserAccessPlan plan) {
-      return switch (plan) {
-        UserAccessPlan.admin => 'Admin',
-        UserAccessPlan.premium => 'Premium',
-        UserAccessPlan.free => 'Free',
-      };
-    }
-
     List<UserAccessPlan> availablePlanActions(UserAccessRecord user) {
       final activePlan = currentPlan(user);
       return UserAccessPlan.values
@@ -648,6 +640,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 await userAccessRepository.saveAccessPlan(
                   email: user.email,
                   plan: plan,
+                  changedByEmail: currentUserEmail,
+                  previousPlan: currentPlan(user),
                 );
 
                 if (!mounted) return;
@@ -660,7 +654,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      '${user.email} moved to ${planActionLabel(plan)} access.',
+                      '${user.email} moved to ${userAccessPlanLabel(plan)} access.',
                     ),
                   ),
                 );
@@ -706,7 +700,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       disabledForegroundColor: Colors.white24,
                       visualDensity: VisualDensity.compact,
                     ),
-                    child: Text(planActionLabel(plan)),
+                    child: Text(userAccessPlanLabel(plan)),
                   );
                 }).toList(),
               );
@@ -827,6 +821,52 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 trailing: accessActions(user),
                               );
                             }),
+                            if (summary.hasRecentChanges) ...[
+                              const SizedBox(height: 18),
+                              const Text(
+                                'Recent Access Changes',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              ...summary.recentChanges.map((change) {
+                                final previousPlan = change.previousPlan == null
+                                    ? 'Unknown'
+                                    : userAccessPlanLabel(change.previousPlan!);
+
+                                return ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(
+                                    Icons.manage_history_outlined,
+                                    color: Colors.greenAccent,
+                                  ),
+                                  title: Text(
+                                    change.targetEmail.isEmpty
+                                        ? 'Unknown user'
+                                        : change.targetEmail,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    [
+                                      '$previousPlan to ${userAccessPlanLabel(change.nextPlan)}',
+                                      if (change.changedByEmail.isNotEmpty)
+                                        'by ${change.changedByEmail}',
+                                      formatDashboardTimestamp(
+                                        change.createdAt,
+                                      ),
+                                    ].join(' | '),
+                                    style: const TextStyle(
+                                      color: Colors.white38,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
                           ],
                         ),
                       );

@@ -103,4 +103,38 @@ void main() {
       'accessLevel': 'free',
     });
   });
+
+  test('builds an audit payload for admin access changes', () {
+    final draft = UserAccessChangeDraft(
+      targetEmail: ' Reader@Example.COM ',
+      changedByEmail: ' Admin@Example.COM ',
+      previousPlan: UserAccessPlan.free,
+      nextPlan: UserAccessPlan.premium,
+    );
+
+    expect(draft.toMap(createdAt: 'now'), {
+      'targetEmail': 'reader@example.com',
+      'changedByEmail': 'admin@example.com',
+      'previousPlan': 'free',
+      'nextPlan': 'premium',
+      'createdAt': 'now',
+    });
+  });
+
+  test('reads recent admin access change records safely', () {
+    final change = UserAccessChangeRecord.fromMap({
+      'targetEmail': ' Reader@Example.COM ',
+      'changedByEmail': ' Admin@Example.COM ',
+      'previousPlan': 'premium',
+      'nextPlan': 'admin',
+      'createdAt': 'now',
+    }, id: 'change-1');
+
+    expect(change.id, 'change-1');
+    expect(change.targetEmail, 'reader@example.com');
+    expect(change.changedByEmail, 'admin@example.com');
+    expect(change.previousPlan, UserAccessPlan.premium);
+    expect(change.nextPlan, UserAccessPlan.admin);
+    expect(change.createdAt, 'now');
+  });
 }
