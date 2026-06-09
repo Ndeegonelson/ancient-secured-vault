@@ -4509,7 +4509,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             : container.clientWidth;
         final availableWidth = math.max(320, containerWidth - 48);
         final displayScale = (availableWidth / baseWidth).clamp(0.6, 1.8);
-        final pixelRatio = math.min(html.window.devicePixelRatio, 1.5);
+        final targetPixelRatio = pageCount <= 12
+            ? 2.0
+            : pageCount <= 60
+            ? 1.5
+            : 1.25;
+        final pixelRatio = math.min(
+          math.max(html.window.devicePixelRatio, targetPixelRatio),
+          2.25,
+        );
         final renderScale = displayScale * pixelRatio;
         final displayViewport = js_util.callMethod<Object>(
           page,
@@ -4562,6 +4570,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               ..style.width = '${displayWidth}px'
               ..style.height = '${displayHeight}px'
               ..style.display = 'block'
+              ..style.imageRendering = 'auto'
               ..style.userSelect = 'none';
 
         wrapper.children.add(placeholder);
@@ -4583,6 +4592,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         if (renderGeneration != protectedPdfRenderGeneration) return;
 
         final context = job.canvas.context2D;
+        js_util.setProperty(context, 'imageSmoothingEnabled', true);
+        js_util.setProperty(context, 'imageSmoothingQuality', 'high');
         final renderTask = js_util.callMethod<Object>(job.page, 'render', [
           js_util.jsify({
             'canvasContext': context,
