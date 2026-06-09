@@ -76,5 +76,7 @@ void main() {
     expect(summary.categoryCounts.first.freeCount, 2);
     expect(summary.categoryCounts.first.premiumCount, 1);
     expect(summary.categoryCounts.first.totalCount, 3);
+    expect(summary.countForCategory('finance')?.totalCount, 3);
+    expect(summary.countForCategory('Unknown'), isNull);
   });
 }

@@ -114,6 +114,18 @@ class VaultDocumentInventorySummary {
 
   int get totalCount => freeCount + premiumCount;
   bool get hasDocuments => totalCount > 0;
+
+  VaultDocumentCategoryCount? countForCategory(String category) {
+    final normalizedCategory = normalizeVaultDocumentCategory(
+      category,
+    ).toLowerCase();
+
+    for (final count in categoryCounts) {
+      if (count.category.toLowerCase() == normalizedCategory) return count;
+    }
+
+    return null;
+  }
 }
 
 String normalizeVaultAccessLevel(String? value, {String fallback = 'premium'}) {

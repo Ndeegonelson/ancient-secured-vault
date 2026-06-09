@@ -659,6 +659,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         (count) => ListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
+                          hoverColor: Colors.greenAccent.withValues(
+                            alpha: 0.08,
+                          ),
                           leading: const Icon(
                             Icons.folder_outlined,
                             color: Colors.greenAccent,
@@ -672,13 +675,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             '${count.premiumCount} premium',
                             style: const TextStyle(color: Colors.white38),
                           ),
-                          trailing: Text(
-                            count.totalCount.toString(),
-                            style: const TextStyle(
-                              color: Colors.greenAccent,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                count.totalCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(
+                                Icons.filter_alt_outlined,
+                                color: Colors.white38,
+                                size: 18,
+                              ),
+                            ],
                           ),
+                          onTap: () {
+                            setState(() {
+                              freeDocumentCategoryFilter = count.category;
+                              premiumDocumentCategoryFilter = count.category;
+                            });
+                            Navigator.pop(context);
+                          },
                         ),
                       ),
                   ],
@@ -686,6 +707,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
             actions: [
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    freeDocumentCategoryFilter = '';
+                    premiumDocumentCategoryFilter = '';
+                  });
+                  Navigator.pop(context);
+                },
+                child: const Text(
+                  'Show All',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text(
