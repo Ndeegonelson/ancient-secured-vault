@@ -1838,7 +1838,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   List<TextSpan> highlightSearchText(String text, String keyword) {
-    if (keyword.trim().isEmpty) {
+    final searchTerms = vaultSearchTerms(keyword);
+    final fallbackTerm = keyword.trim().toLowerCase();
+    final terms = searchTerms.isEmpty && fallbackTerm.isNotEmpty
+        ? [fallbackTerm]
+        : searchTerms;
+
+    if (terms.isEmpty) {
       return [
         TextSpan(
           text: text,
@@ -1848,14 +1854,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     final lowerText = text.toLowerCase();
-    final lowerKeyword = keyword.toLowerCase();
-
     final spans = <TextSpan>[];
 
     int start = 0;
 
     while (true) {
-      final index = lowerText.indexOf(lowerKeyword, start);
+      var index = -1;
+      var matchedTerm = '';
+
+      for (final term in terms) {
+        final termIndex = lowerText.indexOf(term, start);
+        if (termIndex < 0) continue;
+        if (index < 0 ||
+            termIndex < index ||
+            (termIndex == index && term.length > matchedTerm.length)) {
+          index = termIndex;
+          matchedTerm = term;
+        }
+      }
 
       if (index == -1) {
         spans.add(
@@ -1878,7 +1894,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       spans.add(
         TextSpan(
-          text: text.substring(index, index + keyword.length),
+          text: text.substring(index, index + matchedTerm.length),
           style: const TextStyle(
             color: Colors.yellow,
             fontWeight: FontWeight.bold,
@@ -1886,7 +1902,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       );
 
-      start = index + keyword.length;
+      start = index + matchedTerm.length;
     }
 
     return spans;
@@ -1894,6 +1910,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> showGlobalSearchResults(String keyword) async {
     final searchTerm = vaultPrimarySearchTerm(keyword);
+    final searchTerms = vaultSearchTerms(keyword).take(4).toList();
+    if (searchTerms.isEmpty && searchTerm.isNotEmpty) {
+      searchTerms.add(searchTerm);
+    }
     String accessFilter = 'all';
     String categoryFilter = '';
 
@@ -1961,16 +1981,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Expanded(
                       child: FutureBuilder<List<QuerySnapshot>>(
                         future: Future.wait([
-                          FirebaseFirestore.instance
-                              .collection('pdf_search_index')
-                              .where('keywords', arrayContains: searchTerm)
-                              .limit(30)
-                              .get(),
-                          FirebaseFirestore.instance
-                              .collection('pdf_search_index')
-                              .where('titleKeywords', arrayContains: searchTerm)
-                              .limit(30)
-                              .get(),
+                          for (final term in searchTerms) ...[
+                            FirebaseFirestore.instance
+                                .collection('pdf_search_index')
+                                .where('keywords', arrayContains: term)
+                                .limit(30)
+                                .get(),
+                            FirebaseFirestore.instance
+                                .collection('pdf_search_index')
+                                .where('titleKeywords', arrayContains: term)
+                                .limit(30)
+                                .get(),
+                          ],
                         ]),
 
                         builder: (context, snapshot) {
@@ -1996,20 +2018,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               final titleKeywords = data['titleKeywords'];
                               final hasIndexedTitleMatch =
                                   titleKeywords is Iterable &&
-                                  titleKeywords
-                                      .map((value) => value.toString())
-                                      .contains(searchTerm);
+                                  vaultIndexedTermsMatchQuery(
+                                    titleKeywords,
+                                    keyword,
+                                  );
                               final hasLegacyTitleMatch =
                                   titleKeywords == null &&
-                                  vaultTextMatchesSearchTerm(
+                                  vaultTextMatchesAnySearchTerm(
                                     data['pdfTitle']?.toString() ?? '',
-                                    searchTerm,
+                                    keyword,
                                   );
                               final hasPageMatch =
                                   data['keywords'] is Iterable &&
-                                  (data['keywords'] as Iterable)
-                                      .map((value) => value.toString())
-                                      .contains(searchTerm);
+                                  vaultIndexedTermsMatchQuery(
+                                    data['keywords'] as Iterable,
+                                    keyword,
+                                  );
 
                               if (!hasPageMatch &&
                                   !hasIndexedTitleMatch &&
@@ -2042,6 +2066,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   'premium';
                             }).toList();
                           }
+
+                          filteredDocs.sort((left, right) {
+                            final leftData =
+                                left.data() as Map<String, dynamic>;
+                            final rightData =
+                                right.data() as Map<String, dynamic>;
+                            final leftScore = vaultSearchMatchScore(
+                              query: keyword,
+                              title: leftData['pdfTitle']?.toString() ?? '',
+                              text: leftData['text']?.toString() ?? '',
+                              pageKeywords: leftData['keywords'] is Iterable
+                                  ? leftData['keywords'] as Iterable
+                                  : const [],
+                              titleKeywords:
+                                  leftData['titleKeywords'] is Iterable
+                                  ? leftData['titleKeywords'] as Iterable
+                                  : const [],
+                            );
+                            final rightScore = vaultSearchMatchScore(
+                              query: keyword,
+                              title: rightData['pdfTitle']?.toString() ?? '',
+                              text: rightData['text']?.toString() ?? '',
+                              pageKeywords: rightData['keywords'] is Iterable
+                                  ? rightData['keywords'] as Iterable
+                                  : const [],
+                              titleKeywords:
+                                  rightData['titleKeywords'] is Iterable
+                                  ? rightData['titleKeywords'] as Iterable
+                                  : const [],
+                            );
+                            final scoreComparison = rightScore.compareTo(
+                              leftScore,
+                            );
+                            if (scoreComparison != 0) return scoreComparison;
+
+                            final titleComparison =
+                                (leftData['pdfTitle']?.toString() ?? '')
+                                    .compareTo(
+                                      rightData['pdfTitle']?.toString() ?? '',
+                                    );
+                            if (titleComparison != 0) return titleComparison;
+
+                            final leftPage = leftData['pageNumber'] is int
+                                ? leftData['pageNumber'] as int
+                                : int.tryParse(
+                                        leftData['pageNumber'].toString(),
+                                      ) ??
+                                      0;
+                            final rightPage = rightData['pageNumber'] is int
+                                ? rightData['pageNumber'] as int
+                                : int.tryParse(
+                                        rightData['pageNumber'].toString(),
+                                      ) ??
+                                      0;
+
+                            return leftPage.compareTo(rightPage);
+                          });
 
                           final categoryOptions = vaultDocumentCategoryOptions(
                             filteredDocs.map(
@@ -2129,10 +2210,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           final data =
                                               filteredDocs[index].data()
                                                   as Map<String, dynamic>;
+                                          final snippetKeyword =
+                                              vaultBestSnippetKeyword(
+                                                data['text']?.toString() ?? '',
+                                                keyword,
+                                              );
                                           final snippet =
                                               buildVaultSearchSnippet(
                                                 data['text']?.toString() ?? '',
-                                                searchTerm,
+                                                snippetKeyword.isEmpty
+                                                    ? searchTerm
+                                                    : snippetKeyword,
                                               );
 
                                           return Card(
