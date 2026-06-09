@@ -3678,6 +3678,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final ReaderSavedPositionRepository savedPositionRepository;
   late final ReaderActivityRepository readerActivityRepository;
   late final ReaderDeviceIdentity readerDeviceIdentity;
+  late final UserDeviceAuthorizationRepository
+  readerDeviceAuthorizationRepository;
   late final UserAccessRepository userAccessRepository;
   late final ReaderCloudNarrationSessionCoordinator narrationCloudSession;
   late final ReaderNarrationPlaybackCoordinator narrationPlaybackCoordinator;
@@ -3885,6 +3887,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     if (!mounted) return;
 
     await logReaderAccessAttempt(decision: accessDecision, userAccess: access);
+    await recordReaderDeviceSeen();
 
     if (!mounted) return;
 
@@ -3936,6 +3939,23 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       );
     } catch (_) {
       // Logging should not block the reader if Firestore rules are not ready yet.
+    }
+  }
+
+  Future<void> recordReaderDeviceSeen() async {
+    try {
+      await readerDeviceAuthorizationRepository.recordSeenDevice(
+        UserDeviceSeenDraft(
+          deviceId: readerDeviceIdentity.id,
+          email: FirebaseAuth.instance.currentUser?.email,
+          deviceLabel: readerDeviceIdentity.label,
+          platform: readerDeviceIdentity.platform,
+          lastDocumentTitle: widget.title,
+          lastOpenSource: widget.openSource,
+        ),
+      );
+    } catch (_) {
+      // Device monitoring must not block the reader while rules are being prepared.
     }
   }
 
@@ -8105,6 +8125,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       platformProvider: () => html.window.navigator.platform,
       deviceIdFactory: createReaderDeviceId,
     ).resolve();
+    readerDeviceAuthorizationRepository = UserDeviceAuthorizationRepository();
     userAccessRepository = UserAccessRepository();
     final cloudNarrationRegistry = ReaderCloudNarrationRegistry(
       providers: [

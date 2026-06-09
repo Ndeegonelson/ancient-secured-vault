@@ -203,4 +203,58 @@ void main() {
       'createdAt': 'now',
     });
   });
+
+  test('builds pending seen-device payloads from reader visits', () {
+    final draft = UserDeviceSeenDraft(
+      deviceId: ' device-123 ',
+      email: ' Reader@Example.COM ',
+      deviceLabel: ' Windows browser ',
+      platform: ' Win32 ',
+      lastDocumentTitle: ' Protected Guide ',
+      lastOpenSource: ' premium_dashboard ',
+    );
+
+    expect(draft.hasDeviceId, isTrue);
+    expect(
+      draft.toFirestore(
+        createdAt: 'created',
+        lastSeenAt: 'seen',
+        includePendingStatus: true,
+      ),
+      {
+        'deviceId': 'device-123',
+        'email': 'reader@example.com',
+        'deviceLabel': 'Windows browser',
+        'platform': 'Win32',
+        'lastDocumentTitle': 'Protected Guide',
+        'lastOpenSource': 'premium_dashboard',
+        'createdAt': 'created',
+        'status': 'pending',
+        'isTrusted': false,
+        'isBlocked': false,
+        'lastSeenAt': 'seen',
+      },
+    );
+  });
+
+  test(
+    'seen-device refresh payloads preserve existing authorization status',
+    () {
+      final draft = UserDeviceSeenDraft(
+        deviceId: 'device-123',
+        email: 'reader@example.com',
+        deviceLabel: 'Windows browser',
+      );
+
+      final payload = draft.toFirestore(
+        lastSeenAt: 'seen',
+        includePendingStatus: false,
+      );
+
+      expect(payload['lastSeenAt'], 'seen');
+      expect(payload.containsKey('status'), isFalse);
+      expect(payload.containsKey('isTrusted'), isFalse);
+      expect(payload.containsKey('isBlocked'), isFalse);
+    },
+  );
 }

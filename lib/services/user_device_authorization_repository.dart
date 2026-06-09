@@ -11,6 +11,8 @@ abstract interface class UserDeviceAuthorizationStore {
 
   Future<UserDeviceSummary> loadSummary({int limit = 100});
 
+  Future<void> recordSeenDevice(UserDeviceSeenDraft draft);
+
   Future<void> saveDeviceStatus({
     required String deviceId,
     required UserDeviceStatus status,
@@ -57,6 +59,76 @@ class UserDeviceStatusUpdate {
       'isBlocked': isBlocked,
       if (updatedAt != null) 'updatedAt': updatedAt,
     };
+  }
+}
+
+class UserDeviceSeenDraft {
+  const UserDeviceSeenDraft({
+    required this.deviceId,
+    this.email,
+    this.deviceLabel = '',
+    this.platform = '',
+    this.lastDocumentTitle = '',
+    this.lastOpenSource = '',
+  });
+
+  final String deviceId;
+  final String? email;
+  final String deviceLabel;
+  final String platform;
+  final String lastDocumentTitle;
+  final String lastOpenSource;
+
+  bool get hasDeviceId => deviceId.trim().isNotEmpty;
+
+  Map<String, dynamic> toFirestore({
+    required Object lastSeenAt,
+    Object? createdAt,
+    bool includePendingStatus = false,
+  }) {
+    final data = <String, dynamic>{
+      'deviceId': deviceId.trim(),
+      'lastSeenAt': lastSeenAt,
+    };
+
+    final normalizedEmail = emailDocumentId(email);
+    if (normalizedEmail.isNotEmpty) {
+      data['email'] = normalizedEmail;
+    }
+
+    final normalizedDeviceLabel = deviceLabel.trim();
+    if (normalizedDeviceLabel.isNotEmpty) {
+      data['deviceLabel'] = normalizedDeviceLabel;
+    }
+
+    final normalizedPlatform = platform.trim();
+    if (normalizedPlatform.isNotEmpty) {
+      data['platform'] = normalizedPlatform;
+    }
+
+    final normalizedLastDocumentTitle = lastDocumentTitle.trim();
+    if (normalizedLastDocumentTitle.isNotEmpty) {
+      data['lastDocumentTitle'] = normalizedLastDocumentTitle;
+    }
+
+    final normalizedLastOpenSource = lastOpenSource.trim();
+    if (normalizedLastOpenSource.isNotEmpty) {
+      data['lastOpenSource'] = normalizedLastOpenSource;
+    }
+
+    if (createdAt != null) {
+      data['createdAt'] = createdAt;
+    }
+
+    if (includePendingStatus) {
+      data.addAll(
+        UserDeviceStatusUpdate.fromStatus(
+          UserDeviceStatus.pending,
+        ).toFirestore(),
+      );
+    }
+
+    return data;
   }
 }
 
@@ -276,6 +348,25 @@ class UserDeviceAuthorizationRepository
   @override
   Future<UserDeviceSummary> loadSummary({int limit = 100}) async {
     return UserDeviceSummary.fromDevices(await listDevices(limit: limit));
+  }
+
+  @override
+  Future<void> recordSeenDevice(UserDeviceSeenDraft draft) async {
+    if (!draft.hasDeviceId) return;
+
+    final deviceDoc = _firestore
+        .collection('user_device_authorizations')
+        .doc(draft.deviceId.trim());
+    final existingDevice = await deviceDoc.get();
+
+    await deviceDoc.set(
+      draft.toFirestore(
+        createdAt: existingDevice.exists ? null : FieldValue.serverTimestamp(),
+        lastSeenAt: FieldValue.serverTimestamp(),
+        includePendingStatus: !existingDevice.exists,
+      ),
+      SetOptions(merge: true),
+    );
   }
 
   @override
