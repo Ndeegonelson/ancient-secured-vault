@@ -22,6 +22,7 @@ import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
 import 'services/reader_saved_position_repository.dart';
 import 'services/reader_workspace_filters.dart';
+import 'services/reader_access_decision.dart';
 import 'services/reader_activity_analytics.dart';
 import 'services/reader_activity_repository.dart';
 import 'services/user_access_repository.dart';
@@ -3857,26 +3858,27 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   Future<void> checkViewerAccess() async {
     final access = await loadCurrentUserAccess();
-    final canOpen = access.canOpenPdfWithAccessLevel(widget.accessLevel);
+    final accessDecision = ReaderAccessDecision.evaluate(
+      userAccess: access,
+      documentAccessLevel: widget.accessLevel,
+    );
 
     if (!mounted) return;
 
-    await logReaderAccessAttempt(allowed: canOpen, userAccess: access);
+    await logReaderAccessAttempt(decision: accessDecision, userAccess: access);
 
     if (!mounted) return;
 
     setState(() {
       readerUserAccess = access;
-      canViewDocument = canOpen;
+      canViewDocument = accessDecision.allowed;
       isCheckingViewerAccess = false;
     });
 
-    if (!canOpen) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Subscription required to open this PDF.'),
-        ),
-      );
+    if (!accessDecision.allowed) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(accessDecision.blockedMessage)));
       return;
     }
 
@@ -3895,7 +3897,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Future<void> logReaderAccessAttempt({
-    required bool allowed,
+    required ReaderAccessDecision decision,
     required UserAccessState userAccess,
   }) async {
     try {
@@ -3907,7 +3909,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           hasInitialSearchQuery: widget.initialSearchQuery.trim().isNotEmpty,
           isAdmin: userAccess.isAdmin,
           hasActiveSubscription: userAccess.hasActiveSubscription,
-          allowed: allowed,
+          allowed: decision.allowed,
+          accessDecisionReason: decision.reasonKey,
+          deviceAuthorizationStatus: decision.deviceStatusKey,
+          deviceAuthorizationEnforced: decision.deviceAuthorizationEnforced,
         ),
       );
     } catch (_) {

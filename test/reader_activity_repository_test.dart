@@ -21,6 +21,9 @@ void main() {
       isAdmin: false,
       hasActiveSubscription: true,
       allowed: true,
+      accessDecisionReason: 'allowed',
+      deviceAuthorizationStatus: 'trusted',
+      deviceAuthorizationEnforced: true,
     );
 
     expect(draft.toMap(createdAt: 'now'), {
@@ -37,6 +40,9 @@ void main() {
       'isAdmin': false,
       'hasActiveSubscription': true,
       'allowed': true,
+      'accessDecisionReason': 'allowed',
+      'deviceAuthorizationStatus': 'trusted',
+      'deviceAuthorizationEnforced': true,
       'createdAt': 'now',
     });
   });

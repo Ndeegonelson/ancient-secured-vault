@@ -53,6 +53,9 @@ class ReaderAccessLogDraft {
     required this.isAdmin,
     required this.hasActiveSubscription,
     required this.allowed,
+    this.accessDecisionReason = '',
+    this.deviceAuthorizationStatus = '',
+    this.deviceAuthorizationEnforced = false,
   });
 
   final ReaderActivityLogContext context;
@@ -62,6 +65,9 @@ class ReaderAccessLogDraft {
   final bool isAdmin;
   final bool hasActiveSubscription;
   final bool allowed;
+  final String accessDecisionReason;
+  final String deviceAuthorizationStatus;
+  final bool deviceAuthorizationEnforced;
 
   Map<String, dynamic> toMap({required Object createdAt}) {
     return {
@@ -72,6 +78,11 @@ class ReaderAccessLogDraft {
       'isAdmin': isAdmin,
       'hasActiveSubscription': hasActiveSubscription,
       'allowed': allowed,
+      if (accessDecisionReason.trim().isNotEmpty)
+        'accessDecisionReason': accessDecisionReason.trim(),
+      if (deviceAuthorizationStatus.trim().isNotEmpty)
+        'deviceAuthorizationStatus': deviceAuthorizationStatus.trim(),
+      'deviceAuthorizationEnforced': deviceAuthorizationEnforced,
       'createdAt': createdAt,
     };
   }
