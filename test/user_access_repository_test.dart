@@ -17,6 +17,7 @@ void main() {
   test('reads user access records for future subscriber management', () {
     final user = UserAccessRecord.fromMap({
       'displayName': 'Ama Reader',
+      'country': 'Ghana',
       'role': 'reader',
       'subscriptionStatus': 'active',
       'accessLevel': 'premium',
@@ -24,8 +25,10 @@ void main() {
 
     expect(user.email, 'ama@example.com');
     expect(user.displayName, 'Ama Reader');
+    expect(user.country, 'Ghana');
     expect(user.access.planLabel, 'Premium');
     expect(user.matches('ama'), isTrue);
+    expect(user.matches('ghana'), isTrue);
     expect(user.matches('premium'), isTrue);
     expect(user.matches('blocked'), isFalse);
   });
@@ -87,21 +90,25 @@ void main() {
     final summary = UserAccessSummary.fromUsers([
       UserAccessRecord.fromMap({
         'displayName': 'Ama Admin',
+        'country': 'Ghana',
         'role': 'admin',
         'subscriptionStatus': 'inactive',
       }, email: 'admin@example.com'),
       UserAccessRecord.fromMap({
         'displayName': 'Prem Reader',
+        'country': 'Nigeria',
         'role': 'reader',
         'subscriptionStatus': 'active',
       }, email: 'premium@example.com'),
       UserAccessRecord.fromMap({
         'displayName': 'Free Reader',
+        'country': 'Ghana',
         'role': 'reader',
         'subscriptionStatus': 'inactive',
       }, email: 'free@example.com'),
     ]);
 
+    expect(summary.countryOptions, ['Ghana', 'Nigeria']);
     expect(
       summary
           .filteredUsers(query: 'reader', plan: UserAccessPlan.premium)
@@ -113,6 +120,16 @@ void main() {
           .filteredUsers(plan: UserAccessPlan.free)
           .map((user) => user.email),
       ['free@example.com'],
+    );
+    expect(summary.filteredUsers(country: 'Ghana').map((user) => user.email), [
+      'admin@example.com',
+      'free@example.com',
+    ]);
+    expect(
+      summary
+          .filteredUsers(query: 'reader', country: 'Nigeria')
+          .map((user) => user.email),
+      ['premium@example.com'],
     );
     expect(summary.filteredUsers(query: 'missing'), isEmpty);
   });

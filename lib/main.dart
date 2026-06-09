@@ -597,6 +597,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String? busyUserEmail;
     var accessSearchQuery = '';
     UserAccessPlan? accessPlanFilter;
+    var countryFilter = '';
     final accessSearchController = TextEditingController();
     final currentUserEmail = UserAccessRepository.emailDocumentId(
       FirebaseAuth.instance.currentUser?.email,
@@ -773,6 +774,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       final visibleUsers = summary.filteredUsers(
                         query: accessSearchQuery,
                         plan: accessPlanFilter,
+                        country: countryFilter,
                       );
 
                       return SingleChildScrollView(
@@ -809,7 +811,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               style: const TextStyle(color: Colors.white),
                               decoration: InputDecoration(
                                 labelText: 'Search users',
-                                hintText: 'Email, name, or plan',
+                                hintText: 'Email, name, country, or plan',
                                 labelStyle: const TextStyle(
                                   color: Colors.white70,
                                 ),
@@ -868,6 +870,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                               ],
                             ),
+                            if (summary.countryOptions.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                initialValue: countryFilter,
+                                isExpanded: true,
+                                dropdownColor: const Color(0xFF1A1D25),
+                                iconEnabledColor: Colors.greenAccent,
+                                style: const TextStyle(color: Colors.white70),
+                                decoration: const InputDecoration(
+                                  labelText: 'Filter by country',
+                                  labelStyle: TextStyle(color: Colors.white70),
+                                  floatingLabelStyle: TextStyle(
+                                    color: Colors.greenAccent,
+                                  ),
+                                  filled: true,
+                                  fillColor: Color(0xFF151821),
+                                  border: OutlineInputBorder(),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderSide: BorderSide(
+                                      color: Colors.white24,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderSide: BorderSide(
+                                      color: Colors.greenAccent,
+                                    ),
+                                  ),
+                                ),
+                                items: [
+                                  const DropdownMenuItem<String>(
+                                    value: '',
+                                    child: Text('All countries'),
+                                  ),
+                                  ...summary.countryOptions.map(
+                                    (country) => DropdownMenuItem<String>(
+                                      value: country,
+                                      child: Text(country),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (country) {
+                                  setDialogState(() {
+                                    countryFilter = country ?? '';
+                                  });
+                                },
+                              ),
+                            ],
                             const SizedBox(height: 14),
                             const Text(
                               'Access Records',
@@ -920,6 +969,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   [
                                     if (user.displayName.isNotEmpty)
                                       user.displayName,
+                                    if (user.country.isNotEmpty) user.country,
                                     user.access.planLabel,
                                     if (user.email == currentUserEmail)
                                       'Current admin',

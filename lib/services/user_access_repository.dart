@@ -123,6 +123,7 @@ class UserAccessRecord {
     required this.email,
     required this.access,
     this.displayName = '',
+    this.country = '',
     this.createdAt,
     this.updatedAt,
   });
@@ -134,6 +135,9 @@ class UserAccessRecord {
     return UserAccessRecord(
       email: emailDocumentId(email),
       displayName: data['displayName']?.toString() ?? '',
+      country: _readText(
+        data['country'] ?? data['countryName'] ?? data['countryCode'],
+      ),
       access: UserAccessState.fromFirestore(data),
       createdAt: data['createdAt'],
       updatedAt: data['updatedAt'],
@@ -142,6 +146,7 @@ class UserAccessRecord {
 
   final String email;
   final String displayName;
+  final String country;
   final UserAccessState access;
   final dynamic createdAt;
   final dynamic updatedAt;
@@ -152,6 +157,7 @@ class UserAccessRecord {
 
     return email.contains(normalizedQuery) ||
         displayName.toLowerCase().contains(normalizedQuery) ||
+        country.toLowerCase().contains(normalizedQuery) ||
         access.planLabel.toLowerCase().contains(normalizedQuery) ||
         access.accessLevel.contains(normalizedQuery);
   }
@@ -168,6 +174,10 @@ class UserAccessRecord {
     });
 
     return sorted;
+  }
+
+  static String _readText(dynamic value) {
+    return value?.toString().trim() ?? '';
   }
 }
 
@@ -217,16 +227,31 @@ class UserAccessSummary {
   int get totalCount => users.length;
   bool get hasUsers => users.isNotEmpty;
   bool get hasRecentChanges => recentChanges.isNotEmpty;
+  List<String> get countryOptions {
+    final countries = users
+        .map((user) => user.country.trim())
+        .where((country) => country.isNotEmpty)
+        .toSet()
+        .toList();
+    countries.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return List.unmodifiable(countries);
+  }
 
   List<UserAccessRecord> filteredUsers({
     String query = '',
     UserAccessPlan? plan,
+    String country = '',
   }) {
+    final normalizedCountry = country.trim().toLowerCase();
+
     return List.unmodifiable(
       users.where((user) {
         final matchesPlan =
             plan == null || userAccessPlanForState(user.access) == plan;
-        return matchesPlan && user.matches(query);
+        final matchesCountry =
+            normalizedCountry.isEmpty ||
+            user.country.trim().toLowerCase() == normalizedCountry;
+        return matchesPlan && matchesCountry && user.matches(query);
       }),
     );
   }
