@@ -1839,6 +1839,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> showGlobalSearchResults(String keyword) async {
     String accessFilter = 'all';
+    String categoryFilter = '';
 
     showDialog(
       context: context,
@@ -1870,6 +1871,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onSelected: (_) {
                             setState(() {
                               accessFilter = 'all';
+                              categoryFilter = '';
                             });
                           },
                         ),
@@ -1880,6 +1882,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onSelected: (_) {
                             setState(() {
                               accessFilter = 'free';
+                              categoryFilter = '';
                             });
                           },
                         ),
@@ -1890,6 +1893,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onSelected: (_) {
                             setState(() {
                               accessFilter = 'premium';
+                              categoryFilter = '';
                             });
                           },
                         ),
@@ -1947,126 +1951,224 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             }).toList();
                           }
 
-                          if (filteredDocs.isEmpty) {
-                            return const Center(
-                              child: Text(
-                                'No matching vault documents found.',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            );
+                          final categoryOptions = vaultDocumentCategoryOptions(
+                            filteredDocs.map(
+                              (doc) => doc.data() as Map<String, dynamic>,
+                            ),
+                          );
+                          final safeCategoryFilter =
+                              categoryOptions.contains(categoryFilter)
+                              ? categoryFilter
+                              : '';
+
+                          if (safeCategoryFilter.isNotEmpty) {
+                            filteredDocs = filteredDocs.where((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+
+                              return normalizeVaultDocumentCategory(
+                                    data['category']?.toString(),
+                                  ) ==
+                                  safeCategoryFilter;
+                            }).toList();
                           }
 
-                          return ListView.builder(
-                            itemCount: filteredDocs.length,
-
-                            itemBuilder: (context, index) {
-                              final data =
-                                  filteredDocs[index].data()
-                                      as Map<String, dynamic>;
-
-                              return Card(
-                                color: const Color(0xFF1A1D26),
-
-                                child: ListTile(
-                                  leading: Icon(
-                                    Icons.picture_as_pdf,
-                                    color:
-                                        (data['accessLevel'] ?? 'free') ==
-                                            'premium'
-                                        ? Colors.amber
-                                        : Colors.greenAccent,
+                          return Column(
+                            children: [
+                              if (categoryOptions.isNotEmpty) ...[
+                                DropdownButtonFormField<String>(
+                                  key: ValueKey(
+                                    'search-category-$accessFilter-$safeCategoryFilter',
                                   ),
-
-                                  title: Text(
-                                    data['pdfTitle'] ?? '',
-                                    style: const TextStyle(color: Colors.white),
+                                  initialValue: safeCategoryFilter,
+                                  isExpanded: true,
+                                  dropdownColor: const Color(0xFF1A1D25),
+                                  style: const TextStyle(color: Colors.white70),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Filter by category',
+                                    labelStyle: TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                    floatingLabelStyle: TextStyle(
+                                      color: Colors.greenAccent,
+                                    ),
+                                    filled: true,
+                                    fillColor: Color(0xFF151821),
+                                    border: OutlineInputBorder(),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderSide: BorderSide(
+                                        color: Colors.white24,
+                                      ),
+                                    ),
                                   ),
-
-                                  subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-
-                                    children: [
-                                      Text(
-                                        'Page ${data['pageNumber']} | ${data['category'] ?? 'General'}',
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                        ),
+                                  items: [
+                                    const DropdownMenuItem<String>(
+                                      value: '',
+                                      child: Text('All categories'),
+                                    ),
+                                    ...categoryOptions.map(
+                                      (category) => DropdownMenuItem<String>(
+                                        value: category,
+                                        child: Text(category),
                                       ),
-
-                                      const SizedBox(height: 6),
-
-                                      Text(
-                                        data['text'].toString().substring(
-                                          0,
-                                          data['text'].toString().length > 150
-                                              ? 150
-                                              : data['text'].toString().length,
-                                        ),
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-
-                                  onTap: () async {
-                                    final resultAccessLevel =
-                                        data['accessLevel']?.toString() ??
-                                        'free';
-
-                                    if (!userAccess.canOpenPdfWithAccessLevel(
-                                      resultAccessLevel,
-                                    )) {
-                                      ScaffoldMessenger.of(
-                                        this.context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Subscription required to open this PDF.',
-                                          ),
-                                        ),
-                                      );
-                                      return;
-                                    }
-
-                                    final pdfUrl =
-                                        await resolveSearchResultPdfUrl(data);
-
-                                    if (pdfUrl == null) return;
-                                    if (!mounted || !resultContext.mounted) {
-                                      return;
-                                    }
-
-                                    final pageNumber = data['pageNumber'] is int
-                                        ? data['pageNumber'] as int
-                                        : int.tryParse(
-                                                data['pageNumber'].toString(),
-                                              ) ??
-                                              0;
-
-                                    Navigator.pop(resultContext);
-
-                                    Navigator.push(
-                                      this.context,
-                                      MaterialPageRoute(
-                                        builder: (context) => PDFViewerScreen(
-                                          pdfUrl: pdfUrl,
-                                          title: data['pdfTitle'].toString(),
-                                          initialPage: pageNumber,
-                                          initialSearchQuery: keyword,
-                                          accessLevel: resultAccessLevel,
-                                          openSource: 'global_search_result',
-                                          storagePath:
-                                              data['storagePath']?.toString() ??
-                                              '',
-                                        ),
-                                      ),
-                                    );
+                                    ),
+                                  ],
+                                  onChanged: (category) {
+                                    setState(() {
+                                      categoryFilter = category ?? '';
+                                    });
                                   },
                                 ),
-                              );
-                            },
+                                const SizedBox(height: 12),
+                              ],
+                              Expanded(
+                                child: filteredDocs.isEmpty
+                                    ? const Center(
+                                        child: Text(
+                                          'No matching vault documents found.',
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      )
+                                    : ListView.builder(
+                                        itemCount: filteredDocs.length,
+
+                                        itemBuilder: (context, index) {
+                                          final data =
+                                              filteredDocs[index].data()
+                                                  as Map<String, dynamic>;
+
+                                          return Card(
+                                            color: const Color(0xFF1A1D26),
+
+                                            child: ListTile(
+                                              leading: Icon(
+                                                Icons.picture_as_pdf,
+                                                color:
+                                                    (data['accessLevel'] ??
+                                                            'free') ==
+                                                        'premium'
+                                                    ? Colors.amber
+                                                    : Colors.greenAccent,
+                                              ),
+
+                                              title: Text(
+                                                data['pdfTitle'] ?? '',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+
+                                              subtitle: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+
+                                                children: [
+                                                  Text(
+                                                    'Page ${data['pageNumber']} | ${data['category'] ?? 'General'}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+
+                                                  const SizedBox(height: 6),
+
+                                                  Text(
+                                                    data['text']
+                                                        .toString()
+                                                        .substring(
+                                                          0,
+                                                          data['text']
+                                                                      .toString()
+                                                                      .length >
+                                                                  150
+                                                              ? 150
+                                                              : data['text']
+                                                                    .toString()
+                                                                    .length,
+                                                        ),
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+
+                                              onTap: () async {
+                                                final resultAccessLevel =
+                                                    data['accessLevel']
+                                                        ?.toString() ??
+                                                    'free';
+
+                                                if (!userAccess
+                                                    .canOpenPdfWithAccessLevel(
+                                                      resultAccessLevel,
+                                                    )) {
+                                                  ScaffoldMessenger.of(
+                                                    this.context,
+                                                  ).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                        'Subscription required to open this PDF.',
+                                                      ),
+                                                    ),
+                                                  );
+                                                  return;
+                                                }
+
+                                                final pdfUrl =
+                                                    await resolveSearchResultPdfUrl(
+                                                      data,
+                                                    );
+
+                                                if (pdfUrl == null) return;
+                                                if (!mounted ||
+                                                    !resultContext.mounted) {
+                                                  return;
+                                                }
+
+                                                final pageNumber =
+                                                    data['pageNumber'] is int
+                                                    ? data['pageNumber'] as int
+                                                    : int.tryParse(
+                                                            data['pageNumber']
+                                                                .toString(),
+                                                          ) ??
+                                                          0;
+
+                                                Navigator.pop(resultContext);
+
+                                                Navigator.push(
+                                                  this.context,
+                                                  MaterialPageRoute(
+                                                    builder: (context) =>
+                                                        PDFViewerScreen(
+                                                          pdfUrl: pdfUrl,
+                                                          title:
+                                                              data['pdfTitle']
+                                                                  .toString(),
+                                                          initialPage:
+                                                              pageNumber,
+                                                          initialSearchQuery:
+                                                              keyword,
+                                                          accessLevel:
+                                                              resultAccessLevel,
+                                                          openSource:
+                                                              'global_search_result',
+                                                          storagePath:
+                                                              data['storagePath']
+                                                                  ?.toString() ??
+                                                              '',
+                                                        ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          );
+                                        },
+                                      ),
+                              ),
+                            ],
                           );
                         },
                       ),
