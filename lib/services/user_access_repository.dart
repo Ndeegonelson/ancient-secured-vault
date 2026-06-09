@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'user_access_state.dart';
 
+enum UserAccessPlan { free, premium, admin }
+
 abstract interface class UserAccessStore {
   Future<UserAccessState> loadForEmail(String? email);
 
@@ -16,8 +18,6 @@ abstract interface class UserAccessStore {
     UserAccessPlan? previousPlan,
   });
 }
-
-enum UserAccessPlan { free, premium, admin }
 
 class UserAccessPlanUpdate {
   const UserAccessPlanUpdate({
@@ -217,6 +217,19 @@ class UserAccessSummary {
   int get totalCount => users.length;
   bool get hasUsers => users.isNotEmpty;
   bool get hasRecentChanges => recentChanges.isNotEmpty;
+
+  List<UserAccessRecord> filteredUsers({
+    String query = '',
+    UserAccessPlan? plan,
+  }) {
+    return List.unmodifiable(
+      users.where((user) {
+        final matchesPlan =
+            plan == null || userAccessPlanForState(user.access) == plan;
+        return matchesPlan && user.matches(query);
+      }),
+    );
+  }
 }
 
 class UserAccessRepository implements UserAccessStore {
@@ -348,4 +361,10 @@ UserAccessPlan? readUserAccessPlan(dynamic value) {
     'free' => UserAccessPlan.free,
     _ => null,
   };
+}
+
+UserAccessPlan userAccessPlanForState(UserAccessState access) {
+  if (access.isAdmin) return UserAccessPlan.admin;
+  if (access.hasActiveSubscription) return UserAccessPlan.premium;
+  return UserAccessPlan.free;
 }

@@ -595,14 +595,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     var summaryFuture = userAccessRepository.loadSummary(limit: 100);
     String? busyUserEmail;
+    var accessSearchQuery = '';
+    UserAccessPlan? accessPlanFilter;
+    final accessSearchController = TextEditingController();
     final currentUserEmail = UserAccessRepository.emailDocumentId(
       FirebaseAuth.instance.currentUser?.email,
     );
 
     UserAccessPlan currentPlan(UserAccessRecord user) {
-      if (user.access.isAdmin) return UserAccessPlan.admin;
-      if (user.access.hasActiveSubscription) return UserAccessPlan.premium;
-      return UserAccessPlan.free;
+      return userAccessPlanForState(user.access);
     }
 
     List<UserAccessPlan> availablePlanActions(UserAccessRecord user) {
@@ -706,6 +707,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
             }
 
+            ChoiceChip planFilterChip({
+              required String label,
+              required UserAccessPlan? plan,
+            }) {
+              final selected = accessPlanFilter == plan;
+              return ChoiceChip(
+                label: Text(label),
+                selected: selected,
+                onSelected: (_) {
+                  setDialogState(() {
+                    accessPlanFilter = plan;
+                  });
+                },
+                selectedColor: Colors.greenAccent,
+                backgroundColor: const Color(0xFF151821),
+                labelStyle: TextStyle(
+                  color: selected ? Colors.black : Colors.white70,
+                ),
+                side: const BorderSide(color: Colors.white24),
+              );
+            }
+
             return PointerInterceptor(
               child: AlertDialog(
                 backgroundColor: const Color(0xFF0F1117),
@@ -747,6 +770,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }
 
+                      final visibleUsers = summary.filteredUsers(
+                        query: accessSearchQuery,
+                        plan: accessPlanFilter,
+                      );
+
                       return SingleChildScrollView(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -776,6 +804,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ],
                             ),
                             const SizedBox(height: 18),
+                            TextField(
+                              controller: accessSearchController,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                labelText: 'Search users',
+                                hintText: 'Email, name, or plan',
+                                labelStyle: const TextStyle(
+                                  color: Colors.white70,
+                                ),
+                                hintStyle: const TextStyle(
+                                  color: Colors.white38,
+                                ),
+                                prefixIcon: const Icon(
+                                  Icons.search,
+                                  color: Colors.greenAccent,
+                                ),
+                                suffixIcon: accessSearchQuery.trim().isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: 'Clear search',
+                                        icon: const Icon(Icons.clear),
+                                        color: Colors.white70,
+                                        onPressed: () {
+                                          accessSearchController.clear();
+                                          setDialogState(() {
+                                            accessSearchQuery = '';
+                                          });
+                                        },
+                                      ),
+                                enabledBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.white24),
+                                ),
+                                focusedBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: Colors.greenAccent,
+                                  ),
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  accessSearchQuery = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                planFilterChip(label: 'All', plan: null),
+                                planFilterChip(
+                                  label: 'Admin',
+                                  plan: UserAccessPlan.admin,
+                                ),
+                                planFilterChip(
+                                  label: 'Premium',
+                                  plan: UserAccessPlan.premium,
+                                ),
+                                planFilterChip(
+                                  label: 'Free',
+                                  plan: UserAccessPlan.free,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
                             const Text(
                               'Access Records',
                               style: TextStyle(
@@ -784,7 +877,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            ...summary.users.take(12).map((user) {
+                            Text(
+                              '${visibleUsers.length} of ${summary.totalCount} users shown',
+                              style: const TextStyle(
+                                color: Colors.white38,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            if (visibleUsers.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: Text(
+                                  'No users match this search.',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              ),
+                            ...visibleUsers.take(20).map((user) {
                               final timestamp =
                                   user.updatedAt ?? user.createdAt;
 
@@ -887,7 +996,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           },
         );
       },
-    );
+    ).whenComplete(accessSearchController.dispose);
   }
 
   Future<void> saveUserNote({

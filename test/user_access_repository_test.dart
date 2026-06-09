@@ -83,6 +83,40 @@ void main() {
     ]);
   });
 
+  test('filters summary users by search text and access plan', () {
+    final summary = UserAccessSummary.fromUsers([
+      UserAccessRecord.fromMap({
+        'displayName': 'Ama Admin',
+        'role': 'admin',
+        'subscriptionStatus': 'inactive',
+      }, email: 'admin@example.com'),
+      UserAccessRecord.fromMap({
+        'displayName': 'Prem Reader',
+        'role': 'reader',
+        'subscriptionStatus': 'active',
+      }, email: 'premium@example.com'),
+      UserAccessRecord.fromMap({
+        'displayName': 'Free Reader',
+        'role': 'reader',
+        'subscriptionStatus': 'inactive',
+      }, email: 'free@example.com'),
+    ]);
+
+    expect(
+      summary
+          .filteredUsers(query: 'reader', plan: UserAccessPlan.premium)
+          .map((user) => user.email),
+      ['premium@example.com'],
+    );
+    expect(
+      summary
+          .filteredUsers(plan: UserAccessPlan.free)
+          .map((user) => user.email),
+      ['free@example.com'],
+    );
+    expect(summary.filteredUsers(query: 'missing'), isEmpty);
+  });
+
   test('builds Firestore updates for each admin access plan', () {
     expect(UserAccessPlanUpdate.fromPlan(UserAccessPlan.admin).toFirestore(), {
       'role': 'admin',
