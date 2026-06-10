@@ -396,6 +396,26 @@ class _DashboardAdminOverview {
   final ReaderActivitySummary activity;
 }
 
+enum _AdminAttentionTone { danger, warning, info, success }
+
+class _AdminAttentionItem {
+  const _AdminAttentionItem({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.tone,
+    this.actionLabel,
+    this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final _AdminAttentionTone tone;
+  final String? actionLabel;
+  final VoidCallback? onPressed;
+}
+
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
@@ -4326,6 +4346,288 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  String _pluralize(int count, String singular, String plural) {
+    return '$count ${count == 1 ? singular : plural}';
+  }
+
+  Color adminAttentionColor(_AdminAttentionTone tone) {
+    return switch (tone) {
+      _AdminAttentionTone.danger => Colors.redAccent,
+      _AdminAttentionTone.warning => Colors.orangeAccent,
+      _AdminAttentionTone.info => Colors.lightBlueAccent,
+      _AdminAttentionTone.success => Colors.greenAccent,
+    };
+  }
+
+  List<_AdminAttentionItem> adminAttentionItems({
+    required VaultDocumentInventorySummary inventory,
+    _DashboardAdminOverview? overview,
+  }) {
+    final items = <_AdminAttentionItem>[];
+
+    if (!inventory.hasDocuments) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.upload_file,
+          title: 'Vault has no documents yet',
+          detail: 'Upload the first profiled PDF to start building the vault.',
+          tone: _AdminAttentionTone.info,
+          actionLabel: 'Upload',
+          onPressed: uploadPDF,
+        ),
+      );
+    }
+
+    if (inventory.searchPendingCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.manage_search,
+          title: 'Search readiness pending',
+          detail:
+              '${_pluralize(inventory.searchPendingCount, 'document needs', 'documents need')} a refreshed search profile.',
+          tone: _AdminAttentionTone.warning,
+          actionLabel: 'Refresh index',
+          onPressed: indexVaultPdfsFromAdminPanel,
+        ),
+      );
+    }
+
+    if (inventory.missingDateCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.schedule_outlined,
+          title: 'Upload dates incomplete',
+          detail:
+              '${_pluralize(inventory.missingDateCount, 'document is', 'documents are')} missing update metadata for recent activity tracking.',
+          tone: _AdminAttentionTone.info,
+          actionLabel: 'Inventory',
+          onPressed: showVaultInventory,
+        ),
+      );
+    }
+
+    if (inventory.premiumCount > inventory.protectedImageCount) {
+      final standardPremiumCount =
+          inventory.premiumCount - inventory.protectedImageCount;
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.security_outlined,
+          title: 'Protected reader coverage',
+          detail:
+              '${_pluralize(standardPremiumCount, 'protected PDF may need', 'protected PDFs may need')} image-reader metadata review.',
+          tone: _AdminAttentionTone.warning,
+          actionLabel: 'Inventory',
+          onPressed: showVaultInventory,
+        ),
+      );
+    }
+
+    if (overview == null) return items;
+
+    if (overview.devices.pendingCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.important_devices_outlined,
+          title: 'Pending device decisions',
+          detail:
+              '${_pluralize(overview.devices.pendingCount, 'device needs', 'devices need')} trust or block review before strict enforcement.',
+          tone: _AdminAttentionTone.danger,
+          actionLabel: 'Review devices',
+          onPressed: showDeviceAuthorizationOverview,
+        ),
+      );
+    }
+
+    if (overview.devices.blockedCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.block_outlined,
+          title: 'Blocked devices on record',
+          detail:
+              '${_pluralize(overview.devices.blockedCount, 'device is', 'devices are')} blocked and should be monitored for repeat access attempts.',
+          tone: _AdminAttentionTone.warning,
+          actionLabel: 'Devices',
+          onPressed: showDeviceAuthorizationOverview,
+        ),
+      );
+    }
+
+    if (overview.activity.blockedAccessCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.report_gmailerrorred_outlined,
+          title: 'Blocked access attempts',
+          detail:
+              '${_pluralize(overview.activity.blockedAccessCount, 'blocked attempt was', 'blocked attempts were')} recorded in reader activity.',
+          tone: _AdminAttentionTone.danger,
+          actionLabel: 'Analytics',
+          onPressed: showReaderAnalytics,
+        ),
+      );
+    }
+
+    if (overview.users.freeCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.workspace_premium_outlined,
+          title: 'Free members to nurture',
+          detail:
+              '${_pluralize(overview.users.freeCount, 'reader remains', 'readers remain')} in the free access lane.',
+          tone: _AdminAttentionTone.info,
+          actionLabel: 'User access',
+          onPressed: showUserAccessOverview,
+        ),
+      );
+    }
+
+    if (!overview.activity.hasActivity) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.insights_outlined,
+          title: 'No reader activity yet',
+          detail:
+              'Reader analytics will become useful after members start opening documents.',
+          tone: _AdminAttentionTone.info,
+          actionLabel: 'Analytics',
+          onPressed: showReaderAnalytics,
+        ),
+      );
+    }
+
+    return items;
+  }
+
+  Widget buildAdminAttentionItem(_AdminAttentionItem item) {
+    final color = adminAttentionColor(item.tone);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(item.icon, color: color, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  item.detail,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          if (item.actionLabel != null && item.onPressed != null) ...[
+            const SizedBox(width: 10),
+            TextButton(
+              onPressed: item.onPressed,
+              child: Text(
+                item.actionLabel!,
+                style: const TextStyle(color: Colors.greenAccent),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget buildAdminAttentionPanel({
+    required VaultDocumentInventorySummary inventory,
+    _DashboardAdminOverview? overview,
+    bool isLoading = false,
+  }) {
+    final items = adminAttentionItems(inventory: inventory, overview: overview);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151821),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.priority_high_outlined,
+                color: Colors.orangeAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Attention needed',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (isLoading)
+                const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.greenAccent,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (items.isEmpty && !isLoading)
+            buildAdminAttentionItem(
+              const _AdminAttentionItem(
+                icon: Icons.verified_outlined,
+                title: 'Everything looks steady',
+                detail:
+                    'No urgent vault, device, user, or reader activity issues are showing right now.',
+                tone: _AdminAttentionTone.success,
+              ),
+            )
+          else ...[
+            ...items.take(5).map(buildAdminAttentionItem),
+            if (items.length > 5)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '+${items.length - 5} more item${items.length - 5 == 1 ? '' : 's'} to review in the admin tools.',
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ),
+            if (isLoading)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text(
+                  'Checking member, device, and reader activity status...',
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget buildAdminCommandCenter(VaultDocumentInventorySummary inventory) {
     if (!userAccess.isAdmin) return const SizedBox.shrink();
 
@@ -4443,6 +4745,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 18),
           buildAdminVaultHealth(inventory),
+          const SizedBox(height: 18),
+          FutureBuilder<_DashboardAdminOverview>(
+            future: overviewFuture,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    buildAdminAttentionPanel(inventory: inventory),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Member, device, and reader activity checks could not load right now.',
+                      style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                    ),
+                  ],
+                );
+              }
+
+              return buildAdminAttentionPanel(
+                inventory: inventory,
+                overview: snapshot.data,
+                isLoading: !snapshot.hasData,
+              );
+            },
+          ),
           const SizedBox(height: 18),
           Wrap(
             spacing: 10,
