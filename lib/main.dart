@@ -2727,9 +2727,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<bool> updateVaultDocumentCategory(
+    Map<String, dynamic> document, {
+    required String accessLabel,
+    required String category,
+  }) async {
+    if (!requireVaultManagerAccess()) return false;
+
+    final storagePath = vaultDocumentAdminValue(
+      document,
+      'storagePath',
+      fallback: '',
+    );
+    if (storagePath.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This document is missing its storage path.'),
+        ),
+      );
+      return false;
+    }
+
+    final nextCategory = normalizeVaultDocumentCategory(category);
+    final currentCategory = normalizeVaultDocumentCategory(
+      document['category']?.toString(),
+    );
+    if (nextCategory == currentCategory) return true;
+
+    try {
+      final ref = FirebaseStorage.instance.ref(storagePath);
+      final metadata = await ref.getMetadata();
+      final existingCustomMetadata = Map<String, String>.from(
+        metadata.customMetadata ?? const <String, String>{},
+      );
+      final accessLevel = vaultDocumentAdminAccessLevel(
+        document,
+        accessLabel: accessLabel,
+      );
+      final profile = VaultDocumentProfile.forAccessLevel(
+        accessLevel: accessLevel,
+        category: nextCategory,
+      );
+      final documentName = vaultDocumentAdminValue(document, 'name');
+      final nextCustomMetadata =
+          Map<String, String>.from(existingCustomMetadata)..addAll(
+            profile.toStorageMetadata(
+              uploadedBy:
+                  existingCustomMetadata['uploadedBy'] ??
+                  FirebaseAuth.instance.currentUser?.email ??
+                  '',
+              originalFileName:
+                  existingCustomMetadata['originalFileName'] ?? documentName,
+            ),
+          );
+
+      await ref.updateMetadata(
+        SettableMetadata(customMetadata: nextCustomMetadata),
+      );
+
+      final updatedDocument = Map<String, dynamic>.from(document)
+        ..addAll(profile.toDocumentMap());
+      final indexRefreshed = await refreshVaultDocumentSearchIndex(
+        updatedDocument,
+        accessLabel: accessLabel,
+        showSuccessMessage: false,
+      );
+      if (!indexRefreshed) return false;
+
+      await loadPDFs();
+
+      if (!mounted) return true;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Document category updated to $nextCategory.')),
+      );
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update this document: $e')),
+      );
+      return false;
+    }
+  }
+
   Future<bool> refreshVaultDocumentSearchIndex(
     Map<String, dynamic> document, {
     required String accessLabel,
+    bool showSuccessMessage = true,
   }) async {
     if (!requireVaultManagerAccess()) return false;
 
@@ -2778,9 +2864,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       if (!mounted) return true;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Document search index refreshed.')),
-      );
+      if (showSuccessMessage) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Document search index refreshed.')),
+        );
+      }
       return true;
     } catch (e) {
       if (!mounted) return false;
@@ -2800,6 +2888,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     var isRefreshing = false;
     var isUpgrading = false;
+    var isSavingCategory = false;
+    var selectedCategory = normalizeVaultDocumentCategory(
+      document['category']?.toString(),
+    );
     final needsProfileUpgrade = !vaultDocumentHasCurrentProfile(
       document,
       accessLabel: accessLabel,
@@ -2810,7 +2902,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final isBusy = isRefreshing || isUpgrading;
+            final isBusy = isRefreshing || isUpgrading || isSavingCategory;
+            final currentCategory = normalizeVaultDocumentCategory(
+              document['category']?.toString(),
+            );
+            final categoryChanged = selectedCategory != currentCategory;
 
             return AlertDialog(
               backgroundColor: const Color(0xFF10131A),
@@ -2842,12 +2938,87 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             : 'Current metadata',
                       ),
                       buildVaultDocumentAdminDetail('Access', accessLabel),
-                      buildVaultDocumentAdminDetail(
-                        'Category',
-                        normalizeVaultDocumentCategory(
-                          document['category']?.toString(),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedCategory,
+                        dropdownColor: const Color(0xFF1A1D25),
+                        iconEnabledColor: Colors.greenAccent,
+                        style: const TextStyle(color: Colors.white70),
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          floatingLabelStyle: TextStyle(
+                            color: Colors.greenAccent,
+                          ),
+                          filled: true,
+                          fillColor: Color(0xFF151821),
+                          border: OutlineInputBorder(),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
                         ),
+                        items: vaultDocumentCategories
+                            .map(
+                              (category) => DropdownMenuItem<String>(
+                                value: category,
+                                child: Text(category),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: isBusy
+                            ? null
+                            : (category) {
+                                if (category == null) return;
+                                setDialogState(() {
+                                  selectedCategory =
+                                      normalizeVaultDocumentCategory(category);
+                                });
+                              },
                       ),
+                      if (categoryChanged) ...[
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: isBusy
+                                ? null
+                                : () async {
+                                    setDialogState(() {
+                                      isSavingCategory = true;
+                                    });
+                                    final updated =
+                                        await updateVaultDocumentCategory(
+                                          document,
+                                          accessLabel: accessLabel,
+                                          category: selectedCategory,
+                                        );
+                                    if (!context.mounted) return;
+                                    setDialogState(() {
+                                      isSavingCategory = false;
+                                    });
+                                    if (updated && dialogContext.mounted) {
+                                      Navigator.of(dialogContext).pop();
+                                    }
+                                  },
+                            icon: isSavingCategory
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.greenAccent,
+                                    ),
+                                  )
+                                : const Icon(Icons.save),
+                            label: Text(
+                              isSavingCategory
+                                  ? 'Saving category...'
+                                  : 'Save category',
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
                       buildVaultDocumentAdminDetail(
                         'Reader',
                         vaultDocumentAdminValue(document, 'readerMode'),
