@@ -3147,25 +3147,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                 Navigator.push(
                                                   this.context,
                                                   MaterialPageRoute(
-                                                    builder: (context) =>
-                                                        PDFViewerScreen(
-                                                          pdfUrl: pdfUrl,
-                                                          title:
-                                                              data['pdfTitle']
-                                                                  .toString(),
-                                                          initialPage:
-                                                              pageNumber,
-                                                          initialSearchQuery:
-                                                              keyword,
-                                                          accessLevel:
-                                                              resultAccessLevel,
-                                                          openSource:
-                                                              'global_search_result',
-                                                          storagePath:
-                                                              data['storagePath']
-                                                                  ?.toString() ??
-                                                              '',
-                                                        ),
+                                                    builder: (context) => PDFViewerScreen(
+                                                      pdfUrl: pdfUrl,
+                                                      title: data['pdfTitle']
+                                                          .toString(),
+                                                      initialPage: pageNumber,
+                                                      initialSearchQuery:
+                                                          keyword,
+                                                      accessLevel:
+                                                          resultAccessLevel,
+                                                      readerMode:
+                                                          data['readerMode']
+                                                              ?.toString() ??
+                                                          '',
+                                                      protectionMode:
+                                                          data['protectionMode']
+                                                              ?.toString() ??
+                                                          '',
+                                                      openSource:
+                                                          'global_search_result',
+                                                      storagePath:
+                                                          data['storagePath']
+                                                              ?.toString() ??
+                                                          '',
+                                                    ),
                                                   ),
                                                 );
                                               },
@@ -3621,7 +3626,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         builder: (context) => PDFViewerScreen(
                                           pdfUrl: pdfUrl,
                                           title: pdfFile['name'],
-                                          accessLevel: 'free',
+                                          accessLevel:
+                                              pdfFile['accessLevel']
+                                                  ?.toString() ??
+                                              'free',
+                                          readerMode:
+                                              pdfFile['readerMode']
+                                                  ?.toString() ??
+                                              '',
+                                          protectionMode:
+                                              pdfFile['protectionMode']
+                                                  ?.toString() ??
+                                              '',
                                           openSource: 'free_dashboard',
                                           storagePath:
                                               pdfFile['storagePath']
@@ -3734,7 +3750,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           builder: (context) => PDFViewerScreen(
                                             pdfUrl: pdfUrl,
                                             title: pdfFile['name'],
-                                            accessLevel: 'premium',
+                                            accessLevel:
+                                                pdfFile['accessLevel']
+                                                    ?.toString() ??
+                                                'premium',
+                                            readerMode:
+                                                pdfFile['readerMode']
+                                                    ?.toString() ??
+                                                '',
+                                            protectionMode:
+                                                pdfFile['protectionMode']
+                                                    ?.toString() ??
+                                                '',
                                             openSource: 'premium_dashboard',
                                             storagePath:
                                                 pdfFile['storagePath']
@@ -3808,6 +3835,8 @@ class PDFViewerScreen extends StatefulWidget {
   final int initialPage;
   final String initialSearchQuery;
   final String accessLevel;
+  final String readerMode;
+  final String protectionMode;
   final String openSource;
   final String storagePath;
 
@@ -3818,6 +3847,8 @@ class PDFViewerScreen extends StatefulWidget {
     this.initialPage = 0,
     this.initialSearchQuery = '',
     this.accessLevel = 'free',
+    this.readerMode = '',
+    this.protectionMode = '',
     this.openSource = 'direct_open',
     this.storagePath = '',
   });
@@ -3931,6 +3962,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   ReaderProtectionPolicy get readerProtectionPolicy => ReaderProtectionPolicy(
     documentAccessLevel: widget.accessLevel,
+    readerMode: widget.readerMode,
+    protectionMode: widget.protectionMode,
     hasActiveSubscription: readerUserAccess.hasActiveSubscription,
     isAdmin: readerUserAccess.isAdmin,
   );
@@ -4317,7 +4350,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   void registerPdfViewer() {
     ui.platformViewRegistry.registerViewFactory(viewId, (int viewId) {
-      if (readerProtectionPolicy.shouldDeterCopying) {
+      if (readerProtectionPolicy.usesProtectedImageReader) {
         final container = html.DivElement()
           ..style.width = '100%'
           ..style.height = '100%'
@@ -4807,7 +4840,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       },
     );
 
-    if (readerProtectionPolicy.shouldDeterCopying) {
+    if (readerProtectionPolicy.usesProtectedImageReader) {
       scrollProtectedPdfImageReaderToPage(currentPdfPage);
     } else {
       updatePdfIframeSource(

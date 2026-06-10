@@ -1,16 +1,42 @@
+import 'vault_document_metadata.dart';
+
 class ReaderProtectionPolicy {
   const ReaderProtectionPolicy({
     required this.documentAccessLevel,
     required this.hasActiveSubscription,
     required this.isAdmin,
+    this.readerMode = '',
+    this.protectionMode = '',
   });
 
   final String documentAccessLevel;
   final bool hasActiveSubscription;
   final bool isAdmin;
+  final String readerMode;
+  final String protectionMode;
 
   bool get isProtectedDocument {
+    final normalizedReaderMode = readerMode.trim().toLowerCase();
+    final normalizedProtectionMode = protectionMode.trim().toLowerCase();
+    final hasExplicitProfile =
+        normalizedReaderMode.isNotEmpty || normalizedProtectionMode.isNotEmpty;
+
+    if (normalizedReaderMode == vaultReaderModeProtectedImage ||
+        normalizedProtectionMode == vaultProtectionModeCopyDeterred) {
+      return true;
+    }
+    if (hasExplicitProfile) return false;
+
     return documentAccessLevel.trim().toLowerCase() == 'premium';
+  }
+
+  bool get usesProtectedImageReader {
+    final normalizedReaderMode = readerMode.trim().toLowerCase();
+    if (normalizedReaderMode.isNotEmpty) {
+      return normalizedReaderMode == vaultReaderModeProtectedImage;
+    }
+
+    return isProtectedDocument;
   }
 
   bool get shouldShowWatermark => isProtectedDocument;
