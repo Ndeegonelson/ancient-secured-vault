@@ -247,15 +247,24 @@ void main() {
           'name': 'A.pdf',
           'category': 'Finance',
           'updatedAt': DateTime.utc(2026, 6, 7),
+          'readerMode': vaultReaderModeStandardPdf,
+          'searchMode': vaultSearchModeFullTextIndex,
         },
         {'name': 'B.pdf', 'category': 'finance'},
       ],
       premiumDocuments: [
-        {'name': 'C.pdf', 'category': 'Research'},
+        {
+          'name': 'C.pdf',
+          'category': 'Research',
+          'readerMode': vaultReaderModeProtectedImage,
+          'searchMode': vaultSearchModeFullTextIndex,
+        },
         {
           'name': 'D.pdf',
           'category': 'Finance',
           'updatedAt': DateTime.utc(2026, 6, 9),
+          'readerMode': vaultReaderModeProtectedImage,
+          'searchMode': vaultSearchModeFullTextIndex,
         },
         {'name': 'E.pdf'},
       ],
@@ -280,6 +289,16 @@ void main() {
     expect(summary.latestDocument?.accessLabel, 'Protected');
     expect(summary.latestDocument?.category, 'Finance');
     expect(summary.latestDocument?.updatedAt, DateTime.utc(2026, 6, 9));
+    expect(summary.recentDocuments.map((document) => document.name), [
+      'D.pdf',
+      'A.pdf',
+    ]);
+    expect(summary.datedDocumentCount, 2);
+    expect(summary.missingDateCount, 3);
+    expect(summary.protectedImageCount, 2);
+    expect(summary.standardReaderCount, 3);
+    expect(summary.fullTextSearchCount, 3);
+    expect(summary.searchPendingCount, 2);
   });
 
   test('keeps inventory latest document empty without update dates', () {

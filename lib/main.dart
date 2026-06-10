@@ -4192,6 +4192,140 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget buildAdminHealthPill({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Text(
+            '$label: ',
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildAdminVaultHealth(VaultDocumentInventorySummary inventory) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        buildAdminHealthPill(
+          icon: Icons.image_outlined,
+          label: 'Image reader',
+          value: '${inventory.protectedImageCount}/${inventory.totalCount}',
+          color: Colors.greenAccent,
+        ),
+        buildAdminHealthPill(
+          icon: Icons.manage_search,
+          label: 'Search ready',
+          value: '${inventory.fullTextSearchCount}/${inventory.totalCount}',
+          color: inventory.searchPendingCount == 0
+              ? Colors.lightBlueAccent
+              : Colors.orangeAccent,
+        ),
+        buildAdminHealthPill(
+          icon: Icons.schedule_outlined,
+          label: 'Missing dates',
+          value: inventory.missingDateCount.toString(),
+          color: inventory.missingDateCount == 0
+              ? Colors.greenAccent
+              : Colors.orangeAccent,
+        ),
+        buildAdminHealthPill(
+          icon: Icons.picture_as_pdf_outlined,
+          label: 'Standard reader',
+          value: inventory.standardReaderCount.toString(),
+          color: Colors.white54,
+        ),
+      ],
+    );
+  }
+
+  Widget buildAdminRecentDocuments(VaultDocumentInventorySummary inventory) {
+    if (!inventory.hasDocuments) {
+      return const Text(
+        'No vault documents have been uploaded yet.',
+        style: TextStyle(color: Colors.white54),
+      );
+    }
+
+    if (inventory.recentDocuments.isEmpty) {
+      return const Text(
+        'Recent uploads will appear after documents include update metadata.',
+        style: TextStyle(color: Colors.white54),
+      );
+    }
+
+    return Column(
+      children: inventory.recentDocuments.take(4).map((document) {
+        final isFree = document.accessLevel == 'free';
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                isFree
+                    ? Icons.picture_as_pdf_outlined
+                    : Icons.security_outlined,
+                color: isFree ? Colors.orangeAccent : Colors.greenAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      document.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${document.accessLabel} | ${document.category} | '
+                      'Updated ${formatVaultDocumentDate(document.updatedAt)}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   Widget buildAdminCommandCenter(VaultDocumentInventorySummary inventory) {
     if (!userAccess.isAdmin) return const SizedBox.shrink();
 
@@ -4308,6 +4442,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 18),
+          buildAdminVaultHealth(inventory),
+          const SizedBox(height: 18),
           Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -4353,7 +4489,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 18),
           LayoutBuilder(
             builder: (context, constraints) {
-              final panelWidth = constraints.maxWidth > 760
+              final panelWidth = constraints.maxWidth > 1060
+                  ? (constraints.maxWidth - 28) / 3
+                  : constraints.maxWidth > 760
                   ? (constraints.maxWidth - 14) / 2
                   : constraints.maxWidth;
               return Wrap(
@@ -4374,6 +4512,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         const SizedBox(height: 10),
                         buildAdminCategoryBars(inventory),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: panelWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Recent document updates',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        buildAdminRecentDocuments(inventory),
                       ],
                     ),
                   ),

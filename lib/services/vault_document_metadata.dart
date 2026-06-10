@@ -233,6 +233,10 @@ class VaultDocumentInventorySummary {
     required this.premiumCount,
     required this.categoryCounts,
     required this.latestDocument,
+    required this.recentDocuments,
+    required this.datedDocumentCount,
+    required this.protectedImageCount,
+    required this.fullTextSearchCount,
   });
 
   factory VaultDocumentInventorySummary.fromDocuments({
@@ -241,8 +245,16 @@ class VaultDocumentInventorySummary {
   }) {
     final categories = <String, ({int freeCount, int premiumCount})>{};
     VaultRecentDocument? latestDocument;
+    final recentDocuments = <VaultRecentDocument>[];
+    var datedDocumentCount = 0;
+    var protectedImageCount = 0;
+    var fullTextSearchCount = 0;
 
     void countDocument(Map<String, dynamic> document, {required bool isFree}) {
+      final accessLevel = normalizeVaultAccessLevel(
+        document['accessLevel']?.toString(),
+        fallback: isFree ? 'free' : 'premium',
+      );
       final category = normalizeVaultDocumentCategory(
         document['category']?.toString(),
       );
@@ -252,18 +264,30 @@ class VaultDocumentInventorySummary {
         premiumCount: current.premiumCount + (isFree ? 0 : 1),
       );
 
+      if (document['readerMode'] == vaultReaderModeProtectedImage) {
+        protectedImageCount++;
+      }
+      if (document['searchMode'] == vaultSearchModeFullTextIndex) {
+        fullTextSearchCount++;
+      }
+
       final updatedAt = document['updatedAt'];
-      if (updatedAt is DateTime &&
-          (latestDocument == null ||
-              updatedAt.isAfter(latestDocument!.updatedAt))) {
-        latestDocument = VaultRecentDocument(
+      if (updatedAt is DateTime) {
+        datedDocumentCount++;
+        final recentDocument = VaultRecentDocument(
           name: document['name']?.toString().trim().isEmpty ?? true
               ? 'Untitled PDF'
               : document['name'].toString().trim(),
-          accessLevel: isFree ? 'free' : 'premium',
+          accessLevel: accessLevel,
           category: category,
           updatedAt: updatedAt,
         );
+        recentDocuments.add(recentDocument);
+
+        if (latestDocument == null ||
+            updatedAt.isAfter(latestDocument!.updatedAt)) {
+          latestDocument = recentDocument;
+        }
       }
     }
 
@@ -295,6 +319,12 @@ class VaultDocumentInventorySummary {
       premiumCount: premiumDocuments.length,
       categoryCounts: List.unmodifiable(categoryCounts),
       latestDocument: latestDocument,
+      recentDocuments: List.unmodifiable(
+        recentDocuments..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)),
+      ),
+      datedDocumentCount: datedDocumentCount,
+      protectedImageCount: protectedImageCount,
+      fullTextSearchCount: fullTextSearchCount,
     );
   }
 
@@ -302,10 +332,17 @@ class VaultDocumentInventorySummary {
   final int premiumCount;
   final List<VaultDocumentCategoryCount> categoryCounts;
   final VaultRecentDocument? latestDocument;
+  final List<VaultRecentDocument> recentDocuments;
+  final int datedDocumentCount;
+  final int protectedImageCount;
+  final int fullTextSearchCount;
 
   int get totalCount => freeCount + premiumCount;
   bool get hasDocuments => totalCount > 0;
   bool get hasDatedDocument => latestDocument != null;
+  int get missingDateCount => totalCount - datedDocumentCount;
+  int get standardReaderCount => totalCount - protectedImageCount;
+  int get searchPendingCount => totalCount - fullTextSearchCount;
 
   VaultDocumentCategoryCount? countForCategory(String category) {
     final normalizedCategory = normalizeVaultDocumentCategory(
