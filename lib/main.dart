@@ -2612,6 +2612,121 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  String vaultDocumentAdminAccessLevel(
+    Map<String, dynamic> document, {
+    required String accessLabel,
+  }) {
+    final fallbackAccessLevel = accessLabel.toLowerCase().contains('free')
+        ? 'free'
+        : 'premium';
+    return normalizeVaultAccessLevel(
+      document['accessLevel']?.toString(),
+      fallback: fallbackAccessLevel,
+    );
+  }
+
+  VaultDocumentProfile vaultDocumentAdminProfile(
+    Map<String, dynamic> document, {
+    required String accessLabel,
+  }) {
+    return VaultDocumentProfile.forAccessLevel(
+      accessLevel: vaultDocumentAdminAccessLevel(
+        document,
+        accessLabel: accessLabel,
+      ),
+      category: normalizeVaultDocumentCategory(
+        document['category']?.toString(),
+      ),
+    );
+  }
+
+  bool vaultDocumentHasCurrentProfile(
+    Map<String, dynamic> document, {
+    required String accessLabel,
+  }) {
+    final profile = vaultDocumentAdminProfile(
+      document,
+      accessLabel: accessLabel,
+    );
+
+    return vaultDocumentAdminValue(document, 'schemaVersion') ==
+            profile.schemaVersion &&
+        vaultDocumentAdminValue(document, 'accessLevel') ==
+            profile.accessLevel &&
+        normalizeVaultDocumentCategory(document['category']?.toString()) ==
+            profile.category &&
+        vaultDocumentAdminValue(document, 'readerMode') == profile.readerMode &&
+        vaultDocumentAdminValue(document, 'deliveryMode') ==
+            profile.deliveryMode &&
+        vaultDocumentAdminValue(document, 'protectionMode') ==
+            profile.protectionMode &&
+        vaultDocumentAdminValue(document, 'searchMode') == profile.searchMode;
+  }
+
+  Future<bool> upgradeVaultDocumentProfileMetadata(
+    Map<String, dynamic> document, {
+    required String accessLabel,
+  }) async {
+    if (!requireVaultManagerAccess()) return false;
+
+    final storagePath = vaultDocumentAdminValue(
+      document,
+      'storagePath',
+      fallback: '',
+    );
+    if (storagePath.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This document is missing its storage path.'),
+        ),
+      );
+      return false;
+    }
+
+    try {
+      final ref = FirebaseStorage.instance.ref(storagePath);
+      final metadata = await ref.getMetadata();
+      final existingCustomMetadata = Map<String, String>.from(
+        metadata.customMetadata ?? const <String, String>{},
+      );
+      final profile = vaultDocumentAdminProfile(
+        document,
+        accessLabel: accessLabel,
+      );
+      final documentName = vaultDocumentAdminValue(document, 'name');
+      final nextCustomMetadata =
+          Map<String, String>.from(existingCustomMetadata)..addAll(
+            profile.toStorageMetadata(
+              uploadedBy:
+                  existingCustomMetadata['uploadedBy'] ??
+                  FirebaseAuth.instance.currentUser?.email ??
+                  '',
+              originalFileName:
+                  existingCustomMetadata['originalFileName'] ?? documentName,
+            ),
+          );
+
+      await ref.updateMetadata(
+        SettableMetadata(customMetadata: nextCustomMetadata),
+      );
+      await loadPDFs();
+
+      if (!mounted) return true;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Document profile metadata upgraded.')),
+      );
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not upgrade this document: $e')),
+      );
+      return false;
+    }
+  }
+
   Future<bool> refreshVaultDocumentSearchIndex(
     Map<String, dynamic> document, {
     required String accessLabel,
@@ -2643,12 +2758,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         throw Exception('The PDF could not be downloaded for indexing.');
       }
 
-      final fallbackAccessLevel = accessLabel.toLowerCase().contains('free')
-          ? 'free'
-          : 'premium';
-      final accessLevel = normalizeVaultAccessLevel(
-        document['accessLevel']?.toString(),
-        fallback: fallbackAccessLevel,
+      final accessLevel = vaultDocumentAdminAccessLevel(
+        document,
+        accessLabel: accessLabel,
       );
       final category = normalizeVaultDocumentCategory(
         document['category']?.toString(),
@@ -2687,12 +2799,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!requireVaultManagerAccess()) return;
 
     var isRefreshing = false;
+    var isUpgrading = false;
+    final needsProfileUpgrade = !vaultDocumentHasCurrentProfile(
+      document,
+      accessLabel: accessLabel,
+    );
 
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final isBusy = isRefreshing || isUpgrading;
+
             return AlertDialog(
               backgroundColor: const Color(0xFF10131A),
               title: const Text(
@@ -2716,6 +2835,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       const SizedBox(height: 12),
                       const Divider(color: Colors.white12),
+                      buildVaultDocumentAdminDetail(
+                        'Profile',
+                        needsProfileUpgrade
+                            ? 'Legacy metadata - upgrade available'
+                            : 'Current metadata',
+                      ),
                       buildVaultDocumentAdminDetail('Access', accessLabel),
                       buildVaultDocumentAdminDetail(
                         'Category',
@@ -2765,7 +2890,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: isRefreshing
+                  onPressed: isBusy
                       ? null
                       : () => Navigator.of(dialogContext).pop(),
                   child: const Text(
@@ -2773,12 +2898,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style: TextStyle(color: Colors.white70),
                   ),
                 ),
+                if (needsProfileUpgrade)
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                      side: const BorderSide(color: Colors.greenAccent),
+                    ),
+                    onPressed: isBusy
+                        ? null
+                        : () async {
+                            setDialogState(() {
+                              isUpgrading = true;
+                            });
+                            final upgraded =
+                                await upgradeVaultDocumentProfileMetadata(
+                                  document,
+                                  accessLabel: accessLabel,
+                                );
+                            if (!context.mounted) return;
+                            setDialogState(() {
+                              isUpgrading = false;
+                            });
+                            if (upgraded && dialogContext.mounted) {
+                              Navigator.of(dialogContext).pop();
+                            }
+                          },
+                    icon: isUpgrading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.greenAccent,
+                            ),
+                          )
+                        : const Icon(Icons.upgrade),
+                    label: Text(
+                      isUpgrading ? 'Upgrading...' : 'Upgrade profile',
+                    ),
+                  ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.greenAccent,
                     foregroundColor: Colors.black,
                   ),
-                  onPressed: isRefreshing
+                  onPressed: isBusy
                       ? null
                       : () async {
                           setDialogState(() {
