@@ -384,6 +384,18 @@ class HtmlDeviceIdentityStorage implements ReaderDeviceIdentityStorage {
   }
 }
 
+class _DashboardAdminOverview {
+  const _DashboardAdminOverview({
+    required this.users,
+    required this.devices,
+    required this.activity,
+  });
+
+  final UserAccessSummary users;
+  final UserDeviceSummary devices;
+  final ReaderActivitySummary activity;
+}
+
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
@@ -405,6 +417,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final UserAccessRepository userAccessRepository = UserAccessRepository();
   final UserDeviceAuthorizationRepository deviceAuthorizationRepository =
       UserDeviceAuthorizationRepository();
+  Future<_DashboardAdminOverview>? adminOverviewFuture;
 
   @override
   void initState() {
@@ -415,6 +428,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> loadDashboardData() async {
     await checkUserRole();
     await loadPDFs();
+  }
+
+  Future<_DashboardAdminOverview> loadDashboardAdminOverview() async {
+    final users = await userAccessRepository.loadSummary(limit: 100);
+    final devices = await deviceAuthorizationRepository.loadSummary(limit: 100);
+    final activity = await readerActivityRepository.loadSummary(
+      perCollectionLimit: 75,
+      recentLimit: 6,
+      topDocumentLimit: 4,
+    );
+
+    return _DashboardAdminOverview(
+      users: users,
+      devices: devices,
+      activity: activity,
+    );
+  }
+
+  void refreshDashboardAdminOverview() {
+    if (!userAccess.isAdmin) return;
+
+    setState(() {
+      adminOverviewFuture = loadDashboardAdminOverview();
+    });
   }
 
   @override
@@ -3917,6 +3954,479 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Future<void> indexVaultPdfsFromAdminPanel() async {
+    if (!requireVaultManagerAccess()) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        backgroundColor: Color(0xFF0F1117),
+        content: Row(
+          children: [
+            CircularProgressIndicator(color: Colors.greenAccent),
+            SizedBox(width: 20),
+            Expanded(
+              child: Text(
+                'Indexing vault PDFs...',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await indexExistingVaultPdfs();
+    if (!mounted) return;
+
+    Navigator.pop(context);
+    refreshDashboardAdminOverview();
+  }
+
+  Widget buildAdminMetricTile({
+    required IconData icon,
+    required String label,
+    required String value,
+    required String detail,
+    required Color color,
+  }) {
+    return Container(
+      width: 210,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151821),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.42)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildAdminActionButton({
+    required IconData icon,
+    required String label,
+    required String detail,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: 230,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          alignment: Alignment.centerLeft,
+          foregroundColor: Colors.greenAccent,
+          side: const BorderSide(color: Colors.white24),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon),
+        label: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              detail,
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget buildAdminCategoryBars(VaultDocumentInventorySummary inventory) {
+    if (inventory.categoryCounts.isEmpty) {
+      return const Text(
+        'No categorized documents yet.',
+        style: TextStyle(color: Colors.white54),
+      );
+    }
+
+    final largestCount = inventory.categoryCounts
+        .map((count) => count.totalCount)
+        .fold<int>(1, math.max);
+
+    return Column(
+      children: inventory.categoryCounts.take(6).map((count) {
+        final progress = count.totalCount / largestCount;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      count.category,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  Text(
+                    '${count.totalCount}',
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: progress.clamp(0, 1).toDouble(),
+                  minHeight: 8,
+                  backgroundColor: Colors.white10,
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    Colors.greenAccent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget buildAdminActivityList(ReaderActivitySummary activity) {
+    if (!activity.hasActivity) {
+      return const Text(
+        'No reader activity has been recorded yet.',
+        style: TextStyle(color: Colors.white54),
+      );
+    }
+
+    return Column(
+      children: activity.recentRecords.take(4).map((record) {
+        final title = record.pdfTitle.trim().isEmpty
+            ? 'Unknown document'
+            : record.pdfTitle.trim();
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                record.isBlockedAccess
+                    ? Icons.block_outlined
+                    : Icons.history_outlined,
+                color: record.isBlockedAccess
+                    ? Colors.redAccent
+                    : Colors.greenAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        formatActivityLabel(record),
+                        if (record.userEmail.isNotEmpty) record.userEmail,
+                        formatDashboardTimestamp(record.createdAt),
+                      ].join(' | '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget buildAdminCommandCenter(VaultDocumentInventorySummary inventory) {
+    if (!userAccess.isAdmin) return const SizedBox.shrink();
+
+    final overviewFuture = adminOverviewFuture ??= loadDashboardAdminOverview();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111722),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Admin command center',
+                      style: TextStyle(
+                        color: Colors.greenAccent,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Manage documents, members, devices, and reader activity from one place.',
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Refresh admin overview',
+                onPressed: refreshDashboardAdminOverview,
+                icon: const Icon(Icons.refresh, color: Colors.greenAccent),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              buildAdminMetricTile(
+                icon: Icons.folder_copy_outlined,
+                label: 'Vault documents',
+                value: inventory.totalCount.toString(),
+                detail:
+                    '${inventory.freeCount} free | ${inventory.premiumCount} protected',
+                color: Colors.greenAccent,
+              ),
+              buildAdminMetricTile(
+                icon: Icons.category_outlined,
+                label: 'Categories',
+                value: inventory.categoryCounts.length.toString(),
+                detail: inventory.latestDocument == null
+                    ? 'No recent document yet'
+                    : 'Latest: ${inventory.latestDocument!.name}',
+                color: Colors.orangeAccent,
+              ),
+              FutureBuilder<_DashboardAdminOverview>(
+                future: overviewFuture,
+                builder: (context, snapshot) {
+                  final overview = snapshot.data;
+                  return buildAdminMetricTile(
+                    icon: Icons.people_alt_outlined,
+                    label: 'Members',
+                    value: overview?.users.totalCount.toString() ?? '...',
+                    detail: overview == null
+                        ? 'Loading access summary'
+                        : '${overview.users.adminCount} admins | ${overview.users.premiumCount} premium | ${overview.users.freeCount} free',
+                    color: Colors.lightBlueAccent,
+                  );
+                },
+              ),
+              FutureBuilder<_DashboardAdminOverview>(
+                future: overviewFuture,
+                builder: (context, snapshot) {
+                  final overview = snapshot.data;
+                  return buildAdminMetricTile(
+                    icon: Icons.devices_other_outlined,
+                    label: 'Devices',
+                    value: overview?.devices.totalCount.toString() ?? '...',
+                    detail: overview == null
+                        ? 'Loading device summary'
+                        : '${overview.devices.pendingCount} pending | ${overview.devices.trustedCount} trusted | ${overview.devices.blockedCount} blocked',
+                    color: Colors.pinkAccent,
+                  );
+                },
+              ),
+              FutureBuilder<_DashboardAdminOverview>(
+                future: overviewFuture,
+                builder: (context, snapshot) {
+                  final overview = snapshot.data;
+                  return buildAdminMetricTile(
+                    icon: Icons.insights_outlined,
+                    label: 'Reader events',
+                    value:
+                        overview?.activity.totalEventCount.toString() ?? '...',
+                    detail: overview == null
+                        ? 'Loading reader activity'
+                        : '${overview.activity.uniqueReaderCount} readers | ${overview.activity.blockedAccessCount} blocked',
+                    color: Colors.cyanAccent,
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              buildAdminActionButton(
+                icon: Icons.upload_file,
+                label: 'Upload PDF',
+                detail: 'Add a profiled document',
+                onPressed: uploadPDF,
+              ),
+              buildAdminActionButton(
+                icon: Icons.manage_search,
+                label: 'Refresh index',
+                detail: 'Rebuild searchable text',
+                onPressed: indexVaultPdfsFromAdminPanel,
+              ),
+              buildAdminActionButton(
+                icon: Icons.inventory_2_outlined,
+                label: 'Inventory',
+                detail: 'Open vault breakdown',
+                onPressed: showVaultInventory,
+              ),
+              buildAdminActionButton(
+                icon: Icons.manage_accounts_outlined,
+                label: 'User access',
+                detail: 'Review plans and roles',
+                onPressed: showUserAccessOverview,
+              ),
+              buildAdminActionButton(
+                icon: Icons.important_devices_outlined,
+                label: 'Devices',
+                detail: 'Trust or block devices',
+                onPressed: showDeviceAuthorizationOverview,
+              ),
+              buildAdminActionButton(
+                icon: Icons.insights_outlined,
+                label: 'Analytics',
+                detail: 'Reader activity report',
+                onPressed: showReaderAnalytics,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final panelWidth = constraints.maxWidth > 760
+                  ? (constraints.maxWidth - 14) / 2
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 14,
+                runSpacing: 14,
+                children: [
+                  SizedBox(
+                    width: panelWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Documents by category',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        buildAdminCategoryBars(inventory),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: panelWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Recent reader activity',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        FutureBuilder<_DashboardAdminOverview>(
+                          future: overviewFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return const Text(
+                                'Admin activity could not load right now.',
+                                style: TextStyle(color: Colors.redAccent),
+                              );
+                            }
+
+                            if (!snapshot.hasData) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: LinearProgressIndicator(
+                                  color: Colors.greenAccent,
+                                  backgroundColor: Colors.white10,
+                                ),
+                              );
+                            }
+
+                            return buildAdminActivityList(
+                              snapshot.data!.activity,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canAccessMainVault = userAccess.canAccessMainVault;
@@ -3944,6 +4454,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       freeCategory: freeDocumentCategoryFilter,
       premiumCategory: premiumDocumentCategoryFilter,
     );
+    final vaultInventory = VaultDocumentInventorySummary.fromDocuments(
+      freeDocuments: freePdfFiles,
+      premiumDocuments: premiumPdfFiles,
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
@@ -3955,85 +4469,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
 
         actions: [
-          if (userAccess.isAdmin)
-            IconButton(
-              icon: const Icon(Icons.upload_file, color: Colors.greenAccent),
-              onPressed: uploadPDF,
-            ),
-
-          if (userAccess.isAdmin)
-            IconButton(
-              tooltip: 'Index Vault PDFs',
-              icon: const Icon(Icons.manage_search, color: Colors.greenAccent),
-              onPressed: () async {
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => const AlertDialog(
-                    backgroundColor: Color(0xFF0F1117),
-                    content: Row(
-                      children: [
-                        CircularProgressIndicator(color: Colors.greenAccent),
-                        SizedBox(width: 20),
-                        Expanded(
-                          child: Text(
-                            'Indexing vault PDFs...',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-
-                await indexExistingVaultPdfs();
-
-                if (!context.mounted) return;
-
-                Navigator.pop(context);
-              },
-            ),
-
-          if (userAccess.isAdmin)
-            IconButton(
-              tooltip: 'Reader Analytics',
-              icon: const Icon(
-                Icons.insights_outlined,
-                color: Colors.greenAccent,
-              ),
-              onPressed: showReaderAnalytics,
-            ),
-
-          if (userAccess.isAdmin)
-            IconButton(
-              tooltip: 'Vault Inventory',
-              icon: const Icon(
-                Icons.inventory_2_outlined,
-                color: Colors.greenAccent,
-              ),
-              onPressed: showVaultInventory,
-            ),
-
-          if (userAccess.isAdmin)
-            IconButton(
-              tooltip: 'User Access',
-              icon: const Icon(
-                Icons.manage_accounts_outlined,
-                color: Colors.greenAccent,
-              ),
-              onPressed: showUserAccessOverview,
-            ),
-
-          if (userAccess.isAdmin)
-            IconButton(
-              tooltip: 'Device Authorization',
-              icon: const Icon(
-                Icons.important_devices_outlined,
-                color: Colors.greenAccent,
-              ),
-              onPressed: showDeviceAuthorizationOverview,
-            ),
-
           IconButton(
             icon: const Icon(Icons.search, color: Colors.greenAccent),
 
@@ -4105,6 +4540,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ),
                           const SizedBox(height: 20),
+                        ],
+
+                        if (userAccess.isAdmin) ...[
+                          buildAdminCommandCenter(vaultInventory),
+                          const SizedBox(height: 24),
                         ],
 
                         buildDashboardDocumentSearch(),
