@@ -2579,6 +2579,246 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return null;
   }
 
+  String vaultDocumentAdminValue(
+    Map<String, dynamic> document,
+    String key, {
+    String fallback = 'Not set',
+  }) {
+    final value = document[key]?.toString().trim() ?? '';
+    return value.isEmpty ? fallback : value;
+  }
+
+  Widget buildVaultDocumentAdminDetail(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 128,
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: SelectableText(
+              value.isEmpty ? 'Not set' : value,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> refreshVaultDocumentSearchIndex(
+    Map<String, dynamic> document, {
+    required String accessLabel,
+  }) async {
+    if (!requireVaultManagerAccess()) return false;
+
+    final storagePath = vaultDocumentAdminValue(
+      document,
+      'storagePath',
+      fallback: '',
+    );
+    if (storagePath.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This document is missing its storage path.'),
+        ),
+      );
+      return false;
+    }
+
+    try {
+      final pdfUrl = await resolveSearchResultPdfUrl(document);
+      if (pdfUrl == null) return false;
+
+      final response = await http
+          .get(Uri.parse(pdfUrl))
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode >= 400) {
+        throw Exception('The PDF could not be downloaded for indexing.');
+      }
+
+      final fallbackAccessLevel = accessLabel.toLowerCase().contains('free')
+          ? 'free'
+          : 'premium';
+      final accessLevel = normalizeVaultAccessLevel(
+        document['accessLevel']?.toString(),
+        fallback: fallbackAccessLevel,
+      );
+      final category = normalizeVaultDocumentCategory(
+        document['category']?.toString(),
+      );
+
+      await indexPdfForSearch(
+        pdfBytes: response.bodyBytes,
+        pdfUrl: accessLevel == 'free' ? pdfUrl : null,
+        pdfTitle: vaultDocumentAdminValue(document, 'name'),
+        accessLevel: accessLevel,
+        storagePath: storagePath,
+        category: category,
+        replaceExisting: true,
+      );
+
+      if (!mounted) return true;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Document search index refreshed.')),
+      );
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not refresh this document: $e')),
+      );
+      return false;
+    }
+  }
+
+  Future<void> showVaultDocumentAdminDialog(
+    Map<String, dynamic> document, {
+    required String accessLabel,
+  }) async {
+    if (!requireVaultManagerAccess()) return;
+
+    var isRefreshing = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF10131A),
+              title: const Text(
+                'Manage document',
+                style: TextStyle(color: Colors.greenAccent),
+              ),
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        vaultDocumentAdminValue(document, 'name'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Divider(color: Colors.white12),
+                      buildVaultDocumentAdminDetail('Access', accessLabel),
+                      buildVaultDocumentAdminDetail(
+                        'Category',
+                        normalizeVaultDocumentCategory(
+                          document['category']?.toString(),
+                        ),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Reader',
+                        vaultDocumentAdminValue(document, 'readerMode'),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Protection',
+                        vaultDocumentAdminValue(document, 'protectionMode'),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Delivery',
+                        vaultDocumentAdminValue(document, 'deliveryMode'),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Search',
+                        vaultDocumentAdminValue(document, 'searchMode'),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Schema',
+                        vaultDocumentAdminValue(document, 'schemaVersion'),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Size',
+                        formatVaultDocumentSize(document['sizeBytes'] as num?),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Updated',
+                        formatVaultDocumentDate(
+                          document['updatedAt'] is DateTime
+                              ? document['updatedAt'] as DateTime
+                              : null,
+                        ),
+                      ),
+                      buildVaultDocumentAdminDetail(
+                        'Storage',
+                        vaultDocumentAdminValue(document, 'storagePath'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isRefreshing
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(),
+                  child: const Text(
+                    'Close',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.greenAccent,
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: isRefreshing
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            isRefreshing = true;
+                          });
+                          final refreshed =
+                              await refreshVaultDocumentSearchIndex(
+                                document,
+                                accessLabel: accessLabel,
+                              );
+                          if (!context.mounted) return;
+                          setDialogState(() {
+                            isRefreshing = false;
+                          });
+                          if (refreshed && dialogContext.mounted) {
+                            Navigator.of(dialogContext).pop();
+                          }
+                        },
+                  icon: isRefreshing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.black,
+                          ),
+                        )
+                      : const Icon(Icons.manage_search),
+                  label: Text(
+                    isRefreshing ? 'Refreshing...' : 'Refresh search index',
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> globalSearch() async {
     final keywordController = TextEditingController();
 
@@ -3610,6 +3850,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       color: Colors.white70,
                                     ),
                                   ),
+                                  trailing: userAccess.canManageVault
+                                      ? IconButton(
+                                          tooltip: 'Manage document',
+                                          icon: const Icon(
+                                            Icons.admin_panel_settings,
+                                          ),
+                                          color: Colors.orangeAccent,
+                                          onPressed: () {
+                                            showVaultDocumentAdminDialog(
+                                              pdfFile,
+                                              accessLabel: 'Free Access PDF',
+                                            );
+                                          },
+                                        )
+                                      : null,
                                   onTap: () async {
                                     final pdfUrl =
                                         await resolveSearchResultPdfUrl(
@@ -3732,6 +3987,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         color: Colors.white70,
                                       ),
                                     ),
+
+                                    trailing: userAccess.canManageVault
+                                        ? IconButton(
+                                            tooltip: 'Manage document',
+                                            icon: const Icon(
+                                              Icons.admin_panel_settings,
+                                            ),
+                                            color: Colors.greenAccent,
+                                            onPressed: () {
+                                              showVaultDocumentAdminDialog(
+                                                pdfFile,
+                                                accessLabel: 'Protected PDF',
+                                              );
+                                            },
+                                          )
+                                        : null,
 
                                     onTap: () async {
                                       final pdfUrl =
