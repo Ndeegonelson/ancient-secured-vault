@@ -6214,12 +6214,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
       final pdfJs = js_util.getProperty<Object>(html.window, 'pdfjsLib');
+      final response = await http
+          .get(Uri.parse(widget.pdfUrl))
+          .timeout(const Duration(seconds: 45));
+      if (renderGeneration != protectedPdfRenderGeneration) return;
+
+      if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
+        throw StateError('The protected PDF file could not be downloaded.');
+      }
+
+      final documentOptions = js_util.newObject();
+      js_util.setProperty(documentOptions, 'data', response.bodyBytes);
       final loadingTask = js_util.callMethod<Object>(pdfJs, 'getDocument', [
-        js_util.jsify({
-          'url': widget.pdfUrl,
-          'disableAutoFetch': false,
-          'disableStream': false,
-        }),
+        documentOptions,
       ]);
       final document = await js_util.promiseToFuture<Object>(
         js_util.getProperty<Object>(loadingTask, 'promise'),
@@ -6326,14 +6333,23 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     } catch (error) {
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
+      final errorMessage = describeProtectedPdfRenderError(error);
+      final console = js_util.getProperty<Object?>(html.window, 'console');
+      if (console != null) {
+        js_util.callMethod<void>(console, 'error', [
+          'Protected PDF image reader failed: $errorMessage',
+        ]);
+      }
+
       protectedPdfRenderQueueActive = false;
+      protectedPdfRenderStarted = false;
       pendingProtectedPdfRenderPage = null;
       container.children.clear();
       container.children.add(
         html.DivElement()
           ..text =
               'Protected PDF image reader could not prepare this document. '
-              'Please try again.'
+              'Reason: $errorMessage'
           ..style.color = '#FF8A80'
           ..style.fontFamily = 'Arial, sans-serif'
           ..style.fontSize = '15px'
@@ -6348,6 +6364,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         );
       }
     }
+  }
+
+  String describeProtectedPdfRenderError(Object error) {
+    final rawMessage = error.toString().trim();
+    if (rawMessage.isEmpty) return 'Unknown browser rendering error.';
+
+    if (rawMessage.contains('Failed to fetch') ||
+        rawMessage.contains('Missing PDF') ||
+        rawMessage.contains('CORS')) {
+      return 'The protected image reader could not fetch the PDF file.';
+    }
+
+    if (rawMessage.contains('InvalidPDFException')) {
+      return 'The PDF structure could not be read by the protected image reader.';
+    }
+
+    if (rawMessage.contains('PasswordException')) {
+      return 'This PDF requires a password before it can be protected as images.';
+    }
+
+    if (rawMessage.length > 160) {
+      return '${rawMessage.substring(0, 160)}...';
+    }
+
+    return rawMessage;
   }
 
   Future<void> renderProtectedPdfPagesAroundPage(
@@ -6436,8 +6477,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final context = canvas.context2D;
       js_util.setProperty(context, 'imageSmoothingEnabled', true);
       js_util.setProperty(context, 'imageSmoothingQuality', 'high');
+      final renderContext = js_util.newObject();
+      js_util.setProperty(renderContext, 'canvasContext', context);
+      js_util.setProperty(renderContext, 'viewport', renderViewport);
       final renderTask = js_util.callMethod<Object>(page, 'render', [
-        js_util.jsify({'canvasContext': context, 'viewport': renderViewport}),
+        renderContext,
       ]);
       await js_util.promiseToFuture<Object>(
         js_util.getProperty<Object>(renderTask, 'promise'),
