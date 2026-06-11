@@ -54,12 +54,166 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 const UserDeviceAuthorizationMode readerDeviceAuthorizationMode =
     UserDeviceAuthorizationMode.monitoring;
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  runApp(const AncientSecureDocsBootstrap());
+}
 
-  runApp(const AncientSecureDocsApp());
+class AncientSecureDocsBootstrap extends StatefulWidget {
+  const AncientSecureDocsBootstrap({super.key});
+
+  @override
+  State<AncientSecureDocsBootstrap> createState() =>
+      _AncientSecureDocsBootstrapState();
+}
+
+class _AncientSecureDocsBootstrapState
+    extends State<AncientSecureDocsBootstrap> {
+  Future<void>? _startupFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      setState(() {
+        _startupFuture = initializeSecureServices();
+      });
+    });
+  }
+
+  Future<void> initializeSecureServices() async {
+    if (Firebase.apps.isNotEmpty) return;
+
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {
+        throw TimeoutException(
+          'Secure services took too long to start. Please retry.',
+        );
+      },
+    );
+  }
+
+  void retryStartup() {
+    setState(() {
+      _startupFuture = initializeSecureServices();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final startupFuture = _startupFuture;
+    if (startupFuture == null) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Ancient Secure Docs',
+        theme: ThemeData(
+          primarySwatch: Colors.green,
+          scaffoldBackgroundColor: const Color(0xFF0F1117),
+        ),
+        home: _StartupScreen(onRetry: retryStartup),
+      );
+    }
+
+    return FutureBuilder<void>(
+      future: startupFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.done &&
+            !snapshot.hasError) {
+          return const AncientSecureDocsApp();
+        }
+
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'Ancient Secure Docs',
+          theme: ThemeData(
+            primarySwatch: Colors.green,
+            scaffoldBackgroundColor: const Color(0xFF0F1117),
+          ),
+          home: _StartupScreen(error: snapshot.error, onRetry: retryStartup),
+        );
+      },
+    );
+  }
+}
+
+class _StartupScreen extends StatelessWidget {
+  const _StartupScreen({this.error, required this.onRetry});
+
+  final Object? error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError = error != null;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F1117),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  hasError ? Icons.cloud_off_outlined : Icons.security_outlined,
+                  color: hasError ? Colors.orangeAccent : Colors.greenAccent,
+                  size: 46,
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  hasError
+                      ? 'Secure services need attention'
+                      : 'Preparing Ancient Secure Docs',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.greenAccent,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  hasError
+                      ? 'The vault could not finish starting. Check your connection, then retry.'
+                      : 'Connecting the vault, reader, and protected storage...',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white60, height: 1.4),
+                ),
+                const SizedBox(height: 22),
+                if (hasError)
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry startup'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.greenAccent,
+                      foregroundColor: Colors.black,
+                    ),
+                  )
+                else
+                  const SizedBox(
+                    height: 28,
+                    width: 28,
+                    child: CircularProgressIndicator(
+                      color: Colors.greenAccent,
+                      strokeWidth: 3,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AncientSecureDocsApp extends StatelessWidget {
@@ -4499,6 +4653,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget buildAdminAttentionItem(_AdminAttentionItem item) {
     final color = adminAttentionColor(item.tone);
+    final actionLabel = item.actionLabel;
+    final onPressed = item.onPressed;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -4508,37 +4664,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.32)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(item.icon, color: color, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(item.icon, color: color, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      item.detail,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  item.detail,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          if (item.actionLabel != null && item.onPressed != null) ...[
-            const SizedBox(width: 10),
-            TextButton(
-              onPressed: item.onPressed,
-              child: Text(
-                item.actionLabel!,
-                style: const TextStyle(color: Colors.greenAccent),
+          if (actionLabel != null && onPressed != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: onPressed,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  actionLabel,
+                  style: const TextStyle(color: Colors.greenAccent),
+                ),
               ),
             ),
           ],
@@ -5386,17 +5558,27 @@ class PDFViewerScreen extends StatefulWidget {
 }
 
 class _ProtectedPdfPageRenderJob {
-  const _ProtectedPdfPageRenderJob({
-    required this.page,
-    required this.canvas,
-    required this.renderViewport,
+  _ProtectedPdfPageRenderJob({
+    required this.pageNumber,
+    required this.document,
+    required this.wrapper,
     required this.placeholder,
+    required this.displayScale,
+    required this.renderScale,
+    required this.displayWidth,
+    required this.displayHeight,
   });
 
-  final Object page;
-  final html.CanvasElement canvas;
-  final Object renderViewport;
+  final int pageNumber;
+  final Object document;
+  final html.DivElement wrapper;
   final html.HtmlElement placeholder;
+  final double displayScale;
+  final double renderScale;
+  final num displayWidth;
+  final num displayHeight;
+  bool isRendering = false;
+  bool isRendered = false;
 }
 
 class _PDFViewerScreenState extends State<PDFViewerScreen> {
@@ -5433,6 +5615,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   StreamSubscription<html.KeyboardEvent>? readerKeyDownSubscription;
   int protectedPdfRenderGeneration = 0;
   bool protectedPdfRenderStarted = false;
+  bool protectedPdfRenderQueueActive = false;
+  int? pendingProtectedPdfRenderPage;
+  final Map<int, _ProtectedPdfPageRenderJob> protectedPdfRenderJobs = {};
   late final String readerSessionId;
   late final ReaderTtsService readerTtsService;
   late final ReaderNarrationProgressRepository narrationProgressRepository;
@@ -6050,51 +6235,48 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
       container.children.clear();
       container.style.background = '#2A2A2A';
-      final renderJobs = <_ProtectedPdfPageRenderJob>[];
+      protectedPdfRenderJobs.clear();
+      pendingProtectedPdfRenderPage = null;
+
+      final firstPage = await js_util.promiseToFuture<Object>(
+        js_util.callMethod<Object>(document, 'getPage', [1]),
+      );
+      final baseViewport = js_util.callMethod<Object>(
+        firstPage,
+        'getViewport',
+        [
+          js_util.jsify({'scale': 1}),
+        ],
+      );
+      final baseWidth = js_util.getProperty<num>(baseViewport, 'width');
+      final containerWidth = container.clientWidth == 0
+          ? 900
+          : container.clientWidth;
+      final availableWidth = math.max(320, containerWidth - 48);
+      final displayScale = (availableWidth / baseWidth).clamp(0.6, 1.8);
+      final targetPixelRatio = pageCount <= 12
+          ? 2.35
+          : pageCount <= 60
+          ? 1.65
+          : 1.25;
+      final pixelRatio = math.min(
+        math.max(html.window.devicePixelRatio, targetPixelRatio),
+        2.6,
+      );
+      final renderScale = displayScale * pixelRatio;
+      final displayViewport = js_util.callMethod<Object>(
+        firstPage,
+        'getViewport',
+        [
+          js_util.jsify({'scale': displayScale}),
+        ],
+      );
+
+      final displayWidth = js_util.getProperty<num>(displayViewport, 'width');
+      final displayHeight = js_util.getProperty<num>(displayViewport, 'height');
 
       for (var pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
         if (renderGeneration != protectedPdfRenderGeneration) return;
-
-        final page = await js_util.promiseToFuture<Object>(
-          js_util.callMethod<Object>(document, 'getPage', [pageNumber]),
-        );
-        final baseViewport = js_util.callMethod<Object>(page, 'getViewport', [
-          js_util.jsify({'scale': 1}),
-        ]);
-        final baseWidth = js_util.getProperty<num>(baseViewport, 'width');
-        final containerWidth = container.clientWidth == 0
-            ? 900
-            : container.clientWidth;
-        final availableWidth = math.max(320, containerWidth - 48);
-        final displayScale = (availableWidth / baseWidth).clamp(0.6, 1.8);
-        final targetPixelRatio = pageCount <= 12
-            ? 2.35
-            : pageCount <= 60
-            ? 1.65
-            : 1.25;
-        final pixelRatio = math.min(
-          math.max(html.window.devicePixelRatio, targetPixelRatio),
-          2.6,
-        );
-        final renderScale = displayScale * pixelRatio;
-        final displayViewport = js_util.callMethod<Object>(
-          page,
-          'getViewport',
-          [
-            js_util.jsify({'scale': displayScale}),
-          ],
-        );
-        final renderViewport = js_util.callMethod<Object>(page, 'getViewport', [
-          js_util.jsify({'scale': renderScale}),
-        ]);
-
-        final displayWidth = js_util.getProperty<num>(displayViewport, 'width');
-        final displayHeight = js_util.getProperty<num>(
-          displayViewport,
-          'height',
-        );
-        final renderWidth = js_util.getProperty<num>(renderViewport, 'width');
-        final renderHeight = js_util.getProperty<num>(renderViewport, 'height');
 
         final wrapper = html.DivElement()
           ..dataset['readerPageNumber'] = pageNumber.toString()
@@ -6120,56 +6302,32 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ..style.zIndex = '1'
           ..style.pointerEvents = 'none'
           ..style.userSelect = 'none';
-        final canvas =
-            html.CanvasElement(
-                width: renderWidth.ceil(),
-                height: renderHeight.ceil(),
-              )
-              ..style.width = '${displayWidth}px'
-              ..style.height = '${displayHeight}px'
-              ..style.display = 'block'
-              ..style.filter = 'contrast(1.12) brightness(0.98)'
-              ..style.imageRendering = 'auto'
-              ..style.userSelect = 'none';
 
         wrapper.children.add(placeholder);
-        wrapper.children.add(canvas);
         container.children.add(wrapper);
-        renderJobs.add(
-          _ProtectedPdfPageRenderJob(
-            page: page,
-            canvas: canvas,
-            renderViewport: renderViewport,
-            placeholder: placeholder,
-          ),
+        protectedPdfRenderJobs[pageNumber] = _ProtectedPdfPageRenderJob(
+          pageNumber: pageNumber,
+          document: document,
+          wrapper: wrapper,
+          placeholder: placeholder,
+          displayScale: displayScale.toDouble(),
+          renderScale: renderScale.toDouble(),
+          displayWidth: displayWidth,
+          displayHeight: displayHeight,
         );
       }
 
       scrollProtectedPdfImageReaderToPage(currentPdfPage);
-
-      for (final job in renderJobs) {
-        if (renderGeneration != protectedPdfRenderGeneration) return;
-
-        final context = job.canvas.context2D;
-        js_util.setProperty(context, 'imageSmoothingEnabled', true);
-        js_util.setProperty(context, 'imageSmoothingQuality', 'high');
-        final renderTask = js_util.callMethod<Object>(job.page, 'render', [
-          js_util.jsify({
-            'canvasContext': context,
-            'viewport': job.renderViewport,
-          }),
-        ]);
-        await js_util.promiseToFuture<Object>(
-          js_util.getProperty<Object>(renderTask, 'promise'),
-        );
-
-        if (renderGeneration != protectedPdfRenderGeneration) return;
-
-        job.placeholder.remove();
-      }
+      await renderProtectedPdfPagesAroundPage(
+        currentPdfPage,
+        renderGeneration: renderGeneration,
+        radius: 1,
+      );
     } catch (error) {
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
+      protectedPdfRenderQueueActive = false;
+      pendingProtectedPdfRenderPage = null;
       container.children.clear();
       container.children.add(
         html.DivElement()
@@ -6189,6 +6347,114 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> renderProtectedPdfPagesAroundPage(
+    int pageNumber, {
+    required int renderGeneration,
+    int radius = 2,
+  }) async {
+    if (renderGeneration != protectedPdfRenderGeneration) return;
+
+    if (protectedPdfRenderQueueActive) {
+      pendingProtectedPdfRenderPage = pageNumber;
+      return;
+    }
+
+    protectedPdfRenderQueueActive = true;
+    try {
+      pendingProtectedPdfRenderPage = null;
+      final pageCount = pdfPageCount ?? protectedPdfRenderJobs.length;
+      final safePageNumber = pageNumber
+          .clamp(1, math.max(1, pageCount))
+          .toInt();
+      final startPage = math.max(1, safePageNumber - radius);
+      final endPage = math.min(pageCount, safePageNumber + radius);
+      final pages = <int>[safePageNumber];
+
+      for (var page = startPage; page <= endPage; page++) {
+        if (page != safePageNumber) pages.add(page);
+      }
+
+      for (final page in pages) {
+        if (renderGeneration != protectedPdfRenderGeneration) return;
+
+        final job = protectedPdfRenderJobs[page];
+        if (job == null || job.isRendered || job.isRendering) continue;
+
+        await renderProtectedPdfPage(job, renderGeneration: renderGeneration);
+      }
+    } finally {
+      protectedPdfRenderQueueActive = false;
+      final pendingPage = pendingProtectedPdfRenderPage;
+      if (pendingPage != null &&
+          renderGeneration == protectedPdfRenderGeneration) {
+        pendingProtectedPdfRenderPage = null;
+        unawaited(
+          renderProtectedPdfPagesAroundPage(
+            pendingPage,
+            renderGeneration: renderGeneration,
+            radius: radius,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> renderProtectedPdfPage(
+    _ProtectedPdfPageRenderJob job, {
+    required int renderGeneration,
+  }) async {
+    job.isRendering = true;
+    try {
+      final page = await js_util.promiseToFuture<Object>(
+        js_util.callMethod<Object>(job.document, 'getPage', [job.pageNumber]),
+      );
+      if (renderGeneration != protectedPdfRenderGeneration) return;
+
+      final renderViewport = js_util.callMethod<Object>(page, 'getViewport', [
+        js_util.jsify({'scale': job.renderScale}),
+      ]);
+      final renderWidth = js_util.getProperty<num>(renderViewport, 'width');
+      final renderHeight = js_util.getProperty<num>(renderViewport, 'height');
+      final canvas =
+          html.CanvasElement(
+              width: renderWidth.ceil(),
+              height: renderHeight.ceil(),
+            )
+            ..style.width = '${job.displayWidth}px'
+            ..style.height = '${job.displayHeight}px'
+            ..style.display = 'block'
+            ..style.filter = 'contrast(1.12) brightness(0.98)'
+            ..style.imageRendering = 'auto'
+            ..style.pointerEvents = 'none'
+            ..style.userSelect = 'none';
+
+      job.wrapper.children.add(canvas);
+
+      final context = canvas.context2D;
+      js_util.setProperty(context, 'imageSmoothingEnabled', true);
+      js_util.setProperty(context, 'imageSmoothingQuality', 'high');
+      final renderTask = js_util.callMethod<Object>(page, 'render', [
+        js_util.jsify({'canvasContext': context, 'viewport': renderViewport}),
+      ]);
+      await js_util.promiseToFuture<Object>(
+        js_util.getProperty<Object>(renderTask, 'promise'),
+      );
+
+      if (renderGeneration != protectedPdfRenderGeneration) return;
+
+      job.placeholder.remove();
+      job.isRendered = true;
+    } catch (_) {
+      if (renderGeneration == protectedPdfRenderGeneration) {
+        job.placeholder
+          ..text = 'Protected page ${job.pageNumber} could not render.'
+          ..style.color = '#FF8A80';
+      }
+    } finally {
+      job.isRendering = false;
     }
   }
 
@@ -6224,6 +6490,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       currentPdfPage = visiblePage;
     }
     preloadNarrationTextForPage(visiblePage);
+    unawaited(
+      renderProtectedPdfPagesAroundPage(
+        visiblePage,
+        renderGeneration: protectedPdfRenderGeneration,
+      ),
+    );
   }
 
   void scrollProtectedPdfImageReaderToPage(int pageNumber) {
@@ -6236,6 +6508,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     if (pageElement is! html.HtmlElement) return;
 
     container.scrollTop = math.max(0, pageElement.offsetTop - 12);
+    unawaited(
+      renderProtectedPdfPagesAroundPage(
+        pageNumber,
+        renderGeneration: protectedPdfRenderGeneration,
+      ),
+    );
   }
 
   void startReaderProtectionObservers() {
@@ -10459,6 +10737,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     protectedPdfMouseDownSubscription?.cancel();
     readerKeyDownSubscription?.cancel();
     protectedPdfRenderGeneration++;
+    protectedPdfRenderJobs.clear();
+    protectedPdfRenderQueueActive = false;
+    pendingProtectedPdfRenderPage = null;
     readerTtsService.removeListener(observeNarrationSession);
     narrationCloudSession.dispose();
 
