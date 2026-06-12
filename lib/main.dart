@@ -1118,6 +1118,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     var accessSearchQuery = '';
     UserAccessPlan? accessPlanFilter = initialPlanFilter;
     var countryFilter = '';
+    UserSubscriptionStatus? subscriptionFilter;
     final accessSearchController = TextEditingController();
     final currentUserEmail = UserAccessRepository.emailDocumentId(
       FirebaseAuth.instance.currentUser?.email,
@@ -1193,6 +1194,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             }
 
+            Future<void> applySubscriptionStatus(
+              UserAccessRecord user,
+              UserSubscriptionStatus status,
+            ) async {
+              if (user.email == currentUserEmail) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Use another admin account to change your own subscription.',
+                    ),
+                  ),
+                );
+                return;
+              }
+
+              setDialogState(() {
+                busyUserEmail = user.email;
+              });
+
+              try {
+                await userAccessRepository.saveSubscriptionStatus(
+                  email: user.email,
+                  status: status,
+                  changedByEmail: currentUserEmail,
+                  previousStatus: user.access.subscriptionStatus,
+                );
+
+                if (!mounted) return;
+
+                setDialogState(() {
+                  summaryFuture = userAccessRepository.loadSummary(limit: 100);
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '${user.email} subscription marked ${userSubscriptionStatusLabel(status)}.',
+                    ),
+                  ),
+                );
+                await checkUserRole();
+              } catch (error) {
+                if (!mounted) return;
+
+                setDialogState(() {
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Subscription update failed: $error')),
+                );
+              }
+            }
+
             Widget accessActions(UserAccessRecord user) {
               final isCurrentUser = user.email == currentUserEmail;
               final isBusy = busyUserEmail == user.email;
@@ -1210,21 +1265,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               return Wrap(
                 spacing: 6,
-                children: availablePlanActions(user).map((plan) {
-                  return TextButton(
-                    onPressed: busyUserEmail != null || isCurrentUser
-                        ? null
-                        : () => applyPlan(user, plan),
-                    style: TextButton.styleFrom(
-                      foregroundColor: plan == UserAccessPlan.free
-                          ? Colors.orangeAccent
-                          : Colors.greenAccent,
-                      disabledForegroundColor: Colors.white24,
-                      visualDensity: VisualDensity.compact,
+                children: [
+                  ...availablePlanActions(user).map<Widget>((plan) {
+                    return TextButton(
+                      onPressed: busyUserEmail != null || isCurrentUser
+                          ? null
+                          : () => applyPlan(user, plan),
+                      style: TextButton.styleFrom(
+                        foregroundColor: plan == UserAccessPlan.free
+                            ? Colors.orangeAccent
+                            : Colors.greenAccent,
+                        disabledForegroundColor: Colors.white24,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: Text(userAccessPlanLabel(plan)),
+                    );
+                  }),
+                  PopupMenuButton<UserSubscriptionStatus>(
+                    tooltip: 'Update subscription status',
+                    enabled: busyUserEmail == null && !isCurrentUser,
+                    icon: Icon(
+                      Icons.payments_outlined,
+                      color: isCurrentUser ? Colors.white24 : Colors.white70,
+                      size: 20,
                     ),
-                    child: Text(userAccessPlanLabel(plan)),
-                  );
-                }).toList(),
+                    color: const Color(0xFF1A1D25),
+                    onSelected: (status) =>
+                        applySubscriptionStatus(user, status),
+                    itemBuilder: (context) => UserSubscriptionStatus.values
+                        .where(
+                          (status) =>
+                              status != UserSubscriptionStatus.none &&
+                              status != user.access.subscriptionStatus,
+                        )
+                        .map(
+                          (status) => PopupMenuItem<UserSubscriptionStatus>(
+                            value: status,
+                            child: Text(
+                              userSubscriptionStatusLabel(status),
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                ],
               );
             }
 
@@ -1256,6 +1341,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 accessSearchQuery = '';
                 accessPlanFilter = null;
                 countryFilter = '';
+                subscriptionFilter = null;
               });
             }
 
@@ -1337,16 +1423,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         query: accessSearchQuery,
                         plan: accessPlanFilter,
                         country: countryFilter,
+                        subscriptionStatus: subscriptionFilter,
                       );
                       final activeFilterLabels = userAccessActiveFilterLabels(
                         query: accessSearchQuery,
                         plan: accessPlanFilter,
                         country: countryFilter,
+                        subscriptionStatus: subscriptionFilter,
                       );
                       final hasActiveFilter = hasUserAccessFilters(
                         query: accessSearchQuery,
                         plan: accessPlanFilter,
                         country: countryFilter,
+                        subscriptionStatus: subscriptionFilter,
                       );
                       final displayedUsers = visibleUsers
                           .take(userAccessDefaultDisplayLimit)
@@ -1381,7 +1470,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   value: summary.freeCount.toString(),
                                   color: Colors.orangeAccent,
                                 ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Trials',
+                                  value: summary.trialCount.toString(),
+                                  color: Colors.cyanAccent,
+                                ),
+                                _ReaderAnalyticsMetric(
+                                  label: 'Review',
+                                  value: summary.subscriptionReviewCount
+                                      .toString(),
+                                  color: summary.hasSubscriptionAttention
+                                      ? Colors.orangeAccent
+                                      : Colors.white54,
+                                ),
                               ],
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF151821),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    summary.hasSubscriptionAttention
+                                        ? Icons.warning_amber_rounded
+                                        : Icons.verified_user_outlined,
+                                    color: summary.hasSubscriptionAttention
+                                        ? Colors.orangeAccent
+                                        : Colors.greenAccent,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      summary.hasSubscriptionAttention
+                                          ? 'Subscription review queue: ${userAccessSubscriptionAttentionLabel(summary)}'
+                                          : 'Subscription states are clear. Active premium and trial users can access the protected vault.',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                             const SizedBox(height: 18),
                             TextField(
@@ -1447,6 +1585,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   plan: UserAccessPlan.free,
                                 ),
                               ],
+                            ),
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<UserSubscriptionStatus?>(
+                              key: ValueKey(
+                                'access-subscription-$subscriptionFilter',
+                              ),
+                              initialValue: subscriptionFilter,
+                              isExpanded: true,
+                              dropdownColor: const Color(0xFF1A1D25),
+                              iconEnabledColor: Colors.greenAccent,
+                              style: const TextStyle(color: Colors.white70),
+                              decoration: const InputDecoration(
+                                labelText: 'Filter by subscription status',
+                                labelStyle: TextStyle(color: Colors.white70),
+                                floatingLabelStyle: TextStyle(
+                                  color: Colors.greenAccent,
+                                ),
+                                filled: true,
+                                fillColor: Color(0xFF151821),
+                                border: OutlineInputBorder(),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.white24),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: Colors.greenAccent,
+                                  ),
+                                ),
+                              ),
+                              items: [
+                                const DropdownMenuItem<UserSubscriptionStatus?>(
+                                  value: null,
+                                  child: Text('All subscription states'),
+                                ),
+                                ...UserSubscriptionStatus.values.map(
+                                  (status) =>
+                                      DropdownMenuItem<UserSubscriptionStatus?>(
+                                        value: status,
+                                        child: Text(
+                                          userSubscriptionStatusLabel(status),
+                                        ),
+                                      ),
+                                ),
+                              ],
+                              onChanged: (status) {
+                                setDialogState(() {
+                                  subscriptionFilter = status;
+                                });
+                              },
                             ),
                             if (summary.countryOptions.isNotEmpty) ...[
                               const SizedBox(height: 12),
@@ -4794,6 +4981,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget buildAdminMemberMixPanel(UserAccessSummary users) {
     final total = users.totalCount;
+    final subscriptionAttentionLabel = userAccessSubscriptionAttentionLabel(
+      users,
+    );
 
     return Container(
       width: double.infinity,
@@ -4845,6 +5035,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
               color: Colors.lightBlueAccent,
             ),
             buildAdminProgressRow(
+              label: 'Trial readers',
+              value: users.trialCount,
+              total: total,
+              color: users.trialCount == 0 ? Colors.white54 : Colors.cyanAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Needs subscription review',
+              value: users.subscriptionReviewCount,
+              total: total,
+              color: users.hasSubscriptionAttention
+                  ? Colors.orangeAccent
+                  : Colors.white54,
+            ),
+            buildAdminProgressRow(
               label: 'Free readers',
               value: users.freeCount,
               total: total,
@@ -4852,6 +5056,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ? Colors.white54
                   : Colors.orangeAccent,
             ),
+            if (subscriptionAttentionLabel != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.orangeAccent,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Subscriptions needing review: $subscriptionAttentionLabel',
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 6),
             buildAdminPanelAction(
               icon: Icons.manage_accounts_outlined,
@@ -5179,6 +5406,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
           detail:
               '${_pluralize(overview.users.freeCount, 'reader remains', 'readers remain')} in the free access lane.',
           tone: _AdminAttentionTone.info,
+          actionLabel: 'User access',
+          onPressed: showUserAccessOverview,
+        ),
+      );
+    }
+
+    final subscriptionAttentionLabel = userAccessSubscriptionAttentionLabel(
+      overview.users,
+    );
+    if (subscriptionAttentionLabel != null) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.payments_outlined,
+          title: 'Subscriptions need review',
+          detail:
+              'Payment states are waiting for admin review: $subscriptionAttentionLabel.',
+          tone: _AdminAttentionTone.warning,
           actionLabel: 'User access',
           onPressed: showUserAccessOverview,
         ),

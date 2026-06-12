@@ -19,6 +19,13 @@ abstract interface class UserAccessStore {
     String? changedByEmail,
     UserAccessPlan? previousPlan,
   });
+
+  Future<void> saveSubscriptionStatus({
+    required String email,
+    required UserSubscriptionStatus status,
+    String? changedByEmail,
+    UserSubscriptionStatus? previousStatus,
+  });
 }
 
 class UserAccessPlanUpdate {
@@ -120,6 +127,45 @@ class UserAccessChangeRecord {
   final dynamic createdAt;
 }
 
+class UserSubscriptionStatusUpdate {
+  const UserSubscriptionStatusUpdate({required this.status});
+
+  final UserSubscriptionStatus status;
+
+  Map<String, dynamic> toFirestore({Object? updatedAt}) {
+    return {
+      'subscriptionStatus': userSubscriptionStatusKey(status),
+      if (updatedAt != null) 'updatedAt': updatedAt,
+    };
+  }
+}
+
+class UserSubscriptionStatusChangeDraft {
+  const UserSubscriptionStatusChangeDraft({
+    required this.targetEmail,
+    required this.changedByEmail,
+    required this.previousStatus,
+    required this.nextStatus,
+  });
+
+  final String targetEmail;
+  final String changedByEmail;
+  final UserSubscriptionStatus? previousStatus;
+  final UserSubscriptionStatus nextStatus;
+
+  Map<String, dynamic> toMap({required Object createdAt}) {
+    return {
+      'targetEmail': emailDocumentId(targetEmail),
+      'changedByEmail': emailDocumentId(changedByEmail),
+      'previousSubscriptionStatus': previousStatus == null
+          ? null
+          : userSubscriptionStatusKey(previousStatus!),
+      'nextSubscriptionStatus': userSubscriptionStatusKey(nextStatus),
+      'createdAt': createdAt,
+    };
+  }
+}
+
 class UserAccessRecord {
   const UserAccessRecord({
     required this.email,
@@ -161,6 +207,9 @@ class UserAccessRecord {
         displayName.toLowerCase().contains(normalizedQuery) ||
         country.toLowerCase().contains(normalizedQuery) ||
         access.planLabel.toLowerCase().contains(normalizedQuery) ||
+        access.subscriptionStatusLabel.toLowerCase().contains(
+          normalizedQuery,
+        ) ||
         access.accessLevel.contains(normalizedQuery);
   }
 
@@ -189,6 +238,10 @@ class UserAccessSummary {
     required this.adminCount,
     required this.premiumCount,
     required this.freeCount,
+    this.trialCount = 0,
+    this.pendingCount = 0,
+    this.expiredCount = 0,
+    this.cancelledCount = 0,
     this.recentChanges = const [],
   });
 
@@ -200,6 +253,10 @@ class UserAccessSummary {
     var adminCount = 0;
     var premiumCount = 0;
     var freeCount = 0;
+    var trialCount = 0;
+    var pendingCount = 0;
+    var expiredCount = 0;
+    var cancelledCount = 0;
 
     for (final user in sortedUsers) {
       if (user.access.isAdmin) {
@@ -209,6 +266,21 @@ class UserAccessSummary {
       } else {
         freeCount++;
       }
+
+      switch (user.access.subscriptionStatus) {
+        case UserSubscriptionStatus.trial:
+          trialCount++;
+        case UserSubscriptionStatus.pending:
+          pendingCount++;
+        case UserSubscriptionStatus.expired:
+          expiredCount++;
+        case UserSubscriptionStatus.cancelled:
+          cancelledCount++;
+        case UserSubscriptionStatus.none:
+        case UserSubscriptionStatus.active:
+        case UserSubscriptionStatus.inactive:
+          break;
+      }
     }
 
     return UserAccessSummary(
@@ -216,6 +288,10 @@ class UserAccessSummary {
       adminCount: adminCount,
       premiumCount: premiumCount,
       freeCount: freeCount,
+      trialCount: trialCount,
+      pendingCount: pendingCount,
+      expiredCount: expiredCount,
+      cancelledCount: cancelledCount,
       recentChanges: List.unmodifiable(recentChanges),
     );
   }
@@ -224,11 +300,19 @@ class UserAccessSummary {
   final int adminCount;
   final int premiumCount;
   final int freeCount;
+  final int trialCount;
+  final int pendingCount;
+  final int expiredCount;
+  final int cancelledCount;
   final List<UserAccessChangeRecord> recentChanges;
 
   int get totalCount => users.length;
   bool get hasUsers => users.isNotEmpty;
   bool get hasRecentChanges => recentChanges.isNotEmpty;
+  bool get hasSubscriptionAttention =>
+      pendingCount > 0 || expiredCount > 0 || cancelledCount > 0;
+  int get subscriptionReviewCount =>
+      pendingCount + expiredCount + cancelledCount;
   List<String> get countryOptions {
     final countries = users
         .map((user) => user.country.trim())
@@ -243,6 +327,7 @@ class UserAccessSummary {
     String query = '',
     UserAccessPlan? plan,
     String country = '',
+    UserSubscriptionStatus? subscriptionStatus,
   }) {
     final normalizedCountry = country.trim().toLowerCase();
 
@@ -253,7 +338,13 @@ class UserAccessSummary {
         final matchesCountry =
             normalizedCountry.isEmpty ||
             user.country.trim().toLowerCase() == normalizedCountry;
-        return matchesPlan && matchesCountry && user.matches(query);
+        final matchesSubscription =
+            subscriptionStatus == null ||
+            user.access.subscriptionStatus == subscriptionStatus;
+        return matchesPlan &&
+            matchesCountry &&
+            matchesSubscription &&
+            user.matches(query);
       }),
     );
   }
@@ -263,6 +354,7 @@ List<String> userAccessActiveFilterLabels({
   String query = '',
   UserAccessPlan? plan,
   String country = '',
+  UserSubscriptionStatus? subscriptionStatus,
 }) {
   final labels = <String>[];
   final cleanQuery = query.trim();
@@ -277,6 +369,11 @@ List<String> userAccessActiveFilterLabels({
   if (cleanCountry.isNotEmpty) {
     labels.add('Country: $cleanCountry');
   }
+  if (subscriptionStatus != null) {
+    labels.add(
+      'Subscription: ${userSubscriptionStatusLabel(subscriptionStatus)}',
+    );
+  }
 
   return List.unmodifiable(labels);
 }
@@ -285,11 +382,13 @@ bool hasUserAccessFilters({
   String query = '',
   UserAccessPlan? plan,
   String country = '',
+  UserSubscriptionStatus? subscriptionStatus,
 }) {
   return userAccessActiveFilterLabels(
     query: query,
     plan: plan,
     country: country,
+    subscriptionStatus: subscriptionStatus,
   ).isNotEmpty;
 }
 
@@ -315,6 +414,7 @@ List<String> userAccessRecordDetailParts(
     if (user.displayName.trim().isNotEmpty) user.displayName.trim(),
     if (user.country.trim().isNotEmpty) user.country.trim(),
     user.access.planLabel,
+    'Subscription: ${user.access.subscriptionStatusLabel}',
     user.access.canAccessMainVault ? 'Vault enabled' : 'Free vault only',
     if (isCurrentUser) 'Current admin',
   ]);
@@ -343,6 +443,29 @@ String? userAccessListLimitMessage({
 
   final userLabel = safeDisplayLimit == 1 ? 'user' : 'users';
   return 'Showing first $safeDisplayLimit $userLabel. Narrow filters to review the rest.';
+}
+
+List<String> userAccessSubscriptionAttentionParts(UserAccessSummary summary) {
+  final parts = <String>[];
+
+  if (summary.pendingCount > 0) {
+    parts.add('${summary.pendingCount} pending');
+  }
+  if (summary.expiredCount > 0) {
+    parts.add('${summary.expiredCount} expired');
+  }
+  if (summary.cancelledCount > 0) {
+    parts.add('${summary.cancelledCount} cancelled');
+  }
+
+  return List.unmodifiable(parts);
+}
+
+String? userAccessSubscriptionAttentionLabel(UserAccessSummary summary) {
+  final parts = userAccessSubscriptionAttentionParts(summary);
+  if (parts.isEmpty) return null;
+
+  return parts.join(' | ');
 }
 
 class UserAccessRepository implements UserAccessStore {
@@ -418,6 +541,47 @@ class UserAccessRepository implements UserAccessStore {
           changedByEmail: normalizedChangedByEmail,
           previousPlan: previousPlan,
           nextPlan: plan,
+        ).toMap(createdAt: FieldValue.serverTimestamp()),
+      );
+    }
+
+    await batch.commit();
+  }
+
+  @override
+  Future<void> saveSubscriptionStatus({
+    required String email,
+    required UserSubscriptionStatus status,
+    String? changedByEmail,
+    UserSubscriptionStatus? previousStatus,
+  }) async {
+    final documentId = emailDocumentId(email);
+    if (documentId.isEmpty) {
+      throw ArgumentError('A user email is required to update subscription.');
+    }
+
+    final userDoc = _firestore.collection('users').doc(documentId);
+    final batch = _firestore.batch();
+
+    batch.set(userDoc, {
+      'email': documentId,
+      ...UserSubscriptionStatusUpdate(
+        status: status,
+      ).toFirestore(updatedAt: FieldValue.serverTimestamp()),
+    }, SetOptions(merge: true));
+
+    final normalizedChangedByEmail = emailDocumentId(changedByEmail);
+    if (normalizedChangedByEmail.isNotEmpty) {
+      final auditDoc = _firestore
+          .collection('user_subscription_audit_logs')
+          .doc();
+      batch.set(
+        auditDoc,
+        UserSubscriptionStatusChangeDraft(
+          targetEmail: documentId,
+          changedByEmail: normalizedChangedByEmail,
+          previousStatus: previousStatus,
+          nextStatus: status,
         ).toMap(createdAt: FieldValue.serverTimestamp()),
       );
     }

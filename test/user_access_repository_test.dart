@@ -1,4 +1,5 @@
 import 'package:ancient_secure_docs/services/user_access_repository.dart';
+import 'package:ancient_secure_docs/services/user_access_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -30,6 +31,7 @@ void main() {
     expect(user.matches('ama'), isTrue);
     expect(user.matches('ghana'), isTrue);
     expect(user.matches('premium'), isTrue);
+    expect(user.matches('active'), isTrue);
     expect(user.matches('blocked'), isFalse);
   });
 
@@ -70,19 +72,58 @@ void main() {
         'role': 'reader',
         'subscriptionStatus': 'inactive',
       }, email: 'free@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'trial',
+        'accessLevel': 'premium',
+      }, email: 'trial@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'pending',
+        'accessLevel': 'premium',
+      }, email: 'pending@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'expired',
+        'accessLevel': 'premium',
+      }, email: 'expired@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'cancelled',
+        'accessLevel': 'premium',
+      }, email: 'cancelled@example.com'),
     ];
 
     final summary = UserAccessSummary.fromUsers(users);
 
-    expect(summary.totalCount, 3);
+    expect(summary.totalCount, 7);
     expect(summary.adminCount, 1);
-    expect(summary.premiumCount, 1);
-    expect(summary.freeCount, 1);
+    expect(summary.premiumCount, 2);
+    expect(summary.freeCount, 4);
+    expect(summary.trialCount, 1);
+    expect(summary.pendingCount, 1);
+    expect(summary.expiredCount, 1);
+    expect(summary.cancelledCount, 1);
+    expect(summary.hasSubscriptionAttention, isTrue);
+    expect(summary.subscriptionReviewCount, 3);
+    expect(userAccessSubscriptionAttentionParts(summary), [
+      '1 pending',
+      '1 expired',
+      '1 cancelled',
+    ]);
+    expect(
+      userAccessSubscriptionAttentionLabel(summary),
+      '1 pending | 1 expired | 1 cancelled',
+    );
     expect(summary.hasUsers, isTrue);
     expect(summary.users.map((user) => user.email), [
       'admin@example.com',
       'premium@example.com',
+      'trial@example.com',
+      'cancelled@example.com',
+      'expired@example.com',
       'free@example.com',
+      'pending@example.com',
     ]);
   });
 
@@ -131,6 +172,12 @@ void main() {
           .map((user) => user.email),
       ['premium@example.com'],
     );
+    expect(
+      summary
+          .filteredUsers(subscriptionStatus: UserSubscriptionStatus.active)
+          .map((user) => user.email),
+      ['premium@example.com'],
+    );
     expect(summary.filteredUsers(query: 'missing'), isEmpty);
   });
 
@@ -140,11 +187,21 @@ void main() {
         query: ' reader ',
         plan: UserAccessPlan.premium,
         country: ' Ghana ',
+        subscriptionStatus: UserSubscriptionStatus.active,
       ),
-      ['Search: reader', 'Plan: Premium', 'Country: Ghana'],
+      [
+        'Search: reader',
+        'Plan: Premium',
+        'Country: Ghana',
+        'Subscription: Active',
+      ],
     );
     expect(userAccessActiveFilterLabels(), isEmpty);
     expect(hasUserAccessFilters(country: 'Ghana'), isTrue);
+    expect(
+      hasUserAccessFilters(subscriptionStatus: UserSubscriptionStatus.pending),
+      isTrue,
+    );
     expect(hasUserAccessFilters(), isFalse);
   });
 
@@ -193,9 +250,13 @@ void main() {
         isCurrentUser: true,
         timestampLabel: 'Updated today',
       ),
-      'Ama Reader | Ghana | Premium | Vault enabled | Current admin | Updated today',
+      'Ama Reader | Ghana | Premium | Subscription: Active | Vault enabled | Current admin | Updated today',
     );
-    expect(userAccessRecordDetailParts(free), ['Free', 'Free vault only']);
+    expect(userAccessRecordDetailParts(free), [
+      'Free',
+      'Subscription: Inactive',
+      'Free vault only',
+    ]);
   });
 
   test('describes when the access list is capped for display', () {
@@ -234,6 +295,21 @@ void main() {
     });
   });
 
+  test('builds Firestore updates for subscription status changes', () {
+    expect(
+      UserSubscriptionStatusUpdate(
+        status: UserSubscriptionStatus.pending,
+      ).toFirestore(updatedAt: 'now'),
+      {'subscriptionStatus': 'pending', 'updatedAt': 'now'},
+    );
+    expect(
+      UserSubscriptionStatusUpdate(
+        status: UserSubscriptionStatus.cancelled,
+      ).toFirestore(),
+      {'subscriptionStatus': 'cancelled'},
+    );
+  });
+
   test('builds an audit payload for admin access changes', () {
     final draft = UserAccessChangeDraft(
       targetEmail: ' Reader@Example.COM ',
@@ -247,6 +323,23 @@ void main() {
       'changedByEmail': 'admin@example.com',
       'previousPlan': 'free',
       'nextPlan': 'premium',
+      'createdAt': 'now',
+    });
+  });
+
+  test('builds an audit payload for subscription status changes', () {
+    final draft = UserSubscriptionStatusChangeDraft(
+      targetEmail: ' Reader@Example.COM ',
+      changedByEmail: ' Admin@Example.COM ',
+      previousStatus: UserSubscriptionStatus.trial,
+      nextStatus: UserSubscriptionStatus.active,
+    );
+
+    expect(draft.toMap(createdAt: 'now'), {
+      'targetEmail': 'reader@example.com',
+      'changedByEmail': 'admin@example.com',
+      'previousSubscriptionStatus': 'trial',
+      'nextSubscriptionStatus': 'active',
       'createdAt': 'now',
     });
   });
