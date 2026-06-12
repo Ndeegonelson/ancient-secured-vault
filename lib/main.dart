@@ -71,10 +71,13 @@ class AncientSecureDocsBootstrap extends StatefulWidget {
 class _AncientSecureDocsBootstrapState
     extends State<AncientSecureDocsBootstrap> {
   Future<void>? _startupFuture;
+  Object? _browserZoomKeyHandler;
+  Object? _browserZoomWheelHandler;
 
   @override
   void initState() {
     super.initState();
+    startBrowserZoomGuard();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
 
@@ -82,6 +85,67 @@ class _AncientSecureDocsBootstrapState
         _startupFuture = initializeSecureServices();
       });
     });
+  }
+
+  void startBrowserZoomGuard() {
+    final eventOptions = js_util.jsify({'capture': true, 'passive': false});
+    final keyHandler = js_util.allowInterop((Object event) {
+      final hasControl = js_util.getProperty<bool?>(event, 'ctrlKey') == true;
+      final hasMeta = js_util.getProperty<bool?>(event, 'metaKey') == true;
+      if (!hasControl && !hasMeta) return;
+
+      final key = (js_util.getProperty<Object?>(event, 'key') ?? '')
+          .toString()
+          .toLowerCase();
+      if (key != '+' && key != '=' && key != '-' && key != '_') {
+        return;
+      }
+
+      js_util.callMethod<void>(event, 'preventDefault', []);
+      js_util.callMethod<void>(event, 'stopPropagation', []);
+    });
+    final wheelHandler = js_util.allowInterop((Object event) {
+      final hasControl = js_util.getProperty<bool?>(event, 'ctrlKey') == true;
+      final hasMeta = js_util.getProperty<bool?>(event, 'metaKey') == true;
+      if (!hasControl && !hasMeta) return;
+
+      js_util.callMethod<void>(event, 'preventDefault', []);
+      js_util.callMethod<void>(event, 'stopPropagation', []);
+    });
+
+    _browserZoomKeyHandler = keyHandler;
+    _browserZoomWheelHandler = wheelHandler;
+    js_util.callMethod<void>(html.window, 'addEventListener', [
+      'keydown',
+      keyHandler,
+      eventOptions,
+    ]);
+    js_util.callMethod<void>(html.window, 'addEventListener', [
+      'wheel',
+      wheelHandler,
+      eventOptions,
+    ]);
+  }
+
+  @override
+  void dispose() {
+    final keyHandler = _browserZoomKeyHandler;
+    final wheelHandler = _browserZoomWheelHandler;
+    if (keyHandler != null) {
+      js_util.callMethod<void>(html.window, 'removeEventListener', [
+        'keydown',
+        keyHandler,
+        true,
+      ]);
+    }
+    if (wheelHandler != null) {
+      js_util.callMethod<void>(html.window, 'removeEventListener', [
+        'wheel',
+        wheelHandler,
+        true,
+      ]);
+    }
+    super.dispose();
   }
 
   Future<void> initializeSecureServices() async {
