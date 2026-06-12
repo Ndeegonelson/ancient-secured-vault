@@ -4637,6 +4637,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget buildAdminPanelAction({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton.icon(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          minimumSize: const Size(0, 36),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        icon: Icon(icon, size: 16, color: Colors.greenAccent),
+        label: Text(label, style: const TextStyle(color: Colors.greenAccent)),
+      ),
+    );
+  }
+
   Widget buildAdminDocumentMixPanel(VaultDocumentInventorySummary inventory) {
     final total = inventory.totalCount;
 
@@ -4705,6 +4725,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ? Colors.lightBlueAccent
                   : Colors.orangeAccent,
             ),
+            const SizedBox(height: 6),
+            buildAdminPanelAction(
+              icon: inventory.searchPendingCount == 0
+                  ? Icons.inventory_2_outlined
+                  : Icons.manage_search,
+              label: inventory.searchPendingCount == 0
+                  ? 'Open inventory'
+                  : 'Refresh index',
+              onPressed: inventory.searchPendingCount == 0
+                  ? showVaultInventory
+                  : indexVaultPdfsFromAdminPanel,
+            ),
           ],
         ],
       ),
@@ -4770,6 +4802,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               color: users.freeCount == 0
                   ? Colors.white54
                   : Colors.orangeAccent,
+            ),
+            const SizedBox(height: 6),
+            buildAdminPanelAction(
+              icon: Icons.manage_accounts_outlined,
+              label: 'Review access',
+              onPressed: showUserAccessOverview,
             ),
           ],
         ],
@@ -4855,6 +4893,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 fontSize: 12,
               ),
             ),
+            const SizedBox(height: 6),
+            buildAdminPanelAction(
+              icon: Icons.important_devices_outlined,
+              label: 'Review devices',
+              onPressed: showDeviceAuthorizationOverview,
+            ),
           ],
         ],
       ),
@@ -4881,42 +4925,61 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final isFree = document.accessLevel == 'free';
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 7),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                isFree
-                    ? Icons.picture_as_pdf_outlined
-                    : Icons.security_outlined,
-                color: isFree ? Colors.orangeAccent : Colors.greenAccent,
-                size: 20,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      document.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white70),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => showVaultDocumentAdminDialog(
+              document.document,
+              accessLabel: document.accessLabel,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    isFree
+                        ? Icons.picture_as_pdf_outlined
+                        : Icons.security_outlined,
+                    color: isFree ? Colors.orangeAccent : Colors.greenAccent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          document.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${document.accessLabel} | ${document.category} | '
+                          'Updated ${formatVaultDocumentDate(document.updatedAt)}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white38,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${document.accessLabel} | ${document.category} | '
-                      'Updated ${formatVaultDocumentDate(document.updatedAt)}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white38,
-                        fontSize: 12,
-                      ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Tooltip(
+                    message: 'Manage document',
+                    child: Icon(
+                      Icons.tune,
+                      color: Colors.greenAccent,
+                      size: 18,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         );
       }).toList(),

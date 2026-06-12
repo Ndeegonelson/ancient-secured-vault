@@ -217,12 +217,14 @@ class VaultRecentDocument {
     required this.accessLevel,
     required this.category,
     required this.updatedAt,
+    required this.document,
   });
 
   final String name;
   final String accessLevel;
   final String category;
   final DateTime updatedAt;
+  final Map<String, dynamic> document;
 
   String get accessLabel => accessLevel == 'free' ? 'Free' : 'Protected';
 }
@@ -281,6 +283,7 @@ class VaultDocumentInventorySummary {
           accessLevel: accessLevel,
           category: category,
           updatedAt: updatedAt,
+          document: Map<String, dynamic>.unmodifiable(document),
         );
         recentDocuments.add(recentDocument);
 
