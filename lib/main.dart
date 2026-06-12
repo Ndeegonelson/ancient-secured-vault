@@ -634,6 +634,18 @@ class _AdminAttentionItem {
   final VoidCallback? onPressed;
 }
 
+class _AdminReadinessScore {
+  const _AdminReadinessScore({
+    required this.percent,
+    required this.label,
+    required this.detail,
+  });
+
+  final int percent;
+  final String label;
+  final String detail;
+}
+
 class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
@@ -4430,6 +4442,87 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget buildAdminTopDocumentsList(ReaderActivitySummary activity) {
+    if (activity.topDocuments.isEmpty) {
+      return const Text(
+        'Most active documents will appear after readers open and use PDFs.',
+        style: TextStyle(color: Colors.white54),
+      );
+    }
+
+    final largestCount = activity.topDocuments
+        .map((document) => document.eventCount)
+        .fold<int>(1, math.max);
+
+    return Column(
+      children: List.generate(activity.topDocuments.take(5).length, (index) {
+        final document = activity.topDocuments[index];
+        final title = document.pdfTitle.trim().isEmpty
+            ? document.documentIdentity
+            : document.pdfTitle.trim();
+        final progress = document.eventCount / largestCount;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    height: 24,
+                    width: 24,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: Colors.greenAccent.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(
+                        color: Colors.greenAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  Text(
+                    _pluralize(document.eventCount, 'event', 'events'),
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: progress.clamp(0, 1).toDouble(),
+                  minHeight: 6,
+                  backgroundColor: Colors.white10,
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    Colors.cyanAccent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
   Widget buildAdminHealthPill({
     required IconData icon,
     required String label,
@@ -4499,6 +4592,272 @@ class _DashboardScreenState extends State<DashboardScreen> {
           color: Colors.white54,
         ),
       ],
+    );
+  }
+
+  Widget buildAdminProgressRow({
+    required String label,
+    required int value,
+    required int total,
+    required Color color,
+  }) {
+    final progress = total <= 0 ? 0.0 : (value / total).clamp(0, 1).toDouble();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+              Text(
+                '$value/$total',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+              backgroundColor: Colors.white10,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildAdminDocumentMixPanel(VaultDocumentInventorySummary inventory) {
+    final total = inventory.totalCount;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151821),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.donut_large_outlined,
+                color: Colors.greenAccent,
+                size: 20,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Document mix',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (total == 0)
+            const Text(
+              'Document balance will appear after the first upload.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            )
+          else ...[
+            buildAdminProgressRow(
+              label: 'Free access documents',
+              value: inventory.freeCount,
+              total: total,
+              color: Colors.orangeAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Protected vault documents',
+              value: inventory.premiumCount,
+              total: total,
+              color: Colors.greenAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Protected image reader',
+              value: inventory.protectedImageCount,
+              total: total,
+              color: inventory.protectedImageCount == total
+                  ? Colors.greenAccent
+                  : Colors.lightBlueAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Search-ready documents',
+              value: inventory.fullTextSearchCount,
+              total: total,
+              color: inventory.searchPendingCount == 0
+                  ? Colors.lightBlueAccent
+                  : Colors.orangeAccent,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget buildAdminMemberMixPanel(UserAccessSummary users) {
+    final total = users.totalCount;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151821),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.groups_2_outlined,
+                color: Colors.lightBlueAccent,
+                size: 20,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Member mix',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (total == 0)
+            const Text(
+              'Member access balance will appear after user records are available.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            )
+          else ...[
+            buildAdminProgressRow(
+              label: 'Admins',
+              value: users.adminCount,
+              total: total,
+              color: Colors.greenAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Premium readers',
+              value: users.premiumCount,
+              total: total,
+              color: Colors.lightBlueAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Free readers',
+              value: users.freeCount,
+              total: total,
+              color: users.freeCount == 0
+                  ? Colors.white54
+                  : Colors.orangeAccent,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget buildAdminDeviceTrustPanel(UserDeviceSummary devices) {
+    final total = devices.totalCount;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151821),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                devices.isReadyForEnforcement
+                    ? Icons.verified_user_outlined
+                    : Icons.important_devices_outlined,
+                color: devices.isReadyForEnforcement
+                    ? Colors.greenAccent
+                    : Colors.orangeAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Device trust',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (total == 0)
+            const Text(
+              'Device trust balance will appear after readers open documents.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            )
+          else ...[
+            buildAdminProgressRow(
+              label: 'Trusted devices',
+              value: devices.trustedCount,
+              total: total,
+              color: Colors.greenAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Pending review',
+              value: devices.pendingCount,
+              total: total,
+              color: devices.pendingCount == 0
+                  ? Colors.white54
+                  : Colors.orangeAccent,
+            ),
+            buildAdminProgressRow(
+              label: 'Blocked devices',
+              value: devices.blockedCount,
+              total: total,
+              color: devices.blockedCount == 0
+                  ? Colors.white54
+                  : Colors.redAccent,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              devices.isReadyForEnforcement
+                  ? 'Device enforcement is ready.'
+                  : 'Review pending devices before strict enforcement.',
+              style: TextStyle(
+                color: devices.isReadyForEnforcement
+                    ? Colors.greenAccent
+                    : Colors.orangeAccent,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -4715,6 +5074,142 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return items;
   }
 
+  _AdminReadinessScore adminReadinessScore({
+    required VaultDocumentInventorySummary inventory,
+    _DashboardAdminOverview? overview,
+  }) {
+    var score = 100;
+    final notes = <String>[];
+
+    if (!inventory.hasDocuments) {
+      score -= 40;
+      notes.add('upload documents');
+    }
+
+    if (inventory.searchPendingCount > 0) {
+      score -= (inventory.searchPendingCount * 8).clamp(8, 24).toInt();
+      notes.add('refresh search index');
+    }
+
+    if (inventory.missingDateCount > 0) {
+      score -= (inventory.missingDateCount * 3).clamp(3, 12).toInt();
+      notes.add('complete metadata');
+    }
+
+    final uncoveredPremiumCount =
+        inventory.premiumCount - inventory.protectedImageCount;
+    if (uncoveredPremiumCount > 0) {
+      score -= (uncoveredPremiumCount * 10).clamp(10, 25).toInt();
+      notes.add('review protected reader coverage');
+    }
+
+    if (overview == null) {
+      score -= 8;
+      notes.add('loading member and device signals');
+    } else {
+      if (overview.devices.pendingCount > 0) {
+        score -= (overview.devices.pendingCount * 12).clamp(12, 30).toInt();
+        notes.add('review pending devices');
+      }
+
+      if (overview.activity.blockedAccessCount > 0) {
+        score -= (overview.activity.blockedAccessCount * 6)
+            .clamp(6, 18)
+            .toInt();
+        notes.add('check blocked access');
+      }
+    }
+
+    final safeScore = score.clamp(0, 100).toInt();
+    final label = safeScore >= 90
+        ? 'Operationally ready'
+        : safeScore >= 75
+        ? 'Stable with minor checks'
+        : safeScore >= 55
+        ? 'Needs admin review'
+        : 'Setup attention needed';
+    final detail = notes.isEmpty
+        ? 'Vault, access, and reader signals look steady.'
+        : 'Next: ${notes.take(3).join(', ')}.';
+
+    return _AdminReadinessScore(
+      percent: safeScore,
+      label: label,
+      detail: detail,
+    );
+  }
+
+  Color adminReadinessColor(int percent) {
+    if (percent >= 90) return Colors.greenAccent;
+    if (percent >= 75) return Colors.lightBlueAccent;
+    if (percent >= 55) return Colors.orangeAccent;
+    return Colors.redAccent;
+  }
+
+  Widget buildAdminReadinessSummary({
+    required VaultDocumentInventorySummary inventory,
+    _DashboardAdminOverview? overview,
+  }) {
+    final readiness = adminReadinessScore(
+      inventory: inventory,
+      overview: overview,
+    );
+    final color = adminReadinessColor(readiness.percent);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.speed_outlined, color: color, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  readiness.label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Text(
+                '${readiness.percent}%',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: readiness.percent / 100,
+              minHeight: 6,
+              backgroundColor: Colors.white12,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            readiness.detail,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget buildAdminAttentionItem(_AdminAttentionItem item) {
     final color = adminAttentionColor(item.tone);
     final actionLabel = item.actionLabel;
@@ -4829,6 +5324,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
             ],
           ),
+          const SizedBox(height: 8),
+          buildAdminReadinessSummary(inventory: inventory, overview: overview),
           const SizedBox(height: 8),
           if (items.isEmpty && !isLoading)
             buildAdminAttentionItem(
@@ -5063,6 +5560,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   SizedBox(
                     width: panelWidth,
+                    child: buildAdminDocumentMixPanel(inventory),
+                  ),
+                  SizedBox(
+                    width: panelWidth,
+                    child: FutureBuilder<_DashboardAdminOverview>(
+                      future: overviewFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return const Text(
+                            'Member mix could not load right now.',
+                            style: TextStyle(color: Colors.redAccent),
+                          );
+                        }
+
+                        if (!snapshot.hasData) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: LinearProgressIndicator(
+                              color: Colors.greenAccent,
+                              backgroundColor: Colors.white10,
+                            ),
+                          );
+                        }
+
+                        return buildAdminMemberMixPanel(snapshot.data!.users);
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: panelWidth,
+                    child: FutureBuilder<_DashboardAdminOverview>(
+                      future: overviewFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return const Text(
+                            'Device trust mix could not load right now.',
+                            style: TextStyle(color: Colors.redAccent),
+                          );
+                        }
+
+                        if (!snapshot.hasData) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: LinearProgressIndicator(
+                              color: Colors.greenAccent,
+                              backgroundColor: Colors.white10,
+                            ),
+                          );
+                        }
+
+                        return buildAdminDeviceTrustPanel(
+                          snapshot.data!.devices,
+                        );
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: panelWidth,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -5075,6 +5630,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         const SizedBox(height: 10),
                         buildAdminCategoryBars(inventory),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: panelWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Most active documents',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        FutureBuilder<_DashboardAdminOverview>(
+                          future: overviewFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return const Text(
+                                'Document activity could not load right now.',
+                                style: TextStyle(color: Colors.redAccent),
+                              );
+                            }
+
+                            if (!snapshot.hasData) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: LinearProgressIndicator(
+                                  color: Colors.greenAccent,
+                                  backgroundColor: Colors.white10,
+                                ),
+                              );
+                            }
+
+                            return buildAdminTopDocumentsList(
+                              snapshot.data!.activity,
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ),
