@@ -5577,12 +5577,18 @@ class _ProtectedPdfPageRenderJob {
   final double renderScale;
   final num displayWidth;
   final num displayHeight;
+  html.CanvasElement? canvas;
   bool isRendering = false;
   bool isRendered = false;
 }
 
 class _PDFViewerScreenState extends State<PDFViewerScreen> {
   static Future<void>? _pdfJsReady;
+  static const int _maximumProtectedPdfImageBytes = 120 * 1024 * 1024;
+  static const int _protectedPdfRetainedPageRadius = 4;
+  static const double _minimumReaderZoomScale = 0.75;
+  static const double _maximumReaderZoomScale = 1.8;
+  static const double _readerZoomStep = 0.15;
 
   final TextEditingController searchController = TextEditingController();
 
@@ -5602,6 +5608,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool readerSessionStarted = false;
   bool showReaderStatusOverlay = true;
   bool readerWindowIsActive = true;
+  double readerZoomScale = 1;
   DateTime? readerSessionStartedAt;
   StreamSubscription<html.Event>? readerVisibilitySubscription;
   StreamSubscription<html.Event>? readerWindowBlurSubscription;
@@ -5644,6 +5651,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final Future<void> narrationPreferencesReady;
   final Map<int, String> narrationPageTextCache = {};
   Future<List<int>>? narrationPdfBytesFuture;
+  Future<Uint8List>? protectedPdfImageBytesFuture;
 
   String get shortReaderSessionId {
     if (readerSessionId.length <= 8) {
@@ -5831,7 +5839,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         ? 'Page $currentPdfPage'
         : 'Page $currentPdfPage of $pdfPageCount';
 
-    return '$pageStatus | $readerAccessLabel | $searchStatus';
+    return '$pageStatus | ${formatReaderZoomLabel()} | '
+        '$readerAccessLabel | $searchStatus';
   }
 
   String get readerWatermarkText {
@@ -6057,8 +6066,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final searchFragment = safeSearchQuery.isEmpty
         ? ''
         : '&search=${Uri.encodeComponent(safeSearchQuery)}';
+    final zoomPercent = (readerZoomScale * 100).round().clamp(75, 180);
 
-    return '${widget.pdfUrl}#toolbar=0&navpanes=0&scrollbar=1&page=$safePageNumber$searchFragment';
+    return '${widget.pdfUrl}#page=$safePageNumber&zoom=$zoomPercent&toolbar=0&navpanes=0&scrollbar=1$searchFragment';
   }
 
   void registerPdfViewer() {
@@ -6068,7 +6078,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ..style.width = '100%'
           ..style.height = '100%'
           ..style.overflowY = 'auto'
-          ..style.overflowX = 'hidden'
+          ..style.overflowX = 'auto'
           ..style.background = '#202124'
           ..style.padding = '18px 0 96px'
           ..style.boxSizing = 'border-box'
@@ -6143,6 +6153,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   void updatePdfIframeSource({
     required int pageNumber,
     required String searchQuery,
+    bool forceReload = false,
   }) {
     final iframe = pdfIframe;
     if (iframe == null) return;
@@ -6151,6 +6162,17 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       pageNumber: pageNumber,
       searchQuery: searchQuery,
     );
+
+    if (forceReload) {
+      iframe.src = 'about:blank';
+      Timer(const Duration(milliseconds: 20), () {
+        if (pdfIframe == iframe) {
+          iframe.src = url;
+        }
+      });
+      return;
+    }
+
     iframe.src = url;
   }
 
@@ -6202,6 +6224,67 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
   }
 
+  Future<Uint8List> loadProtectedPdfImageBytes() async {
+    final cachedFuture = protectedPdfImageBytesFuture;
+    if (cachedFuture != null) return cachedFuture;
+
+    final future = fetchProtectedPdfImageBytes();
+    protectedPdfImageBytesFuture = future;
+
+    try {
+      return await future;
+    } catch (_) {
+      if (identical(protectedPdfImageBytesFuture, future)) {
+        protectedPdfImageBytesFuture = null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<Uint8List> fetchProtectedPdfImageBytes() async {
+    final storagePath = normalizedReaderStoragePath;
+    Object? storageError;
+
+    if (storagePath.isNotEmpty) {
+      try {
+        final data = await FirebaseStorage.instance
+            .ref(storagePath)
+            .getData(_maximumProtectedPdfImageBytes)
+            .timeout(const Duration(seconds: 45));
+
+        if (data != null && data.isNotEmpty) return data;
+        throw StateError('The secure storage PDF file is empty.');
+      } catch (error) {
+        storageError = error;
+      }
+    }
+
+    try {
+      return await loadProtectedPdfImageBytesFromUrl();
+    } catch (urlError) {
+      if (storageError != null) {
+        throw StateError(
+          'The secure storage path and fallback URL could not be read. '
+          'Storage: ${storageError.toString()}. URL: ${urlError.toString()}',
+        );
+      }
+
+      rethrow;
+    }
+  }
+
+  Future<Uint8List> loadProtectedPdfImageBytesFromUrl() async {
+    final response = await http
+        .get(Uri.parse(widget.pdfUrl))
+        .timeout(const Duration(seconds: 45));
+
+    if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
+      throw StateError('The protected PDF file could not be downloaded.');
+    }
+
+    return response.bodyBytes;
+  }
+
   Future<void> renderProtectedPdfImages() async {
     final container = protectedPdfImageContainer;
     if (container == null || protectedPdfRenderStarted) return;
@@ -6214,17 +6297,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
       final pdfJs = js_util.getProperty<Object>(html.window, 'pdfjsLib');
-      final response = await http
-          .get(Uri.parse(widget.pdfUrl))
-          .timeout(const Duration(seconds: 45));
+      final pdfBytes = await loadProtectedPdfImageBytes();
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
-        throw StateError('The protected PDF file could not be downloaded.');
-      }
-
       final documentOptions = js_util.newObject();
-      js_util.setProperty(documentOptions, 'data', response.bodyBytes);
+      js_util.setProperty(documentOptions, 'data', pdfBytes);
       final loadingTask = js_util.callMethod<Object>(pdfJs, 'getDocument', [
         documentOptions,
       ]);
@@ -6264,39 +6341,51 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final targetPixelRatio = pageCount <= 12
           ? 2.35
           : pageCount <= 60
-          ? 1.65
-          : 1.25;
+          ? 1.85
+          : 1.55;
       final pixelRatio = math.min(
         math.max(html.window.devicePixelRatio, targetPixelRatio),
-        2.6,
+        2.7,
       );
       final renderScale = displayScale * pixelRatio;
-      final displayViewport = js_util.callMethod<Object>(
+      final zoomedDisplayScale = displayScale * readerZoomScale;
+      final zoomedRenderScale = renderScale * readerZoomScale;
+      final zoomedDisplayViewport = js_util.callMethod<Object>(
         firstPage,
         'getViewport',
         [
-          js_util.jsify({'scale': displayScale}),
+          js_util.jsify({'scale': zoomedDisplayScale}),
         ],
       );
-
-      final displayWidth = js_util.getProperty<num>(displayViewport, 'width');
-      final displayHeight = js_util.getProperty<num>(displayViewport, 'height');
+      final zoomedDisplayWidth = js_util.getProperty<num>(
+        zoomedDisplayViewport,
+        'width',
+      );
+      final zoomedDisplayHeight = js_util.getProperty<num>(
+        zoomedDisplayViewport,
+        'height',
+      );
+      final pageMargin = zoomedDisplayWidth <= availableWidth
+          ? '0 auto 18px'
+          : '0 24px 18px';
 
       for (var pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
         if (renderGeneration != protectedPdfRenderGeneration) return;
 
         final wrapper = html.DivElement()
           ..dataset['readerPageNumber'] = pageNumber.toString()
-          ..style.width = '${displayWidth}px'
-          ..style.margin = '0 auto 18px'
+          ..style.width = '${zoomedDisplayWidth}px'
+          ..style.height = '${zoomedDisplayHeight}px'
+          ..style.margin = pageMargin
           ..style.background = '#FFFFFF'
           ..style.boxShadow = '0 2px 14px rgba(0,0,0,0.35)'
           ..style.position = 'relative'
+          ..style.overflow = 'hidden'
           ..style.userSelect = 'none';
         final placeholder = html.DivElement()
           ..text = 'Preparing protected page $pageNumber...'
-          ..style.width = '${displayWidth}px'
-          ..style.height = '${displayHeight}px'
+          ..style.width = '${zoomedDisplayWidth}px'
+          ..style.height = '${zoomedDisplayHeight}px'
           ..style.display = 'flex'
           ..style.alignItems = 'center'
           ..style.justifyContent = 'center'
@@ -6317,14 +6406,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           document: document,
           wrapper: wrapper,
           placeholder: placeholder,
-          displayScale: displayScale.toDouble(),
-          renderScale: renderScale.toDouble(),
-          displayWidth: displayWidth,
-          displayHeight: displayHeight,
+          displayScale: zoomedDisplayScale.toDouble(),
+          renderScale: zoomedRenderScale.toDouble(),
+          displayWidth: zoomedDisplayWidth,
+          displayHeight: zoomedDisplayHeight,
         );
       }
 
       scrollProtectedPdfImageReaderToPage(currentPdfPage);
+      centerProtectedPdfImageReaderHorizontally();
       await renderProtectedPdfPagesAroundPage(
         currentPdfPage,
         renderGeneration: renderGeneration,
@@ -6369,6 +6459,27 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   String describeProtectedPdfRenderError(Object error) {
     final rawMessage = error.toString().trim();
     if (rawMessage.isEmpty) return 'Unknown browser rendering error.';
+
+    if (rawMessage.contains('secure storage path and fallback URL')) {
+      if (rawMessage.contains('storage/unauthorized')) {
+        return 'Secure storage denied access to this protected PDF.';
+      }
+
+      if (rawMessage.contains('object-not-found')) {
+        return 'The protected PDF storage path does not exist.';
+      }
+
+      if (rawMessage.contains('Failed to fetch') ||
+          rawMessage.contains('CORS')) {
+        return 'Secure storage blocked this browser origin. Open the app from localhost.';
+      }
+
+      if (rawMessage.length > 220) {
+        return '${rawMessage.substring(0, 220)}...';
+      }
+
+      return rawMessage;
+    }
 
     if (rawMessage.contains('Failed to fetch') ||
         rawMessage.contains('Missing PDF') ||
@@ -6426,6 +6537,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
         await renderProtectedPdfPage(job, renderGeneration: renderGeneration);
       }
+
+      releaseDistantProtectedPdfPages(safePageNumber);
     } finally {
       protectedPdfRenderQueueActive = false;
       final pendingPage = pendingProtectedPdfRenderPage;
@@ -6472,7 +6585,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             ..style.pointerEvents = 'none'
             ..style.userSelect = 'none';
 
+      if (!job.wrapper.children.contains(job.placeholder)) {
+        job.wrapper.children.add(job.placeholder);
+      }
+      job.canvas?.remove();
+      job.canvas = null;
       job.wrapper.children.add(canvas);
+      job.canvas = canvas;
 
       final context = canvas.context2D;
       js_util.setProperty(context, 'imageSmoothingEnabled', true);
@@ -6487,18 +6606,59 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         js_util.getProperty<Object>(renderTask, 'promise'),
       );
 
-      if (renderGeneration != protectedPdfRenderGeneration) return;
+      if (renderGeneration != protectedPdfRenderGeneration) {
+        canvas.remove();
+        if (identical(job.canvas, canvas)) {
+          job.canvas = null;
+        }
+        return;
+      }
 
       job.placeholder.remove();
       job.isRendered = true;
     } catch (_) {
       if (renderGeneration == protectedPdfRenderGeneration) {
+        job.canvas?.remove();
+        job.canvas = null;
+        job.isRendered = false;
         job.placeholder
           ..text = 'Protected page ${job.pageNumber} could not render.'
           ..style.color = '#FF8A80';
+        if (!job.wrapper.children.contains(job.placeholder)) {
+          job.wrapper.children.add(job.placeholder);
+        }
       }
     } finally {
       job.isRendering = false;
+    }
+  }
+
+  void releaseDistantProtectedPdfPages(int centerPage) {
+    final pageCount = pdfPageCount ?? protectedPdfRenderJobs.length;
+    if (pageCount <= 40) return;
+
+    final startPage = math.max(1, centerPage - _protectedPdfRetainedPageRadius);
+    final endPage = math.min(
+      pageCount,
+      centerPage + _protectedPdfRetainedPageRadius,
+    );
+
+    for (final job in protectedPdfRenderJobs.values) {
+      if (job.isRendering ||
+          !job.isRendered ||
+          (job.pageNumber >= startPage && job.pageNumber <= endPage)) {
+        continue;
+      }
+
+      job.canvas?.remove();
+      job.canvas = null;
+      job.isRendered = false;
+      job.placeholder
+        ..text = 'Preparing protected page ${job.pageNumber}...'
+        ..style.color = '#8B8F99';
+      if (!job.wrapper.children.contains(job.placeholder)) {
+        job.wrapper.children.add(job.placeholder);
+      }
     }
   }
 
@@ -6557,6 +6717,196 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         pageNumber,
         renderGeneration: protectedPdfRenderGeneration,
       ),
+    );
+  }
+
+  void centerProtectedPdfImageReaderHorizontally() {
+    final container = protectedPdfImageContainer;
+    if (container == null) return;
+
+    final overflowWidth = container.scrollWidth - container.clientWidth;
+    if (overflowWidth <= 0) {
+      container.scrollLeft = 0;
+      return;
+    }
+
+    container.scrollLeft = (overflowWidth / 2).round();
+  }
+
+  double normalizeReaderZoomScale(double value) {
+    return value
+        .clamp(_minimumReaderZoomScale, _maximumReaderZoomScale)
+        .toDouble();
+  }
+
+  String formatReaderZoomLabel([double? value]) {
+    final zoom = ((value ?? readerZoomScale) * 100).round();
+    return '$zoom%';
+  }
+
+  void restartProtectedPdfImageReaderForZoom() {
+    final container = protectedPdfImageContainer;
+    if (container == null) return;
+
+    protectedPdfRenderGeneration++;
+    protectedPdfRenderStarted = false;
+    protectedPdfRenderQueueActive = false;
+    pendingProtectedPdfRenderPage = null;
+    protectedPdfRenderJobs.clear();
+    container.children.clear();
+    container.children.add(
+      html.DivElement()
+        ..text = 'Adjusting protected page size...'
+        ..style.color = '#C8C8C8'
+        ..style.fontFamily = 'Arial, sans-serif'
+        ..style.fontSize = '15px'
+        ..style.padding = '32px'
+        ..style.textAlign = 'center',
+    );
+
+    scheduleMicrotask(renderProtectedPdfImages);
+  }
+
+  void applyReaderZoomScale(double value) {
+    final nextZoom = normalizeReaderZoomScale(value);
+    if ((nextZoom - readerZoomScale).abs() < 0.001) return;
+
+    if (mounted) {
+      setState(() {
+        readerZoomScale = nextZoom;
+      });
+    } else {
+      readerZoomScale = nextZoom;
+    }
+
+    if (readerProtectionPolicy.usesProtectedImageReader) {
+      restartProtectedPdfImageReaderForZoom();
+    } else {
+      updatePdfIframeSource(
+        pageNumber: currentPdfPage,
+        searchQuery: currentSearchQuery,
+        forceReload: true,
+      );
+    }
+
+    logReaderAction(
+      action: 'change_reader_zoom',
+      details: {
+        'zoomPercent': (readerZoomScale * 100).round(),
+        'pageNumber': currentPdfPage,
+        'usesProtectedImageReader':
+            readerProtectionPolicy.usesProtectedImageReader,
+      },
+    );
+  }
+
+  void changeReaderZoomBy(double delta) {
+    applyReaderZoomScale(readerZoomScale + delta);
+  }
+
+  Future<void> showReaderZoomDialog() async {
+    if (!mounted) return;
+
+    var draftZoom = readerZoomScale;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              void updateDraft(double value) {
+                setDialogState(() {
+                  draftZoom = normalizeReaderZoomScale(value);
+                });
+              }
+
+              void applyDraft(double value) {
+                final zoom = normalizeReaderZoomScale(value);
+                updateDraft(zoom);
+                applyReaderZoomScale(zoom);
+              }
+
+              return AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Document size',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 360,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        formatReaderZoomLabel(draftZoom),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Tooltip(
+                            message: 'Zoom out',
+                            child: IconButton(
+                              onPressed:
+                                  draftZoom <= _minimumReaderZoomScale + 0.001
+                                  ? null
+                                  : () =>
+                                        applyDraft(draftZoom - _readerZoomStep),
+                              icon: const Icon(Icons.zoom_out),
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                          Expanded(
+                            child: Slider(
+                              value: draftZoom,
+                              min: _minimumReaderZoomScale,
+                              max: _maximumReaderZoomScale,
+                              divisions: 21,
+                              activeColor: Colors.greenAccent,
+                              inactiveColor: Colors.white24,
+                              label: formatReaderZoomLabel(draftZoom),
+                              onChanged: updateDraft,
+                              onChangeEnd: applyReaderZoomScale,
+                            ),
+                          ),
+                          Tooltip(
+                            message: 'Zoom in',
+                            child: IconButton(
+                              onPressed:
+                                  draftZoom >= _maximumReaderZoomScale - 0.001
+                                  ? null
+                                  : () =>
+                                        applyDraft(draftZoom + _readerZoomStep),
+                              icon: const Icon(Icons.zoom_in),
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: () => applyDraft(1),
+                        icon: const Icon(Icons.restart_alt),
+                        label: const Text('Reset to 100%'),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Close'),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -10912,6 +11262,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                     title: 'Go to page',
                   ),
                   item(
+                    value: 'zoom',
+                    icon: Icons.zoom_in,
+                    title: 'Document size',
+                    subtitle: 'Current zoom ${formatReaderZoomLabel()}',
+                  ),
+                  item(
                     value: 'save_position',
                     icon: Icons.bookmark_add,
                     title: 'Save reading position',
@@ -10982,6 +11338,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         break;
       case 'go_page':
         await showManualPageJumpDialog();
+        break;
+      case 'zoom':
+        await showReaderZoomDialog();
         break;
       case 'save_position':
         await showSaveReadingPositionDialog();
