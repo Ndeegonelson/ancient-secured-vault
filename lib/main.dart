@@ -5732,6 +5732,20 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     return storagePath.isNotEmpty ? storagePath : widget.title;
   }
 
+  String get readerZoomPreferenceKey {
+    final keySource = readerDocumentKey.trim().isNotEmpty
+        ? readerDocumentKey.trim()
+        : widget.pdfUrl.trim();
+    return 'ancient_secure_docs.reader_zoom.${Uri.encodeComponent(keySource)}';
+  }
+
+  String get readerStatusPreferenceKey {
+    final keySource = readerDocumentKey.trim().isNotEmpty
+        ? readerDocumentKey.trim()
+        : widget.pdfUrl.trim();
+    return 'ancient_secure_docs.reader_status.${Uri.encodeComponent(keySource)}';
+  }
+
   ReaderNarrationProgressContext get narrationProgressContext =>
       ReaderNarrationProgressContext(
         userEmail: FirebaseAuth.instance.currentUser?.email,
@@ -6808,6 +6822,48 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     return '$zoom%';
   }
 
+  double loadSavedReaderZoomScale() {
+    double? parsedValue;
+    try {
+      final rawValue = html.window.localStorage[readerZoomPreferenceKey];
+      parsedValue = rawValue == null ? null : double.tryParse(rawValue);
+    } catch (_) {
+      return 1;
+    }
+
+    return parsedValue == null ? 1 : normalizeReaderZoomScale(parsedValue);
+  }
+
+  void saveReaderZoomScale(double value) {
+    try {
+      html.window.localStorage[readerZoomPreferenceKey] =
+          normalizeReaderZoomScale(value).toStringAsFixed(2);
+    } catch (_) {
+      // Zoom should still update even if browser storage is unavailable.
+    }
+  }
+
+  bool loadSavedReaderStatusVisibility() {
+    try {
+      final rawValue = html.window.localStorage[readerStatusPreferenceKey];
+      if (rawValue == null) return true;
+
+      return rawValue != 'hidden';
+    } catch (_) {
+      return true;
+    }
+  }
+
+  void saveReaderStatusVisibility(bool visible) {
+    try {
+      html.window.localStorage[readerStatusPreferenceKey] = visible
+          ? 'visible'
+          : 'hidden';
+    } catch (_) {
+      // The toggle should still work for this reader session if storage fails.
+    }
+  }
+
   void restartProtectedPdfImageReaderForZoom() {
     final container = protectedPdfImageContainer;
     if (container == null) return;
@@ -6834,6 +6890,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   void applyReaderZoomScale(double value) {
     final nextZoom = normalizeReaderZoomScale(value);
     if ((nextZoom - readerZoomScale).abs() < 0.001) return;
+
+    saveReaderZoomScale(nextZoom);
 
     if (mounted) {
       setState(() {
@@ -11177,6 +11235,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         'pdf-viewer-${widget.pdfUrl.hashCode}-${DateTime.now().millisecondsSinceEpoch}';
     currentPdfPage = widget.initialPage < 1 ? 1 : widget.initialPage;
     currentSearchQuery = widget.initialSearchQuery;
+    readerZoomScale = loadSavedReaderZoomScale();
+    showReaderStatusOverlay = loadSavedReaderStatusVisibility();
     startReaderProtectionObservers();
     checkViewerAccess();
   }
@@ -11492,6 +11552,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               setState(() {
                 showReaderStatusOverlay = nextVisible;
               });
+              saveReaderStatusVisibility(nextVisible);
 
               ScaffoldMessenger.of(context).hideCurrentSnackBar();
               ScaffoldMessenger.of(context).showSnackBar(
