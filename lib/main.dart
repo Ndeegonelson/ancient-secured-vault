@@ -1108,13 +1108,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Future<void> showUserAccessOverview() async {
+  Future<void> showUserAccessOverview({
+    UserAccessPlan? initialPlanFilter,
+  }) async {
     if (!requireVaultManagerAccess()) return;
 
     var summaryFuture = userAccessRepository.loadSummary(limit: 100);
     String? busyUserEmail;
     var accessSearchQuery = '';
-    UserAccessPlan? accessPlanFilter;
+    UserAccessPlan? accessPlanFilter = initialPlanFilter;
     var countryFilter = '';
     final accessSearchController = TextEditingController();
     final currentUserEmail = UserAccessRepository.emailDocumentId(
@@ -1639,13 +1641,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ).whenComplete(accessSearchController.dispose);
   }
 
-  Future<void> showDeviceAuthorizationOverview() async {
+  Future<void> showDeviceAuthorizationOverview({
+    UserDeviceStatus? initialStatusFilter,
+  }) async {
     if (!requireVaultManagerAccess()) return;
 
     var summaryFuture = deviceAuthorizationRepository.loadSummary(limit: 100);
     String? busyDeviceId;
     var deviceSearchQuery = '';
-    UserDeviceStatus? deviceStatusFilter;
+    UserDeviceStatus? deviceStatusFilter = initialStatusFilter;
     var countryFilter = '';
     final deviceSearchController = TextEditingController();
     final currentUserEmail = UserAccessRepository.emailDocumentId(
@@ -4344,36 +4348,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final progress = count.totalCount / largestCount;
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () {
+              setState(() {
+                freeDocumentCategoryFilter = count.category;
+                premiumDocumentCategoryFilter = count.category;
+              });
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Dashboard filtered to ${count.category}.'),
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      count.category,
-                      style: const TextStyle(color: Colors.white70),
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          count.category,
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      Text(
+                        '${count.totalCount}',
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.filter_alt_outlined,
+                        color: Colors.greenAccent,
+                        size: 16,
+                      ),
+                    ],
                   ),
-                  Text(
-                    '${count.totalCount}',
-                    style: const TextStyle(color: Colors.white54),
+                  const SizedBox(height: 5),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: progress.clamp(0, 1).toDouble(),
+                      minHeight: 8,
+                      backgroundColor: Colors.white10,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Colors.greenAccent,
+                      ),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 5),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(
-                  value: progress.clamp(0, 1).toDouble(),
-                  minHeight: 8,
-                  backgroundColor: Colors.white10,
-                  valueColor: const AlwaysStoppedAnimation<Color>(
-                    Colors.greenAccent,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         );
       }).toList(),
@@ -4464,59 +4492,80 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 7),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: title.trim().isEmpty
+                ? null
+                : () => unawaited(showGlobalSearchResults(title)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    height: 24,
-                    width: 24,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.greenAccent.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: Colors.greenAccent.withValues(alpha: 0.3),
+                  Row(
+                    children: [
+                      Container(
+                        height: 24,
+                        width: 24,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Colors.greenAccent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: Colors.greenAccent.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          '${index + 1}',
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      Text(
+                        _pluralize(document.eventCount, 'event', 'events'),
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Tooltip(
+                        message: 'Search this document',
+                        child: Icon(
+                          Icons.manage_search,
+                          color: Colors.greenAccent,
+                          size: 18,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: progress.clamp(0, 1).toDouble(),
+                      minHeight: 6,
+                      backgroundColor: Colors.white10,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Colors.cyanAccent,
                       ),
                     ),
-                    child: Text(
-                      '${index + 1}',
-                      style: const TextStyle(
-                        color: Colors.greenAccent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                  Text(
-                    _pluralize(document.eventCount, 'event', 'events'),
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(
-                  value: progress.clamp(0, 1).toDouble(),
-                  minHeight: 6,
-                  backgroundColor: Colors.white10,
-                  valueColor: const AlwaysStoppedAnimation<Color>(
-                    Colors.cyanAccent,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         );
       }),
@@ -4806,8 +4855,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 6),
             buildAdminPanelAction(
               icon: Icons.manage_accounts_outlined,
-              label: 'Review access',
-              onPressed: showUserAccessOverview,
+              label: users.freeCount > 0
+                  ? 'Review free readers'
+                  : 'Review access',
+              onPressed: () => showUserAccessOverview(
+                initialPlanFilter: users.freeCount > 0
+                    ? UserAccessPlan.free
+                    : null,
+              ),
             ),
           ],
         ],
@@ -4896,8 +4951,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 6),
             buildAdminPanelAction(
               icon: Icons.important_devices_outlined,
-              label: 'Review devices',
-              onPressed: showDeviceAuthorizationOverview,
+              label: devices.pendingCount > 0
+                  ? 'Review pending'
+                  : devices.blockedCount > 0
+                  ? 'Review blocked'
+                  : 'Review devices',
+              onPressed: () => showDeviceAuthorizationOverview(
+                initialStatusFilter: devices.pendingCount > 0
+                    ? UserDeviceStatus.pending
+                    : devices.blockedCount > 0
+                    ? UserDeviceStatus.blocked
+                    : null,
+              ),
             ),
           ],
         ],
