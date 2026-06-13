@@ -148,6 +148,11 @@ abstract interface class ReaderHighlightStore {
     required String pdfTitle,
   });
 
+  Future<List<ReaderHighlight>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  });
+
   Future<void> save(ReaderHighlightDraft highlight);
 
   Future<void> updateNote({required String highlightId, required String note});
@@ -173,6 +178,21 @@ class ReaderHighlightRepository implements ReaderHighlightStore {
       (snapshot) => ReaderHighlight.sortNewest(
         snapshot.docs.map(ReaderHighlight.fromSnapshot),
       ),
+    );
+  }
+
+  @override
+  Future<List<ReaderHighlight>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  }) async {
+    final snapshot = await _collection
+        .where('userEmail', isEqualTo: userEmail)
+        .limit(limit < 1 ? 1 : limit)
+        .get();
+
+    return ReaderHighlight.sortNewest(
+      snapshot.docs.map(ReaderHighlight.fromSnapshot),
     );
   }
 

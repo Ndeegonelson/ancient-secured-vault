@@ -1,5 +1,5 @@
 const {setGlobalOptions} = require("firebase-functions");
-const {onCall} = require("firebase-functions/v2/https");
+const {onCall, onRequest} = require("firebase-functions/v2/https");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
 const {
@@ -18,6 +18,15 @@ const {
 const {
   createGoogleCloudTextToSpeechProvider,
 } = require("./narration_google_tts_provider");
+const {
+  createStripeBillingPortalSessionHandler,
+  createStripeCheckoutSessionHandler,
+  createStripeWebhookHandler,
+} = require("./stripe_subscription_checkout");
+const {
+  createPaystackCheckoutSessionHandler,
+  createPaystackWebhookHandler,
+} = require("./paystack_subscription_checkout");
 
 initializeApp();
 const firestore = getFirestore();
@@ -77,8 +86,9 @@ const narrationHttpOptions = {
   timeoutSeconds: 120,
 };
 
-exports.cloudNarrationCatalogHttp = require("firebase-functions/v2/https")
-    .onRequest(narrationHttpOptions, async (request, response) => {
+exports.cloudNarrationCatalogHttp = onRequest(
+    narrationHttpOptions,
+    async (request, response) => {
       try {
         await requireNarrationHttpAccess(request);
         const voices = await narrationProviderRegistry.loadCatalog();
@@ -89,10 +99,12 @@ exports.cloudNarrationCatalogHttp = require("firebase-functions/v2/https")
       } catch (error) {
         sendNarrationHttpError(response, error);
       }
-    });
+    },
+);
 
-exports.synthesizeCloudNarrationHttp = require("firebase-functions/v2/https")
-    .onRequest(narrationHttpOptions, async (request, response) => {
+exports.synthesizeCloudNarrationHttp = onRequest(
+    narrationHttpOptions,
+    async (request, response) => {
       try {
         await requireNarrationHttpAccess(request);
         const input = request.body && request.body.data ?
@@ -103,7 +115,63 @@ exports.synthesizeCloudNarrationHttp = require("firebase-functions/v2/https")
       } catch (error) {
         sendNarrationHttpError(response, error);
       }
-    });
+    },
+);
+
+exports.createStripeCheckoutSession = onRequest(
+    {
+      cors: true,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+      secrets: ["STRIPE_SECRET_KEY", "STRIPE_PREMIUM_PRICE_ID", "APP_BASE_URL"],
+    },
+    createStripeCheckoutSessionHandler({firestore}),
+);
+
+exports.createStripeBillingPortalSession = onRequest(
+    {
+      cors: true,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+      secrets: ["STRIPE_SECRET_KEY", "APP_BASE_URL"],
+    },
+    createStripeBillingPortalSessionHandler({firestore}),
+);
+
+exports.stripeWebhook = onRequest(
+    {
+      cors: false,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+      secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+    },
+    createStripeWebhookHandler({firestore}),
+);
+
+exports.createPaystackCheckoutSession = onRequest(
+    {
+      cors: true,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+      secrets: [
+        "PAYSTACK_SECRET_KEY",
+        "PAYSTACK_PREMIUM_AMOUNT_SUBUNITS",
+        "PAYSTACK_PREMIUM_CURRENCY",
+        "APP_BASE_URL",
+      ],
+    },
+    createPaystackCheckoutSessionHandler({firestore}),
+);
+
+exports.paystackWebhook = onRequest(
+    {
+      cors: false,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+      secrets: ["PAYSTACK_SECRET_KEY"],
+    },
+    createPaystackWebhookHandler({firestore}),
+);
 
 async function requireNarrationHttpAccess(request) {
   if (request.method === "OPTIONS") return;

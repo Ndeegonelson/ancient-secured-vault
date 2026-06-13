@@ -11,6 +11,11 @@ const int userDeviceDefaultDisplayLimit = 20;
 abstract interface class UserDeviceAuthorizationStore {
   Future<List<UserDeviceRecord>> listDevices({int limit = 100});
 
+  Future<List<UserDeviceRecord>> listForUser({
+    required String userEmail,
+    int limit = 12,
+  });
+
   Future<List<UserDeviceStatusChangeRecord>> listRecentDeviceChanges({
     int limit = 8,
   });
@@ -287,6 +292,30 @@ class UserDeviceRecord {
     return sorted;
   }
 
+  static List<UserDeviceRecord> sortForReaderList(
+    Iterable<UserDeviceRecord> devices,
+  ) {
+    final sorted = List<UserDeviceRecord>.from(devices);
+    sorted.sort((a, b) {
+      final aTime = a.lastSeenAt ?? a.updatedAt ?? a.createdAt;
+      final bTime = b.lastSeenAt ?? b.updatedAt ?? b.createdAt;
+      if (aTime is Timestamp && bTime is Timestamp) {
+        return bTime.compareTo(aTime);
+      }
+      if (aTime is Timestamp) return -1;
+      if (bTime is Timestamp) return 1;
+
+      final statusComparison = _statusPriority(
+        b.status,
+      ).compareTo(_statusPriority(a.status));
+      if (statusComparison != 0) return statusComparison;
+
+      return a.id.compareTo(b.id);
+    });
+
+    return sorted;
+  }
+
   static int _statusPriority(UserDeviceStatus status) {
     return switch (status) {
       UserDeviceStatus.pending => 3,
@@ -396,6 +425,30 @@ class UserDeviceAuthorizationRepository
     return UserDeviceRecord.sortForAdminList(
       snapshot.docs.map(
         (doc) => UserDeviceRecord.fromMap(doc.data(), id: doc.id),
+      ),
+    );
+  }
+
+  @override
+  Future<List<UserDeviceRecord>> listForUser({
+    required String userEmail,
+    int limit = 12,
+  }) async {
+    final normalizedEmail = emailDocumentId(userEmail);
+    if (normalizedEmail.isEmpty) return const [];
+
+    final safeLimit = limit < 1 ? 1 : limit;
+    final snapshot = await _firestore
+        .collection('user_device_authorizations')
+        .where('email', isEqualTo: normalizedEmail)
+        .limit(safeLimit)
+        .get();
+
+    return List.unmodifiable(
+      UserDeviceRecord.sortForReaderList(
+        snapshot.docs.map(
+          (doc) => UserDeviceRecord.fromMap(doc.data(), id: doc.id),
+        ),
       ),
     );
   }

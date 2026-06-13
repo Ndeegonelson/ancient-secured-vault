@@ -96,6 +96,11 @@ abstract interface class ReaderSavedPositionStore {
     required String pdfTitle,
   });
 
+  Future<List<ReaderSavedPosition>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  });
+
   Future<ReaderSavedPosition?> loadLatest({
     required String userEmail,
     required String pdfTitle,
@@ -136,6 +141,21 @@ class ReaderSavedPositionRepository implements ReaderSavedPositionStore {
       userEmail: userEmail,
       pdfTitle: pdfTitle,
     ).get();
+
+    return ReaderSavedPosition.sortNewest(
+      snapshot.docs.map(ReaderSavedPosition.fromSnapshot),
+    );
+  }
+
+  @override
+  Future<List<ReaderSavedPosition>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  }) async {
+    final snapshot = await _collection
+        .where('userEmail', isEqualTo: userEmail)
+        .limit(limit < 1 ? 1 : limit)
+        .get();
 
     return ReaderSavedPosition.sortNewest(
       snapshot.docs.map(ReaderSavedPosition.fromSnapshot),

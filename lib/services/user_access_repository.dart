@@ -26,6 +26,14 @@ abstract interface class UserAccessStore {
     String? changedByEmail,
     UserSubscriptionStatus? previousStatus,
   });
+
+  Future<void> saveSubscriptionExpiry({
+    required String email,
+    DateTime? expiresAt,
+    bool clearExpiry = false,
+    String? changedByEmail,
+    DateTime? previousExpiresAt,
+  });
 }
 
 class UserAccessPlanUpdate {
@@ -140,6 +148,21 @@ class UserSubscriptionStatusUpdate {
   }
 }
 
+class UserSubscriptionExpiryUpdate {
+  const UserSubscriptionExpiryUpdate({this.expiresAt, this.clearExpiry = false})
+    : assert(expiresAt != null || clearExpiry);
+
+  final DateTime? expiresAt;
+  final bool clearExpiry;
+
+  Map<String, dynamic> toFirestore({Object? updatedAt, Object? deleteValue}) {
+    return {
+      'subscriptionExpiresAt': clearExpiry ? deleteValue : expiresAt,
+      if (updatedAt != null) 'updatedAt': updatedAt,
+    };
+  }
+}
+
 class UserSubscriptionStatusChangeDraft {
   const UserSubscriptionStatusChangeDraft({
     required this.targetEmail,
@@ -163,6 +186,107 @@ class UserSubscriptionStatusChangeDraft {
       'nextSubscriptionStatus': userSubscriptionStatusKey(nextStatus),
       'createdAt': createdAt,
     };
+  }
+}
+
+class UserSubscriptionExpiryChangeDraft {
+  const UserSubscriptionExpiryChangeDraft({
+    required this.targetEmail,
+    required this.changedByEmail,
+    required this.previousExpiresAt,
+    required this.nextExpiresAt,
+    required this.clearExpiry,
+  });
+
+  final String targetEmail;
+  final String changedByEmail;
+  final DateTime? previousExpiresAt;
+  final DateTime? nextExpiresAt;
+  final bool clearExpiry;
+
+  Map<String, dynamic> toMap({required Object createdAt}) {
+    return {
+      'targetEmail': emailDocumentId(targetEmail),
+      'changedByEmail': emailDocumentId(changedByEmail),
+      'subscriptionChangeType': 'expiry',
+      'previousSubscriptionExpiresAt': previousExpiresAt?.toIso8601String(),
+      'nextSubscriptionExpiresAt': clearExpiry
+          ? null
+          : nextExpiresAt?.toIso8601String(),
+      'createdAt': createdAt,
+    };
+  }
+}
+
+class UserSubscriptionStatusChangeRecord {
+  const UserSubscriptionStatusChangeRecord({
+    required this.id,
+    required this.targetEmail,
+    required this.changedByEmail,
+    required this.previousStatus,
+    required this.nextStatus,
+    required this.changeType,
+    this.previousExpiresAt,
+    this.nextExpiresAt,
+    this.createdAt,
+  });
+
+  factory UserSubscriptionStatusChangeRecord.fromMap(
+    Map<String, dynamic> data, {
+    required String id,
+  }) {
+    return UserSubscriptionStatusChangeRecord(
+      id: id,
+      targetEmail: emailDocumentId(data['targetEmail']?.toString()),
+      changedByEmail: emailDocumentId(data['changedByEmail']?.toString()),
+      previousStatus: _readOptionalSubscriptionStatus(
+        data['previousSubscriptionStatus'],
+      ),
+      nextStatus: readUserSubscriptionStatus(data['nextSubscriptionStatus']),
+      changeType:
+          data['subscriptionChangeType']?.toString().trim().toLowerCase() ??
+          'status',
+      previousExpiresAt: _readDateTime(data['previousSubscriptionExpiresAt']),
+      nextExpiresAt: _readDateTime(data['nextSubscriptionExpiresAt']),
+      createdAt: data['createdAt'],
+    );
+  }
+
+  final String id;
+  final String targetEmail;
+  final String changedByEmail;
+  final UserSubscriptionStatus? previousStatus;
+  final UserSubscriptionStatus nextStatus;
+  final String changeType;
+  final DateTime? previousExpiresAt;
+  final DateTime? nextExpiresAt;
+  final dynamic createdAt;
+
+  bool get isExpiryChange =>
+      changeType == 'expiry' ||
+      previousExpiresAt != null ||
+      nextExpiresAt != null;
+
+  static UserSubscriptionStatus? _readOptionalSubscriptionStatus(
+    dynamic value,
+  ) {
+    if (value == null) return null;
+
+    return readUserSubscriptionStatus(value);
+  }
+
+  static DateTime? _readDateTime(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+
+    try {
+      final date = (value as dynamic).toDate();
+      if (date is DateTime) return date;
+    } catch (_) {
+      // Firestore timestamps expose toDate; strings and test values do not.
+    }
+
+    return DateTime.tryParse(value.toString());
   }
 }
 
@@ -242,12 +366,17 @@ class UserAccessSummary {
     this.pendingCount = 0,
     this.expiredCount = 0,
     this.cancelledCount = 0,
+    this.expiredByDateCount = 0,
+    this.expiringSoonCount = 0,
     this.recentChanges = const [],
+    this.recentSubscriptionChanges = const [],
   });
 
   factory UserAccessSummary.fromUsers(
     Iterable<UserAccessRecord> users, {
     List<UserAccessChangeRecord> recentChanges = const [],
+    List<UserSubscriptionStatusChangeRecord> recentSubscriptionChanges =
+        const [],
   }) {
     final sortedUsers = UserAccessRecord.sortForAdminList(users);
     var adminCount = 0;
@@ -257,6 +386,8 @@ class UserAccessSummary {
     var pendingCount = 0;
     var expiredCount = 0;
     var cancelledCount = 0;
+    var expiredByDateCount = 0;
+    var expiringSoonCount = 0;
 
     for (final user in sortedUsers) {
       if (user.access.isAdmin) {
@@ -281,6 +412,12 @@ class UserAccessSummary {
         case UserSubscriptionStatus.inactive:
           break;
       }
+
+      if (user.access.isSubscriptionExpired) {
+        expiredByDateCount++;
+      } else if (user.access.isSubscriptionExpiringSoon) {
+        expiringSoonCount++;
+      }
     }
 
     return UserAccessSummary(
@@ -292,7 +429,10 @@ class UserAccessSummary {
       pendingCount: pendingCount,
       expiredCount: expiredCount,
       cancelledCount: cancelledCount,
+      expiredByDateCount: expiredByDateCount,
+      expiringSoonCount: expiringSoonCount,
       recentChanges: List.unmodifiable(recentChanges),
+      recentSubscriptionChanges: List.unmodifiable(recentSubscriptionChanges),
     );
   }
 
@@ -304,15 +444,27 @@ class UserAccessSummary {
   final int pendingCount;
   final int expiredCount;
   final int cancelledCount;
+  final int expiredByDateCount;
+  final int expiringSoonCount;
   final List<UserAccessChangeRecord> recentChanges;
+  final List<UserSubscriptionStatusChangeRecord> recentSubscriptionChanges;
 
   int get totalCount => users.length;
   bool get hasUsers => users.isNotEmpty;
   bool get hasRecentChanges => recentChanges.isNotEmpty;
+  bool get hasRecentSubscriptionChanges => recentSubscriptionChanges.isNotEmpty;
   bool get hasSubscriptionAttention =>
-      pendingCount > 0 || expiredCount > 0 || cancelledCount > 0;
+      pendingCount > 0 ||
+      expiredCount > 0 ||
+      cancelledCount > 0 ||
+      expiredByDateCount > 0 ||
+      expiringSoonCount > 0;
   int get subscriptionReviewCount =>
-      pendingCount + expiredCount + cancelledCount;
+      pendingCount +
+      expiredCount +
+      cancelledCount +
+      expiredByDateCount +
+      expiringSoonCount;
   List<String> get countryOptions {
     final countries = users
         .map((user) => user.country.trim())
@@ -328,6 +480,7 @@ class UserAccessSummary {
     UserAccessPlan? plan,
     String country = '',
     UserSubscriptionStatus? subscriptionStatus,
+    bool subscriptionReviewOnly = false,
   }) {
     final normalizedCountry = country.trim().toLowerCase();
 
@@ -341,13 +494,24 @@ class UserAccessSummary {
         final matchesSubscription =
             subscriptionStatus == null ||
             user.access.subscriptionStatus == subscriptionStatus;
+        final matchesSubscriptionReview =
+            !subscriptionReviewOnly || userAccessNeedsSubscriptionReview(user);
         return matchesPlan &&
             matchesCountry &&
             matchesSubscription &&
+            matchesSubscriptionReview &&
             user.matches(query);
       }),
     );
   }
+}
+
+bool userAccessNeedsSubscriptionReview(UserAccessRecord user) {
+  return user.access.isSubscriptionExpired ||
+      user.access.isSubscriptionExpiringSoon ||
+      user.access.subscriptionStatus == UserSubscriptionStatus.pending ||
+      user.access.subscriptionStatus == UserSubscriptionStatus.expired ||
+      user.access.subscriptionStatus == UserSubscriptionStatus.cancelled;
 }
 
 List<String> userAccessActiveFilterLabels({
@@ -355,6 +519,7 @@ List<String> userAccessActiveFilterLabels({
   UserAccessPlan? plan,
   String country = '',
   UserSubscriptionStatus? subscriptionStatus,
+  bool subscriptionReviewOnly = false,
 }) {
   final labels = <String>[];
   final cleanQuery = query.trim();
@@ -374,6 +539,9 @@ List<String> userAccessActiveFilterLabels({
       'Subscription: ${userSubscriptionStatusLabel(subscriptionStatus)}',
     );
   }
+  if (subscriptionReviewOnly) {
+    labels.add('Needs subscription review');
+  }
 
   return List.unmodifiable(labels);
 }
@@ -383,12 +551,14 @@ bool hasUserAccessFilters({
   UserAccessPlan? plan,
   String country = '',
   UserSubscriptionStatus? subscriptionStatus,
+  bool subscriptionReviewOnly = false,
 }) {
   return userAccessActiveFilterLabels(
     query: query,
     plan: plan,
     country: country,
     subscriptionStatus: subscriptionStatus,
+    subscriptionReviewOnly: subscriptionReviewOnly,
   ).isNotEmpty;
 }
 
@@ -415,6 +585,14 @@ List<String> userAccessRecordDetailParts(
     if (user.country.trim().isNotEmpty) user.country.trim(),
     user.access.planLabel,
     'Subscription: ${user.access.subscriptionStatusLabel}',
+    if (user.access.subscriptionProviderLabel.isNotEmpty)
+      'Provider: ${user.access.subscriptionProviderLabel}',
+    if (userAccessSubscriptionExpiryLabel(user.access) != null)
+      userAccessSubscriptionExpiryLabel(user.access)!,
+    if (user.access.subscriptionReferenceLabel.isNotEmpty)
+      user.access.subscriptionReferenceLabel,
+    if (userAccessSubscriptionReviewLabel(user) != null)
+      userAccessSubscriptionReviewLabel(user)!,
     user.access.canAccessMainVault ? 'Vault enabled' : 'Free vault only',
     if (isCurrentUser) 'Current admin',
   ]);
@@ -445,9 +623,98 @@ String? userAccessListLimitMessage({
   return 'Showing first $safeDisplayLimit $userLabel. Narrow filters to review the rest.';
 }
 
+String? userAccessSubscriptionExpiryLabel(UserAccessState access) {
+  final expiresAt = access.subscriptionExpiresAt;
+  if (expiresAt == null) return null;
+
+  final dateLabel = _formatUserAccessDate(expiresAt);
+  if (access.isSubscriptionExpired) {
+    return 'Expired: $dateLabel';
+  }
+  if (access.isSubscriptionExpiringSoon) {
+    return 'Expires soon: $dateLabel';
+  }
+
+  return 'Expires: $dateLabel';
+}
+
+String? userAccessSubscriptionReviewLabel(UserAccessRecord user) {
+  final reasons = userAccessSubscriptionReviewReasons(user);
+  if (reasons.isEmpty) return null;
+
+  return 'Review: ${reasons.join(', ')}';
+}
+
+List<String> userAccessSubscriptionReviewReasons(UserAccessRecord user) {
+  final reasons = <String>[];
+  final access = user.access;
+
+  if (access.isSubscriptionExpired) {
+    reasons.add('expired by date');
+  } else if (access.isSubscriptionExpiringSoon) {
+    reasons.add('expiring soon');
+  }
+
+  if (access.hasStripePaymentIssue) {
+    reasons.add('Stripe payment issue');
+  }
+
+  switch (access.subscriptionStatus) {
+    case UserSubscriptionStatus.pending:
+      reasons.add('pending payment');
+    case UserSubscriptionStatus.expired:
+      reasons.add('expired status');
+    case UserSubscriptionStatus.cancelled:
+      reasons.add('cancelled');
+    case UserSubscriptionStatus.none:
+    case UserSubscriptionStatus.trial:
+    case UserSubscriptionStatus.active:
+    case UserSubscriptionStatus.inactive:
+      break;
+  }
+
+  return List.unmodifiable(reasons);
+}
+
+String userAccessSubscriptionChangeLabel(
+  UserSubscriptionStatusChangeRecord change,
+) {
+  if (change.isExpiryChange) {
+    final previous = change.previousExpiresAt == null
+        ? 'No expiry'
+        : _formatUserAccessDate(change.previousExpiresAt!);
+    final next = change.nextExpiresAt == null
+        ? 'No expiry'
+        : _formatUserAccessDate(change.nextExpiresAt!);
+
+    return 'Expiry: $previous to $next';
+  }
+
+  final previousStatus = change.previousStatus == null
+      ? 'Unknown'
+      : userSubscriptionStatusLabel(change.previousStatus!);
+
+  return '$previousStatus to ${userSubscriptionStatusLabel(change.nextStatus)}';
+}
+
+String _formatUserAccessDate(DateTime date) {
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  final hour = date.hour.toString().padLeft(2, '0');
+  final minute = date.minute.toString().padLeft(2, '0');
+
+  return '${date.year}-$month-$day $hour:$minute';
+}
+
 List<String> userAccessSubscriptionAttentionParts(UserAccessSummary summary) {
   final parts = <String>[];
 
+  if (summary.expiredByDateCount > 0) {
+    parts.add('${summary.expiredByDateCount} expired by date');
+  }
+  if (summary.expiringSoonCount > 0) {
+    parts.add('${summary.expiringSoonCount} expiring soon');
+  }
   if (summary.pendingCount > 0) {
     parts.add('${summary.pendingCount} pending');
   }
@@ -502,10 +769,12 @@ class UserAccessRepository implements UserAccessStore {
   Future<UserAccessSummary> loadSummary({int limit = 100}) async {
     final users = listUsers(limit: limit);
     final recentChanges = listRecentAccessChanges();
+    final recentSubscriptionChanges = listRecentSubscriptionChanges();
 
     return UserAccessSummary.fromUsers(
       await users,
       recentChanges: await recentChanges,
+      recentSubscriptionChanges: await recentSubscriptionChanges,
     );
   }
 
@@ -589,6 +858,53 @@ class UserAccessRepository implements UserAccessStore {
     await batch.commit();
   }
 
+  @override
+  Future<void> saveSubscriptionExpiry({
+    required String email,
+    DateTime? expiresAt,
+    bool clearExpiry = false,
+    String? changedByEmail,
+    DateTime? previousExpiresAt,
+  }) async {
+    final documentId = emailDocumentId(email);
+    if (documentId.isEmpty) {
+      throw ArgumentError('A user email is required to update subscription.');
+    }
+
+    final userDoc = _firestore.collection('users').doc(documentId);
+    final batch = _firestore.batch();
+
+    batch.set(userDoc, {
+      'email': documentId,
+      ...UserSubscriptionExpiryUpdate(
+        expiresAt: expiresAt,
+        clearExpiry: clearExpiry,
+      ).toFirestore(
+        updatedAt: FieldValue.serverTimestamp(),
+        deleteValue: FieldValue.delete(),
+      ),
+    }, SetOptions(merge: true));
+
+    final normalizedChangedByEmail = emailDocumentId(changedByEmail);
+    if (normalizedChangedByEmail.isNotEmpty) {
+      final auditDoc = _firestore
+          .collection('user_subscription_audit_logs')
+          .doc();
+      batch.set(
+        auditDoc,
+        UserSubscriptionExpiryChangeDraft(
+          targetEmail: documentId,
+          changedByEmail: normalizedChangedByEmail,
+          previousExpiresAt: previousExpiresAt,
+          nextExpiresAt: expiresAt,
+          clearExpiry: clearExpiry,
+        ).toMap(createdAt: FieldValue.serverTimestamp()),
+      );
+    }
+
+    await batch.commit();
+  }
+
   Future<List<UserAccessChangeRecord>> listRecentAccessChanges({
     int limit = 8,
   }) async {
@@ -602,6 +918,23 @@ class UserAccessRepository implements UserAccessStore {
     return List.unmodifiable(
       snapshot.docs.map(
         (doc) => UserAccessChangeRecord.fromMap(doc.data(), id: doc.id),
+      ),
+    );
+  }
+
+  Future<List<UserSubscriptionStatusChangeRecord>>
+  listRecentSubscriptionChanges({int limit = 8}) async {
+    final safeLimit = limit < 1 ? 1 : limit;
+    final snapshot = await _firestore
+        .collection('user_subscription_audit_logs')
+        .orderBy('createdAt', descending: true)
+        .limit(safeLimit)
+        .get();
+
+    return List.unmodifiable(
+      snapshot.docs.map(
+        (doc) =>
+            UserSubscriptionStatusChangeRecord.fromMap(doc.data(), id: doc.id),
       ),
     );
   }

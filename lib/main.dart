@@ -19,7 +19,9 @@ import 'services/reader_narration_session_repository.dart';
 import 'services/reader_narration_session_tracker.dart';
 import 'services/reader_narration_playback_coordinator.dart';
 import 'services/reader_narration_voice_catalog_presenter.dart';
+import 'services/reader_announcement_repository.dart';
 import 'services/reader_bookmark_repository.dart';
+import 'services/reader_suggestion_repository.dart';
 import 'services/reader_device_identity.dart';
 import 'services/reader_highlight_repository.dart';
 import 'services/reader_note_repository.dart';
@@ -32,6 +34,8 @@ import 'services/reader_activity_repository.dart';
 import 'services/user_access_repository.dart';
 import 'services/user_device_authorization_repository.dart';
 import 'services/user_access_state.dart';
+import 'services/user_subscription_checkout_client.dart';
+import 'services/user_subscription_request_repository.dart';
 import 'services/vault_document_metadata.dart';
 import 'services/vault_search_snippet.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
@@ -297,8 +301,136 @@ class AncientSecureDocsApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+String? subscriptionReturnStatusFromUrl(Uri uri) {
+  final subscriptionStatus = uri.queryParameters['subscription'];
+  if (subscriptionStatus == 'stripe-success' ||
+      subscriptionStatus == 'stripe-cancelled' ||
+      subscriptionStatus == 'paystack-success') {
+    return subscriptionStatus;
+  }
+
+  final paystackReference = uri.queryParameters['reference']?.trim();
+  final paystackTransactionReference = uri.queryParameters['trxref']?.trim();
+  if ((paystackReference != null && paystackReference.isNotEmpty) ||
+      (paystackTransactionReference != null &&
+          paystackTransactionReference.isNotEmpty)) {
+    return 'paystack-success';
+  }
+
+  return null;
+}
+
+Uri clearSubscriptionReturnParameters(Uri uri) {
+  final queryParameters = Map<String, String>.from(uri.queryParameters)
+    ..remove('subscription')
+    ..remove('reference')
+    ..remove('trxref');
+  return uri.replace(queryParameters: queryParameters);
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool handledSubscriptionReturn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      handlePublicSubscriptionReturn();
+    });
+  }
+
+  void handlePublicSubscriptionReturn() {
+    if (!mounted || handledSubscriptionReturn) return;
+
+    final subscriptionStatus = subscriptionReturnStatusFromUrl(Uri.base);
+    if (subscriptionStatus != 'stripe-success' &&
+        subscriptionStatus != 'stripe-cancelled' &&
+        subscriptionStatus != 'paystack-success') {
+      return;
+    }
+
+    handledSubscriptionReturn = true;
+    clearPublicSubscriptionReturnFromUrl();
+
+    if (subscriptionStatus == 'stripe-success' ||
+        subscriptionStatus == 'paystack-success') {
+      showPublicSubscriptionSuccessDialog();
+    } else {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Stripe checkout was cancelled. You can try again whenever you are ready.',
+          ),
+          backgroundColor: Colors.black87,
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.orangeAccent,
+            onPressed: () {},
+          ),
+        ),
+      );
+    }
+  }
+
+  void clearPublicSubscriptionReturnFromUrl() {
+    final cleanedUrl = clearSubscriptionReturnParameters(Uri.base);
+    html.window.history.replaceState(
+      null,
+      html.document.title,
+      cleanedUrl.toString(),
+    );
+  }
+
+  void showPublicSubscriptionSuccessDialog() {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Subscription Activated',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: const Text(
+              'Congratulations. Your Ancient Secure Vault premium subscription is active. Please login again to refresh your secure session and access the full vault content.',
+              style: TextStyle(color: Colors.white70, height: 1.4),
+            ),
+            actions: [
+              TextButton.icon(
+                onPressed: () async {
+                  await FirebaseAuth.instance.signOut();
+                  if (!dialogContext.mounted || !mounted) return;
+
+                  Navigator.of(dialogContext).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.login, size: 18),
+                label: const Text('Login again'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.greenAccent,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -420,6 +552,57 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
 
+                const SizedBox(height: 12),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                      side: const BorderSide(color: Colors.greenAccent),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LoginScreen(
+                            initialMode: AuthScreenMode.signUp,
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'CREATE TEST ACCOUNT',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LoginScreen(
+                            initialMode: AuthScreenMode.resetPassword,
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Forgot password?',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                ),
+
                 const SizedBox(height: 20),
               ],
             ),
@@ -430,8 +613,12 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
+enum AuthScreenMode { signIn, signUp, resetPassword }
+
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.initialMode = AuthScreenMode.signIn});
+
+  final AuthScreenMode initialMode;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -440,20 +627,179 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
+  final confirmPasswordController = TextEditingController();
+  late AuthScreenMode mode;
+  bool isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    mode = widget.initialMode;
+  }
 
   @override
   void dispose() {
     emailController.dispose();
     passwordController.dispose();
+    confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  String get title => switch (mode) {
+    AuthScreenMode.signIn => 'Welcome Back',
+    AuthScreenMode.signUp => 'Create Account',
+    AuthScreenMode.resetPassword => 'Reset Password',
+  };
+
+  String get helperText => switch (mode) {
+    AuthScreenMode.signIn => 'Login to continue into the secure ecosystem.',
+    AuthScreenMode.signUp =>
+      'Create a free account for testing, then upgrade through Stripe or Paystack when ready.',
+    AuthScreenMode.resetPassword =>
+      'Enter your email address and we will send a secure reset link.',
+  };
+
+  String get primaryActionLabel => switch (mode) {
+    AuthScreenMode.signIn => 'LOGIN',
+    AuthScreenMode.signUp => 'CREATE ACCOUNT',
+    AuthScreenMode.resetPassword => 'SEND RESET LINK',
+  };
+
+  Future<void> submitAuthAction() async {
+    if (isSubmitting) return;
+
+    final email = emailController.text.trim();
+    final password = passwordController.text.trim();
+    final confirmPassword = confirmPasswordController.text.trim();
+
+    if (email.isEmpty) {
+      showAuthMessage('Enter an email address.');
+      return;
+    }
+
+    if (mode != AuthScreenMode.resetPassword && password.isEmpty) {
+      showAuthMessage('Enter a password.');
+      return;
+    }
+
+    if (mode == AuthScreenMode.signUp && password != confirmPassword) {
+      showAuthMessage('Passwords do not match.');
+      return;
+    }
+
+    setState(() {
+      isSubmitting = true;
+    });
+
+    try {
+      if (mode == AuthScreenMode.signIn) {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        openDashboard();
+        return;
+      }
+
+      if (mode == AuthScreenMode.signUp) {
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        await ensureNewUserStartsFree(email);
+        openDashboard();
+        return;
+      }
+
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      showAuthMessage('Password reset email sent. Check your inbox.');
+      setState(() {
+        mode = AuthScreenMode.signIn;
+        isSubmitting = false;
+      });
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        isSubmitting = false;
+      });
+      showAuthMessage(readableAuthError(error));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        isSubmitting = false;
+      });
+      showAuthMessage('Authentication could not continue: $error');
+    }
+  }
+
+  Future<void> ensureNewUserStartsFree(String email) async {
+    try {
+      await UserAccessRepository().saveAccessPlan(
+        email: email,
+        plan: UserAccessPlan.free,
+        changedByEmail: email,
+      );
+    } catch (_) {
+      // If rules block this write, the app still treats missing access as free.
+    }
+  }
+
+  void openDashboard() {
+    if (!mounted) return;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const DashboardScreen()),
+    );
+  }
+
+  void showAuthMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  String readableAuthError(FirebaseAuthException error) {
+    return switch (error.code) {
+      'email-already-in-use' =>
+        'That email already has an account. Try logging in instead.',
+      'invalid-email' => 'Enter a valid email address.',
+      'user-disabled' => 'This account has been disabled.',
+      'user-not-found' => 'No account was found for that email.',
+      'wrong-password' => 'The password is not correct.',
+      'weak-password' => 'Use a stronger password with at least 6 characters.',
+      'operation-not-allowed' =>
+        'Email/password sign-up is not enabled in Firebase Authentication.',
+      _ => error.message ?? 'Authentication could not continue.',
+    };
+  }
+
+  void switchMode(AuthScreenMode nextMode) {
+    setState(() {
+      mode = nextMode;
+      isSubmitting = false;
+      passwordController.clear();
+      confirmPasswordController.clear();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final isPasswordReset = mode == AuthScreenMode.resetPassword;
+    final isSignUp = mode == AuthScreenMode.signUp;
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Login', style: TextStyle(color: Colors.greenAccent)),
+        title: Text(switch (mode) {
+          AuthScreenMode.signIn => 'Login',
+          AuthScreenMode.signUp => 'Create Account',
+          AuthScreenMode.resetPassword => 'Password Reset',
+        }, style: const TextStyle(color: Colors.greenAccent)),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -463,27 +809,29 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 30),
-
-                const Text(
-                  'Welcome Back',
-                  style: TextStyle(
+                Text(
+                  title,
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 30,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-
                 const SizedBox(height: 10),
-
-                const Text(
-                  'Login to continue into the secure ecosystem.',
-                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                Text(
+                  helperText,
+                  style: const TextStyle(color: Colors.white70, fontSize: 16),
                 ),
-
                 const SizedBox(height: 40),
-
                 TextField(
                   controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: isPasswordReset
+                      ? TextInputAction.done
+                      : TextInputAction.next,
+                  onSubmitted: (_) {
+                    if (isPasswordReset) submitAuthAction();
+                  },
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     hintText: 'Email Address',
@@ -495,26 +843,49 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
-
-                const SizedBox(height: 20),
-
-                TextField(
-                  controller: passwordController,
-                  obscureText: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Password',
-                    hintStyle: const TextStyle(color: Colors.white54),
-                    filled: true,
-                    fillColor: Colors.white10,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
+                if (!isPasswordReset) ...[
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    textInputAction: isSignUp
+                        ? TextInputAction.next
+                        : TextInputAction.done,
+                    onSubmitted: (_) {
+                      if (!isSignUp) submitAuthAction();
+                    },
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Password',
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: Colors.white10,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(15),
+                      ),
                     ),
                   ),
-                ),
-
+                ],
+                if (isSignUp) ...[
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: confirmPasswordController,
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => submitAuthAction(),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Confirm Password',
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: Colors.white10,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 30),
-
                 SizedBox(
                   width: double.infinity,
                   height: 55,
@@ -523,38 +894,69 @@ class _LoginScreenState extends State<LoginScreen> {
                       backgroundColor: Colors.greenAccent,
                       foregroundColor: Colors.black,
                     ),
-                    onPressed: () async {
-                      try {
-                        await FirebaseAuth.instance.signInWithEmailAndPassword(
-                          email: emailController.text.trim(),
-                          password: passwordController.text.trim(),
-                        );
-
-                        if (!context.mounted) return;
-
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const DashboardScreen(),
+                    onPressed: isSubmitting ? null : submitAuthAction,
+                    child: isSubmitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.black,
+                            ),
+                          )
+                        : Text(
+                            primaryActionLabel,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        );
-                      } catch (e) {
-                        if (!context.mounted) return;
-
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text(e.toString())));
-                      }
-                    },
-                    child: const Text(
-                      'LOGIN',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                if (mode == AuthScreenMode.signIn)
+                  Center(
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      children: [
+                        TextButton(
+                          onPressed: isSubmitting
+                              ? null
+                              : () => switchMode(AuthScreenMode.signUp),
+                          child: const Text(
+                            'Create account',
+                            style: TextStyle(color: Colors.greenAccent),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: isSubmitting
+                              ? null
+                              : () => switchMode(AuthScreenMode.resetPassword),
+                          child: const Text(
+                            'Forgot password?',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Center(
+                    child: TextButton(
+                      onPressed: isSubmitting
+                          ? null
+                          : () => switchMode(AuthScreenMode.signIn),
+                      child: const Text(
+                        'Back to login',
+                        style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -614,6 +1016,57 @@ class _DashboardAdminOverview {
   final ReaderActivitySummary activity;
 }
 
+class _ReaderDashboardOverview {
+  const _ReaderDashboardOverview({
+    required this.activity,
+    required this.savedPositions,
+    required this.bookmarks,
+    required this.notes,
+    required this.highlights,
+    required this.announcements,
+    required this.suggestions,
+    required this.devices,
+    required this.subscriptionRequests,
+  });
+
+  final ReaderActivitySummary activity;
+  final List<ReaderSavedPosition> savedPositions;
+  final List<ReaderBookmark> bookmarks;
+  final List<ReaderNote> notes;
+  final List<ReaderHighlight> highlights;
+  final List<ReaderAnnouncement> announcements;
+  final List<ReaderSuggestion> suggestions;
+  final List<UserDeviceRecord> devices;
+  final List<UserSubscriptionRequest> subscriptionRequests;
+
+  int get studyAssetCount =>
+      bookmarks.length + notes.length + highlights.length;
+  int get contributionCount =>
+      notes.length + highlights.length + suggestions.length;
+  int get milestoneCount {
+    var count = 0;
+    if (savedPositions.isNotEmpty) count++;
+    if (bookmarks.isNotEmpty) count++;
+    if (notes.isNotEmpty) count++;
+    if (highlights.isNotEmpty) count++;
+    if (trustedDeviceCount > 0) count++;
+    if (activity.allowedAccessCount >= 10) count++;
+    return count;
+  }
+
+  int get trustedDeviceCount =>
+      devices.where((device) => device.isTrusted).length;
+  int get pendingDeviceCount =>
+      devices.where((device) => device.needsReview).length;
+  int get blockedDeviceCount =>
+      devices.where((device) => device.isBlocked).length;
+  bool get hasOpenSubscriptionRequest => subscriptionRequests.any(
+    (request) =>
+        request.status == UserSubscriptionRequestStatus.open ||
+        request.status == UserSubscriptionRequestStatus.reviewing,
+  );
+}
+
 enum _AdminAttentionTone { danger, warning, info, success }
 
 class _AdminAttentionItem {
@@ -661,13 +1114,52 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final TextEditingController dashboardDocumentSearchController =
       TextEditingController();
   List<Map<String, dynamic>> userNotes = [];
+  final ReaderAnnouncementRepository readerAnnouncementRepository =
+      ReaderAnnouncementRepository();
+  final ReaderSuggestionRepository readerSuggestionRepository =
+      ReaderSuggestionRepository();
+  final UserSubscriptionRequestRepository subscriptionRequestRepository =
+      UserSubscriptionRequestRepository();
+  final UserSubscriptionCheckoutClient
+  subscriptionCheckoutClient = UserSubscriptionCheckoutClient.firebase(
+    options: DefaultFirebaseOptions.currentPlatform,
+    checkoutFunctionUrl: Uri.parse(
+      const String.fromEnvironment(
+        'STRIPE_CHECKOUT_FUNCTION_URL',
+        defaultValue:
+            'https://createstripecheckoutsession-63jholaf6a-uc.a.run.app',
+      ),
+    ),
+    billingPortalFunctionUrl: Uri.parse(
+      const String.fromEnvironment(
+        'STRIPE_BILLING_PORTAL_FUNCTION_URL',
+        defaultValue:
+            'https://createstripebillingportalsession-63jholaf6a-uc.a.run.app',
+      ),
+    ),
+    paystackCheckoutFunctionUrl: Uri.parse(
+      const String.fromEnvironment(
+        'PAYSTACK_CHECKOUT_FUNCTION_URL',
+        defaultValue:
+            'https://createpaystackcheckoutsession-63jholaf6a-uc.a.run.app',
+      ),
+    ),
+  );
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
+  final ReaderBookmarkRepository readerBookmarkRepository =
+      ReaderBookmarkRepository();
+  final ReaderHighlightRepository readerHighlightRepository =
+      ReaderHighlightRepository();
+  final ReaderSavedPositionRepository savedPositionRepository =
+      ReaderSavedPositionRepository();
   final ReaderActivityRepository readerActivityRepository =
       ReaderActivityRepository();
   final UserAccessRepository userAccessRepository = UserAccessRepository();
   final UserDeviceAuthorizationRepository deviceAuthorizationRepository =
       UserDeviceAuthorizationRepository();
   Future<_DashboardAdminOverview>? adminOverviewFuture;
+  Future<_ReaderDashboardOverview>? readerDashboardFuture;
+  bool handledSubscriptionReturn = false;
 
   @override
   void initState() {
@@ -677,7 +1169,129 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> loadDashboardData() async {
     await checkUserRole();
+    await handleSubscriptionReturn();
     await loadPDFs();
+  }
+
+  Future<void> handleSubscriptionReturn() async {
+    if (handledSubscriptionReturn) return;
+
+    final subscriptionStatus = subscriptionReturnStatusFromUrl(Uri.base);
+    if (subscriptionStatus != 'stripe-success' &&
+        subscriptionStatus != 'stripe-cancelled' &&
+        subscriptionStatus != 'paystack-success') {
+      return;
+    }
+
+    handledSubscriptionReturn = true;
+
+    if (subscriptionStatus == 'stripe-success' ||
+        subscriptionStatus == 'paystack-success') {
+      await waitForStripeSubscriptionAccess();
+      if (!mounted) return;
+
+      refreshReaderDashboard();
+      if (userAccess.canAccessMainVault) {
+        showSubscriptionActivatedDialog();
+      } else {
+        showDashboardMessage(
+          'Stripe payment received. Premium access is still syncing; refresh shortly if the vault stays locked.',
+          color: Colors.orangeAccent,
+        );
+      }
+    } else {
+      if (!mounted) return;
+
+      showDashboardMessage(
+        'Stripe checkout was cancelled. You can try again whenever you are ready.',
+        color: Colors.orangeAccent,
+      );
+    }
+
+    clearSubscriptionReturnFromUrl();
+  }
+
+  Future<void> waitForStripeSubscriptionAccess() async {
+    for (var attempt = 0; attempt < 5; attempt++) {
+      await checkUserRole();
+      if (userAccess.canAccessMainVault) return;
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+    }
+  }
+
+  void clearSubscriptionReturnFromUrl() {
+    final cleanedUrl = clearSubscriptionReturnParameters(Uri.base);
+    html.window.history.replaceState(
+      null,
+      html.document.title,
+      cleanedUrl.toString(),
+    );
+  }
+
+  void showDashboardMessage(String message, {Color? color}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: color == null ? null : Colors.black87,
+          behavior: SnackBarBehavior.floating,
+          action: color == null
+              ? null
+              : SnackBarAction(label: 'OK', textColor: color, onPressed: () {}),
+        ),
+      );
+    });
+  }
+
+  void showSubscriptionActivatedDialog() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return PointerInterceptor(
+            child: AlertDialog(
+              backgroundColor: const Color(0xFF0F1117),
+              title: const Text(
+                'Subscription Activated',
+                style: TextStyle(color: Colors.greenAccent),
+              ),
+              content: const Text(
+                'Congratulations. Your Ancient Secure Vault premium subscription is active. Please login again to refresh your secure session and access the full vault content.',
+                style: TextStyle(color: Colors.white70, height: 1.4),
+              ),
+              actions: [
+                TextButton.icon(
+                  onPressed: () async {
+                    await FirebaseAuth.instance.signOut();
+                    if (!dialogContext.mounted || !mounted) return;
+
+                    Navigator.of(dialogContext).pop();
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const LoginScreen(),
+                      ),
+                      (route) => route.isFirst,
+                    );
+                  },
+                  icon: const Icon(Icons.login, size: 18),
+                  label: const Text('Login again'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.greenAccent,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    });
   }
 
   Future<_DashboardAdminOverview> loadDashboardAdminOverview() async {
@@ -696,11 +1310,85 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Future<_ReaderDashboardOverview> loadReaderDashboardOverview() async {
+    final userEmail = FirebaseAuth.instance.currentUser?.email?.trim() ?? '';
+    if (userEmail.isEmpty) {
+      return _ReaderDashboardOverview(
+        activity: const ReaderActivityAnalytics().summarize(const []),
+        savedPositions: const [],
+        bookmarks: const [],
+        notes: const [],
+        highlights: const [],
+        announcements: const [],
+        suggestions: const [],
+        devices: const [],
+        subscriptionRequests: const [],
+      );
+    }
+
+    final records = await readerActivityRepository.listRecentRecords(limit: 80);
+    final normalizedEmail = userEmail.toLowerCase();
+    final userRecords = records
+        .where(
+          (record) => record.userEmail.trim().toLowerCase() == normalizedEmail,
+        )
+        .toList(growable: false);
+
+    final savedPositions = await savedPositionRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final bookmarks = await readerBookmarkRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final notes = await readerNoteRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final highlights = await readerHighlightRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final announcements = await readerAnnouncementRepository.listForUser(
+      access: userAccess,
+      limit: 20,
+    );
+    final suggestions = await readerSuggestionRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final devices = await deviceAuthorizationRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final subscriptionRequests = await subscriptionRequestRepository
+        .listForUser(userEmail: userEmail, limit: 6);
+
+    return _ReaderDashboardOverview(
+      activity: const ReaderActivityAnalytics().summarize(userRecords),
+      savedPositions: savedPositions,
+      bookmarks: bookmarks,
+      notes: notes,
+      highlights: highlights,
+      announcements: announcements,
+      suggestions: suggestions,
+      devices: devices,
+      subscriptionRequests: subscriptionRequests,
+    );
+  }
+
   void refreshDashboardAdminOverview() {
     if (!userAccess.isAdmin) return;
 
     setState(() {
       adminOverviewFuture = loadDashboardAdminOverview();
+    });
+  }
+
+  void refreshReaderDashboard() {
+    setState(() {
+      readerDashboardFuture = loadReaderDashboardOverview();
     });
   }
 
@@ -1119,6 +1807,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     UserAccessPlan? accessPlanFilter = initialPlanFilter;
     var countryFilter = '';
     UserSubscriptionStatus? subscriptionFilter;
+    var subscriptionReviewOnly = false;
     final accessSearchController = TextEditingController();
     final currentUserEmail = UserAccessRepository.emailDocumentId(
       FirebaseAuth.instance.currentUser?.email,
@@ -1248,6 +1937,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             }
 
+            Future<void> applySubscriptionExpiry(
+              UserAccessRecord user, {
+              DateTime? expiresAt,
+              bool clearExpiry = false,
+            }) async {
+              if (user.email == currentUserEmail) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Use another admin account to change your own subscription.',
+                    ),
+                  ),
+                );
+                return;
+              }
+
+              setDialogState(() {
+                busyUserEmail = user.email;
+              });
+
+              try {
+                await userAccessRepository.saveSubscriptionExpiry(
+                  email: user.email,
+                  expiresAt: expiresAt,
+                  clearExpiry: clearExpiry,
+                  changedByEmail: currentUserEmail,
+                  previousExpiresAt: user.access.subscriptionExpiresAt,
+                );
+
+                if (!mounted) return;
+
+                setDialogState(() {
+                  summaryFuture = userAccessRepository.loadSummary(limit: 100);
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      clearExpiry
+                          ? '${user.email} subscription expiry cleared.'
+                          : '${user.email} subscription expiry updated.',
+                    ),
+                  ),
+                );
+                await checkUserRole();
+              } catch (error) {
+                if (!mounted) return;
+
+                setDialogState(() {
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Expiry update failed: $error')),
+                );
+              }
+            }
+
             Widget accessActions(UserAccessRecord user) {
               final isCurrentUser = user.email == currentUserEmail;
               final isBusy = busyUserEmail == user.email;
@@ -1309,6 +2056,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         )
                         .toList(growable: false),
                   ),
+                  PopupMenuButton<int>(
+                    tooltip: 'Set subscription expiry',
+                    enabled: busyUserEmail == null && !isCurrentUser,
+                    icon: Icon(
+                      Icons.event_available_outlined,
+                      color: isCurrentUser ? Colors.white24 : Colors.white70,
+                      size: 20,
+                    ),
+                    color: const Color(0xFF1A1D25),
+                    onSelected: (days) {
+                      if (days == 0) {
+                        applySubscriptionExpiry(user, clearExpiry: true);
+                        return;
+                      }
+
+                      applySubscriptionExpiry(
+                        user,
+                        expiresAt: DateTime.now().add(Duration(days: days)),
+                      );
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem<int>(
+                        value: 7,
+                        child: Text(
+                          'Set 7 days',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      PopupMenuItem<int>(
+                        value: 30,
+                        child: Text(
+                          'Set 30 days',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      PopupMenuItem<int>(
+                        value: 365,
+                        child: Text(
+                          'Set 1 year',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      PopupMenuItem<int>(
+                        value: 0,
+                        child: Text(
+                          'Clear expiry',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               );
             }
@@ -1342,6 +2140,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 accessPlanFilter = null;
                 countryFilter = '';
                 subscriptionFilter = null;
+                subscriptionReviewOnly = false;
               });
             }
 
@@ -1424,18 +2223,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         plan: accessPlanFilter,
                         country: countryFilter,
                         subscriptionStatus: subscriptionFilter,
+                        subscriptionReviewOnly: subscriptionReviewOnly,
                       );
                       final activeFilterLabels = userAccessActiveFilterLabels(
                         query: accessSearchQuery,
                         plan: accessPlanFilter,
                         country: countryFilter,
                         subscriptionStatus: subscriptionFilter,
+                        subscriptionReviewOnly: subscriptionReviewOnly,
                       );
                       final hasActiveFilter = hasUserAccessFilters(
                         query: accessSearchQuery,
                         plan: accessPlanFilter,
                         country: countryFilter,
                         subscriptionStatus: subscriptionFilter,
+                        subscriptionReviewOnly: subscriptionReviewOnly,
                       );
                       final displayedUsers = visibleUsers
                           .take(userAccessDefaultDisplayLimit)
@@ -1518,6 +2320,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       ),
                                     ),
                                   ),
+                                  if (summary.hasSubscriptionAttention) ...[
+                                    const SizedBox(width: 8),
+                                    TextButton(
+                                      onPressed: () {
+                                        setDialogState(() {
+                                          subscriptionReviewOnly = true;
+                                          accessPlanFilter = null;
+                                          subscriptionFilter = null;
+                                        });
+                                      },
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.orangeAccent,
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      child: const Text('Review'),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -1583,6 +2402,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 planFilterChip(
                                   label: 'Free',
                                   plan: UserAccessPlan.free,
+                                ),
+                                FilterChip(
+                                  label: const Text('Needs review'),
+                                  selected: subscriptionReviewOnly,
+                                  onSelected: (selected) {
+                                    setDialogState(() {
+                                      subscriptionReviewOnly = selected;
+                                      if (selected) {
+                                        subscriptionFilter = null;
+                                      }
+                                    });
+                                  },
+                                  selectedColor: Colors.orangeAccent,
+                                  backgroundColor: const Color(0xFF151821),
+                                  labelStyle: TextStyle(
+                                    color: subscriptionReviewOnly
+                                        ? Colors.black
+                                        : Colors.white70,
+                                  ),
+                                  side: const BorderSide(color: Colors.white24),
                                 ),
                               ],
                             ),
@@ -1715,6 +2554,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ...displayedUsers.map((user) {
                               final timestamp =
                                   user.updatedAt ?? user.createdAt;
+                              final needsSubscriptionReview =
+                                  userAccessNeedsSubscriptionReview(user);
 
                               return ListTile(
                                 dense: true,
@@ -1726,7 +2567,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       ? Icons.workspace_premium_outlined
                                       : Icons.person_outline,
                                   color: user.access.canAccessMainVault
-                                      ? Colors.greenAccent
+                                      ? needsSubscriptionReview
+                                            ? Colors.orangeAccent
+                                            : Colors.greenAccent
                                       : Colors.orangeAccent,
                                 ),
                                 title: Text(
@@ -1792,6 +2635,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   subtitle: Text(
                                     [
                                       '$previousPlan to ${userAccessPlanLabel(change.nextPlan)}',
+                                      if (change.changedByEmail.isNotEmpty)
+                                        'by ${change.changedByEmail}',
+                                      formatDashboardTimestamp(
+                                        change.createdAt,
+                                      ),
+                                    ].join(' | '),
+                                    style: const TextStyle(
+                                      color: Colors.white38,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+                            if (summary.hasRecentSubscriptionChanges) ...[
+                              const SizedBox(height: 18),
+                              const Text(
+                                'Recent Subscription Changes',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              ...summary.recentSubscriptionChanges.map((
+                                change,
+                              ) {
+                                return ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(
+                                    Icons.payments_outlined,
+                                    color: Colors.orangeAccent,
+                                  ),
+                                  title: Text(
+                                    change.targetEmail.isEmpty
+                                        ? 'Unknown user'
+                                        : change.targetEmail,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    [
+                                      userAccessSubscriptionChangeLabel(change),
                                       if (change.changedByEmail.isNotEmpty)
                                         'by ${change.changedByEmail}',
                                       formatDashboardTimestamp(
@@ -5916,6 +6803,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 detail: 'Reader activity report',
                 onPressed: showReaderAnalytics,
               ),
+              buildAdminActionButton(
+                icon: Icons.campaign_outlined,
+                label: 'Post update',
+                detail: 'Notify reader dashboards',
+                onPressed: showReaderAnnouncementComposer,
+              ),
+              buildAdminActionButton(
+                icon: Icons.lightbulb_outline,
+                label: 'Suggestions',
+                detail: 'Review reader ideas',
+                onPressed: showReaderSuggestionInbox,
+              ),
+              buildAdminActionButton(
+                icon: Icons.workspace_premium_outlined,
+                label: 'Requests',
+                detail: 'Review subscription asks',
+                onPressed: showSubscriptionRequestInbox,
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -6113,6 +7018,1880 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget buildReaderDashboardMetric({
+    required IconData icon,
+    required String label,
+    required String value,
+    required String detail,
+    Color color = Colors.greenAccent,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 190,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF151821),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 10),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              detail,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String readerAccountName() {
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName?.trim();
+    if (displayName != null && displayName.isNotEmpty) return displayName;
+
+    final email = user?.email?.trim();
+    if (email != null && email.isNotEmpty) return email;
+
+    return 'Reader';
+  }
+
+  String readerSubscriptionDetail() {
+    final stripeAttention = userAccess.stripeAttentionLabel;
+    if (stripeAttention != null) return stripeAttention;
+
+    final expiry = userAccessSubscriptionExpiryLabel(userAccess);
+    final provider = userAccess.subscriptionProviderLabel;
+    if (expiry != null && provider.isNotEmpty) return '$provider | $expiry';
+    if (expiry != null) return expiry;
+    if (userAccess.canAccessMainVault && provider.isNotEmpty) {
+      return '$provider | Protected vault enabled';
+    }
+    if (userAccess.canAccessMainVault) return 'Protected vault enabled';
+    return 'Free zone active';
+  }
+
+  String readerSecurityValue(_ReaderDashboardOverview overview) {
+    if (overview.blockedDeviceCount > 0) return 'Review';
+    if (overview.pendingDeviceCount > 0) return 'Pending';
+    if (overview.trustedDeviceCount > 0) return 'Trusted';
+    return userAccess.canAccessMainVault ? 'Protected' : 'Free';
+  }
+
+  String readerSecurityDetail(_ReaderDashboardOverview overview) {
+    if (overview.devices.isEmpty) {
+      return userAccess.canAccessMainVault
+          ? 'Device monitoring ready'
+          : 'Free zone device monitoring';
+    }
+
+    return '${overview.trustedDeviceCount} trusted | '
+        '${overview.pendingDeviceCount} pending | '
+        '${overview.blockedDeviceCount} blocked';
+  }
+
+  Color readerSecurityColor(_ReaderDashboardOverview overview) {
+    if (overview.blockedDeviceCount > 0) return Colors.redAccent;
+    if (overview.pendingDeviceCount > 0) return Colors.orangeAccent;
+    return Colors.lightBlueAccent;
+  }
+
+  Widget buildReaderDashboardPreview(_ReaderDashboardOverview overview) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111B18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.account_circle_outlined,
+                color: Colors.greenAccent,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'My dashboard',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: showReaderDashboard,
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: const Text('Open'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.greenAccent,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              buildReaderDashboardMetric(
+                icon: Icons.verified_user_outlined,
+                label: 'Account',
+                value: userAccess.planLabel,
+                detail: readerAccountName(),
+                onTap: showReaderDashboard,
+              ),
+              buildReaderDashboardMetric(
+                icon: Icons.history_outlined,
+                label: 'Activity',
+                value: overview.activity.totalEventCount.toString(),
+                detail: '${overview.activity.uniqueDocumentCount} documents',
+                color: Colors.lightBlueAccent,
+                onTap: showReaderDashboard,
+              ),
+              buildReaderDashboardMetric(
+                icon: Icons.bookmark_border,
+                label: 'Favourites',
+                value: overview.bookmarks.length.toString(),
+                detail: 'Saved reading points',
+                color: Colors.orangeAccent,
+                onTap: showReaderDashboard,
+              ),
+              buildReaderDashboardMetric(
+                icon: Icons.security_outlined,
+                label: 'Security',
+                value: readerSecurityValue(overview),
+                detail: readerSecurityDetail(overview),
+                color: readerSecurityColor(overview),
+                onTap: showReaderDashboard,
+              ),
+              buildReaderDashboardMetric(
+                icon: Icons.emoji_events_outlined,
+                label: 'Milestones',
+                value: overview.milestoneCount.toString(),
+                detail: 'Reader progress badges',
+                color: Colors.cyanAccent,
+                onTap: showReaderDashboard,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildReaderDashboardList({
+    required String title,
+    required IconData icon,
+    required String emptyMessage,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151821),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: Colors.greenAccent, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (children.isEmpty)
+            Text(emptyMessage, style: const TextStyle(color: Colors.white54))
+          else
+            ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget buildReaderDashboardItem({
+    required String title,
+    required String subtitle,
+    IconData icon = Icons.chevron_right,
+    VoidCallback? onTap,
+  }) {
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      onTap: onTap,
+      leading: Icon(icon, color: Colors.greenAccent, size: 20),
+      title: Text(
+        title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Colors.white70),
+      ),
+      subtitle: Text(
+        subtitle,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Colors.white38, fontSize: 12),
+      ),
+    );
+  }
+
+  Color subscriptionRequestStatusColor(UserSubscriptionRequestStatus status) {
+    return switch (status) {
+      UserSubscriptionRequestStatus.open ||
+      UserSubscriptionRequestStatus.reviewing => Colors.orangeAccent,
+      UserSubscriptionRequestStatus.approved => Colors.greenAccent,
+      UserSubscriptionRequestStatus.declined => Colors.redAccent,
+      UserSubscriptionRequestStatus.archived => Colors.white38,
+    };
+  }
+
+  Color subscriptionPaymentStatusColor(UserSubscriptionPaymentStatus status) {
+    return switch (status) {
+      UserSubscriptionPaymentStatus.awaitingPayment ||
+      UserSubscriptionPaymentStatus.pendingConfirmation => Colors.orangeAccent,
+      UserSubscriptionPaymentStatus.confirmed => Colors.greenAccent,
+      UserSubscriptionPaymentStatus.failed => Colors.redAccent,
+      UserSubscriptionPaymentStatus.refunded => Colors.lightBlueAccent,
+    };
+  }
+
+  Future<void> showSubscriptionRequestInbox() async {
+    if (!requireVaultManagerAccess()) return;
+
+    var requestsFuture = subscriptionRequestRepository.listRecent(limit: 50);
+    String? busyRequestId;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> updateRequestStatus(
+              UserSubscriptionRequest request,
+              UserSubscriptionRequestStatus status,
+            ) async {
+              setDialogState(() {
+                busyRequestId = request.id;
+              });
+
+              try {
+                await subscriptionRequestRepository.updateStatus(
+                  requestId: request.id,
+                  status: status,
+                );
+                if (!mounted) return;
+                setDialogState(() {
+                  requestsFuture = subscriptionRequestRepository.listRecent(
+                    limit: 50,
+                  );
+                  busyRequestId = null;
+                });
+                refreshReaderDashboard();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Request marked ${userSubscriptionRequestStatusLabel(status)}.',
+                    ),
+                  ),
+                );
+              } catch (error) {
+                if (!mounted) return;
+                setDialogState(() {
+                  busyRequestId = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Subscription request update failed: $error'),
+                  ),
+                );
+              }
+            }
+
+            Future<void> updatePaymentStatus(
+              UserSubscriptionRequest request,
+              UserSubscriptionPaymentStatus status,
+            ) async {
+              setDialogState(() {
+                busyRequestId = request.id;
+              });
+
+              try {
+                await subscriptionRequestRepository.updatePaymentStatus(
+                  requestId: request.id,
+                  status: status,
+                );
+                if (!mounted) return;
+                setDialogState(() {
+                  requestsFuture = subscriptionRequestRepository.listRecent(
+                    limit: 50,
+                  );
+                  busyRequestId = null;
+                });
+                refreshReaderDashboard();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Payment marked ${userSubscriptionPaymentStatusLabel(status)}.',
+                    ),
+                  ),
+                );
+              } catch (error) {
+                if (!mounted) return;
+                setDialogState(() {
+                  busyRequestId = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Payment update failed: $error')),
+                );
+              }
+            }
+
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Subscription Requests',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 660,
+                  child: FutureBuilder<List<UserSubscriptionRequest>>(
+                    future: requestsFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Text(
+                          snapshot.error.toString(),
+                          style: const TextStyle(color: Colors.redAccent),
+                        );
+                      }
+
+                      if (!snapshot.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                        );
+                      }
+
+                      final requests = snapshot.data!;
+                      if (requests.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'No subscription requests have been submitted yet.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: requests.map((request) {
+                            final isBusy = busyRequestId == request.id;
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(
+                                Icons.workspace_premium_outlined,
+                                color: subscriptionPaymentStatusColor(
+                                  request.paymentStatus,
+                                ),
+                              ),
+                              title: Text(
+                                request.userEmail,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              subtitle: Text(
+                                [
+                                  'Plan: ${request.requestedPlan}',
+                                  userSubscriptionPaymentMethodLabel(
+                                    request.paymentMethod,
+                                  ),
+                                  userSubscriptionPaymentStatusLabel(
+                                    request.paymentStatus,
+                                  ),
+                                  userSubscriptionRequestStatusLabel(
+                                    request.status,
+                                  ),
+                                  if (request.paymentReference.isNotEmpty)
+                                    'Ref: ${request.paymentReference}',
+                                  if (request.message.isNotEmpty)
+                                    request.message,
+                                  formatDashboardTimestamp(
+                                    request.latestTimestamp,
+                                  ),
+                                ].join(' | '),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              trailing: isBusy
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.greenAccent,
+                                      ),
+                                    )
+                                  : PopupMenuButton<Object>(
+                                      tooltip: 'Update request status',
+                                      color: const Color(0xFF1A1D25),
+                                      icon: const Icon(
+                                        Icons.more_vert,
+                                        color: Colors.white70,
+                                      ),
+                                      onSelected: (value) {
+                                        if (value
+                                            is UserSubscriptionRequestStatus) {
+                                          updateRequestStatus(request, value);
+                                          return;
+                                        }
+                                        if (value
+                                            is UserSubscriptionPaymentStatus) {
+                                          updatePaymentStatus(request, value);
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem<Object>(
+                                          enabled: false,
+                                          child: Text(
+                                            'Request status',
+                                            style: TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                        ...UserSubscriptionRequestStatus.values
+                                            .where(
+                                              (status) =>
+                                                  status != request.status,
+                                            )
+                                            .map(
+                                              (status) => PopupMenuItem<Object>(
+                                                value: status,
+                                                child: Text(
+                                                  userSubscriptionRequestStatusLabel(
+                                                    status,
+                                                  ),
+                                                  style: const TextStyle(
+                                                    color: Colors.white70,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                        const PopupMenuDivider(),
+                                        const PopupMenuItem<Object>(
+                                          enabled: false,
+                                          child: Text(
+                                            'Payment status',
+                                            style: TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                        ...UserSubscriptionPaymentStatus.values
+                                            .where(
+                                              (status) =>
+                                                  status !=
+                                                  request.paymentStatus,
+                                            )
+                                            .map(
+                                              (status) => PopupMenuItem<Object>(
+                                                value: status,
+                                                child: Text(
+                                                  userSubscriptionPaymentStatusLabel(
+                                                    status,
+                                                  ),
+                                                  style: const TextStyle(
+                                                    color: Colors.white70,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                      ],
+                                    ),
+                            );
+                          }).toList(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> showReaderSuggestionInbox() async {
+    if (!requireVaultManagerAccess()) return;
+
+    var suggestionsFuture = readerSuggestionRepository.listRecent(limit: 50);
+    String? busySuggestionId;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> updateSuggestionStatus(
+              ReaderSuggestion suggestion,
+              ReaderSuggestionStatus status,
+            ) async {
+              setDialogState(() {
+                busySuggestionId = suggestion.id;
+              });
+
+              try {
+                await readerSuggestionRepository.updateStatus(
+                  suggestionId: suggestion.id,
+                  status: status,
+                );
+                if (!mounted) return;
+                setDialogState(() {
+                  suggestionsFuture = readerSuggestionRepository.listRecent(
+                    limit: 50,
+                  );
+                  busySuggestionId = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Suggestion marked ${readerSuggestionStatusLabel(status)}.',
+                    ),
+                  ),
+                );
+              } catch (error) {
+                if (!mounted) return;
+                setDialogState(() {
+                  busySuggestionId = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Suggestion update failed: $error')),
+                );
+              }
+            }
+
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Reader Suggestions',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 640,
+                  child: FutureBuilder<List<ReaderSuggestion>>(
+                    future: suggestionsFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Text(
+                          snapshot.error.toString(),
+                          style: const TextStyle(color: Colors.redAccent),
+                        );
+                      }
+
+                      if (!snapshot.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                        );
+                      }
+
+                      final suggestions = snapshot.data!;
+                      if (suggestions.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'No reader suggestions have been submitted yet.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: suggestions.map((suggestion) {
+                            final isBusy = busySuggestionId == suggestion.id;
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(
+                                suggestion.status == ReaderSuggestionStatus.open
+                                    ? Icons.lightbulb_outline
+                                    : Icons.task_alt_outlined,
+                                color:
+                                    suggestion.status ==
+                                        ReaderSuggestionStatus.resolved
+                                    ? Colors.greenAccent
+                                    : Colors.orangeAccent,
+                              ),
+                              title: Text(
+                                suggestion.message,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              subtitle: Text(
+                                [
+                                  suggestion.userEmail.isEmpty
+                                      ? 'Unknown reader'
+                                      : suggestion.userEmail,
+                                  readerSuggestionStatusLabel(
+                                    suggestion.status,
+                                  ),
+                                  formatDashboardTimestamp(
+                                    suggestion.latestTimestamp,
+                                  ),
+                                ].join(' | '),
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              trailing: isBusy
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.greenAccent,
+                                      ),
+                                    )
+                                  : PopupMenuButton<ReaderSuggestionStatus>(
+                                      tooltip: 'Update suggestion status',
+                                      color: const Color(0xFF1A1D25),
+                                      icon: const Icon(
+                                        Icons.more_vert,
+                                        color: Colors.white70,
+                                      ),
+                                      onSelected: (status) =>
+                                          updateSuggestionStatus(
+                                            suggestion,
+                                            status,
+                                          ),
+                                      itemBuilder: (context) =>
+                                          ReaderSuggestionStatus.values
+                                              .where(
+                                                (status) =>
+                                                    status != suggestion.status,
+                                              )
+                                              .map(
+                                                (status) => PopupMenuItem(
+                                                  value: status,
+                                                  child: Text(
+                                                    readerSuggestionStatusLabel(
+                                                      status,
+                                                    ),
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                ),
+                                              )
+                                              .toList(growable: false),
+                                    ),
+                            );
+                          }).toList(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> showReaderAnnouncementComposer() async {
+    if (!requireVaultManagerAccess()) return;
+
+    final titleController = TextEditingController();
+    final messageController = TextEditingController();
+    var audience = ReaderAnnouncementAudience.all;
+    var isPinned = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        var isSending = false;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Post Reader Update',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 460,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: titleController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Title',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: messageController,
+                        maxLines: 4,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Message',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<ReaderAnnouncementAudience>(
+                        initialValue: audience,
+                        dropdownColor: const Color(0xFF1A1D25),
+                        iconEnabledColor: Colors.greenAccent,
+                        style: const TextStyle(color: Colors.white70),
+                        decoration: const InputDecoration(
+                          labelText: 'Audience',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: ReaderAnnouncementAudience.all,
+                            child: Text('All readers'),
+                          ),
+                          DropdownMenuItem(
+                            value: ReaderAnnouncementAudience.free,
+                            child: Text('Free readers'),
+                          ),
+                          DropdownMenuItem(
+                            value: ReaderAnnouncementAudience.premium,
+                            child: Text('Premium readers'),
+                          ),
+                          DropdownMenuItem(
+                            value: ReaderAnnouncementAudience.admin,
+                            child: Text('Admins'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setDialogState(() {
+                            audience = value ?? ReaderAnnouncementAudience.all;
+                          });
+                        },
+                      ),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: isPinned,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            isPinned = value == true;
+                          });
+                        },
+                        activeColor: Colors.greenAccent,
+                        checkColor: Colors.black,
+                        title: const Text(
+                          'Pin this update',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isSending ? null : () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            final hasContent =
+                                titleController.text.trim().isNotEmpty ||
+                                messageController.text.trim().isNotEmpty;
+                            if (!hasContent) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Add a title or message before posting.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+
+                            setDialogState(() {
+                              isSending = true;
+                            });
+                            try {
+                              await readerAnnouncementRepository.save(
+                                ReaderAnnouncementDraft(
+                                  title: titleController.text,
+                                  message: messageController.text,
+                                  audience: audience,
+                                  isPinned: isPinned,
+                                ),
+                              );
+                              if (!context.mounted) return;
+                              Navigator.pop(context);
+                              refreshReaderDashboard();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Reader update posted.'),
+                                ),
+                              );
+                            } catch (error) {
+                              if (!context.mounted) return;
+                              setDialogState(() {
+                                isSending = false;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Reader update could not be posted: $error',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.greenAccent,
+                            ),
+                          )
+                        : const Icon(Icons.campaign_outlined, size: 16),
+                    label: const Text('Post'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(() {
+      titleController.dispose();
+      messageController.dispose();
+    });
+  }
+
+  Future<void> submitReaderSuggestion(String message) async {
+    final cleanMessage = message.trim();
+    if (cleanMessage.isEmpty) return;
+
+    await readerSuggestionRepository.save(
+      ReaderSuggestionDraft(
+        userEmail: FirebaseAuth.instance.currentUser?.email,
+        message: cleanMessage,
+      ),
+    );
+  }
+
+  Future<void> submitSubscriptionRequest(
+    String message, {
+    required UserSubscriptionPaymentMethod paymentMethod,
+    String paymentReference = '',
+  }) async {
+    if (paymentMethod == UserSubscriptionPaymentMethod.stripe) {
+      final currentUrl = Uri.base;
+      final checkout = await subscriptionCheckoutClient
+          .createStripeCheckoutSession(
+            message: message.trim(),
+            successUrl: currentUrl.replace(
+              queryParameters: {
+                ...currentUrl.queryParameters,
+                'subscription': 'stripe-success',
+              },
+            ),
+            cancelUrl: currentUrl.replace(
+              queryParameters: {
+                ...currentUrl.queryParameters,
+                'subscription': 'stripe-cancelled',
+              },
+            ),
+          );
+      html.window.location.assign(checkout.checkoutUrl.toString());
+      return;
+    }
+
+    if (paymentMethod == UserSubscriptionPaymentMethod.paystack) {
+      final currentUrl = Uri.base;
+      final checkout = await subscriptionCheckoutClient
+          .createPaystackCheckoutSession(
+            message: message.trim(),
+            successUrl: currentUrl.replace(
+              queryParameters: {
+                ...currentUrl.queryParameters,
+                'subscription': 'paystack-success',
+              },
+            ),
+          );
+      html.window.location.assign(checkout.checkoutUrl.toString());
+      return;
+    }
+
+    await subscriptionRequestRepository.save(
+      UserSubscriptionRequestDraft(
+        userEmail: FirebaseAuth.instance.currentUser?.email,
+        paymentMethod: paymentMethod,
+        paymentReference: paymentReference,
+        message: message.trim(),
+      ),
+    );
+  }
+
+  Future<void> openStripeBillingPortal() async {
+    final currentUrl = Uri.base;
+    final portal = await subscriptionCheckoutClient
+        .createStripeBillingPortalSession(returnUrl: currentUrl);
+    html.window.location.assign(portal.portalUrl.toString());
+  }
+
+  Future<void> showSubscriptionRequestDialog() async {
+    final controller = TextEditingController();
+    final referenceController = TextEditingController();
+    var paymentMethod = UserSubscriptionPaymentMethod.stripe;
+    String? checkoutErrorMessage;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        var isSending = false;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Subscription Request',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 460,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        userAccess.canAccessMainVault
+                            ? 'Ask administration about renewal, account status, or subscription support.'
+                            : paymentMethod ==
+                                  UserSubscriptionPaymentMethod.stripe
+                            ? 'Continue to secure Stripe checkout to unlock the protected vault.'
+                            : paymentMethod ==
+                                  UserSubscriptionPaymentMethod.paystack
+                            ? 'Continue to secure Paystack checkout to unlock the protected vault.'
+                            : 'Request premium access to unlock the protected vault.',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<UserSubscriptionPaymentMethod>(
+                        initialValue: paymentMethod,
+                        dropdownColor: const Color(0xFF1A1D25),
+                        iconEnabledColor: Colors.greenAccent,
+                        style: const TextStyle(color: Colors.white70),
+                        decoration: const InputDecoration(
+                          labelText: 'Preferred payment method',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
+                          ),
+                        ),
+                        items: UserSubscriptionPaymentMethod.values
+                            .map((method) {
+                              return DropdownMenuItem(
+                                value: method,
+                                child: Text(
+                                  userSubscriptionPaymentMethodLabel(method),
+                                ),
+                              );
+                            })
+                            .toList(growable: false),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            paymentMethod =
+                                value ?? UserSubscriptionPaymentMethod.paystack;
+                            checkoutErrorMessage = null;
+                          });
+                        },
+                      ),
+                      if (paymentMethod ==
+                          UserSubscriptionPaymentMethod.ancientCoin) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: referenceController,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: const InputDecoration(
+                            labelText: 'Payment reference',
+                            hintText:
+                                'Optional transaction, checkout, or Ancient Coin reference',
+                            labelStyle: TextStyle(color: Colors.white70),
+                            hintStyle: TextStyle(color: Colors.white38),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.white24),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.greenAccent),
+                            ),
+                          ),
+                        ),
+                      ] else if (paymentMethod ==
+                          UserSubscriptionPaymentMethod.stripe) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Stripe opens a secure checkout page. Your access updates after payment is confirmed.',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Paystack opens a secure checkout page. Your access updates after payment is confirmed.',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      ],
+                      if (checkoutErrorMessage != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withValues(alpha: 0.12),
+                            border: Border.all(color: Colors.redAccent),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            checkoutErrorMessage!,
+                            style: const TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controller,
+                        maxLines: 4,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          hintText:
+                              'Optional note for administration, payment reference, or access reason...',
+                          hintStyle: TextStyle(color: Colors.white38),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isSending ? null : () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            setDialogState(() {
+                              isSending = true;
+                              checkoutErrorMessage = null;
+                            });
+                            try {
+                              await submitSubscriptionRequest(
+                                controller.text,
+                                paymentMethod: paymentMethod,
+                                paymentReference: referenceController.text,
+                              );
+                              if (paymentMethod ==
+                                      UserSubscriptionPaymentMethod.stripe ||
+                                  paymentMethod ==
+                                      UserSubscriptionPaymentMethod.paystack) {
+                                return;
+                              }
+                              if (!context.mounted) return;
+                              Navigator.pop(context);
+                              refreshReaderDashboard();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Subscription request sent for review.',
+                                  ),
+                                ),
+                              );
+                            } catch (error) {
+                              if (!context.mounted) return;
+                              setDialogState(() {
+                                isSending = false;
+                                checkoutErrorMessage =
+                                    paymentMethod ==
+                                        UserSubscriptionPaymentMethod.stripe
+                                    ? 'Stripe checkout could not start: $error'
+                                    : paymentMethod ==
+                                          UserSubscriptionPaymentMethod.paystack
+                                    ? 'Paystack checkout could not start: $error'
+                                    : null;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    paymentMethod ==
+                                            UserSubscriptionPaymentMethod.stripe
+                                        ? 'Stripe checkout could not start: $error'
+                                        : paymentMethod ==
+                                              UserSubscriptionPaymentMethod
+                                                  .paystack
+                                        ? 'Paystack checkout could not start: $error'
+                                        : 'Subscription request could not be sent: $error',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.greenAccent,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.workspace_premium_outlined,
+                            size: 16,
+                          ),
+                    label: Text(
+                      paymentMethod == UserSubscriptionPaymentMethod.stripe
+                          ? 'Continue to Stripe'
+                          : paymentMethod ==
+                                UserSubscriptionPaymentMethod.paystack
+                          ? 'Continue to Paystack'
+                          : 'Send request',
+                    ),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(() {
+      controller.dispose();
+      referenceController.dispose();
+    });
+  }
+
+  Future<void> showManageStripeSubscriptionDialog() async {
+    String? errorMessage;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        var isOpening = false;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Manage Subscription',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 430,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${userAccess.subscriptionStatusLabel} | ${readerSubscriptionDetail()}',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      if (userAccess.stripeAttentionLabel != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orangeAccent.withValues(alpha: 0.12),
+                            border: Border.all(color: Colors.orangeAccent),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${userAccess.stripeAttentionLabel}. Open Stripe billing to review the subscription and update payment details.',
+                            style: const TextStyle(
+                              color: Colors.orangeAccent,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Open Stripe billing to review your subscription, payment method, invoices, and renewal details.',
+                        style: TextStyle(color: Colors.white54, height: 1.4),
+                      ),
+                      if (errorMessage != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withValues(alpha: 0.12),
+                            border: Border.all(color: Colors.redAccent),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            errorMessage!,
+                            style: const TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isOpening ? null : () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: isOpening
+                        ? null
+                        : () async {
+                            setDialogState(() {
+                              isOpening = true;
+                              errorMessage = null;
+                            });
+                            try {
+                              await openStripeBillingPortal();
+                            } catch (error) {
+                              if (!context.mounted) return;
+                              setDialogState(() {
+                                isOpening = false;
+                                errorMessage =
+                                    'Stripe billing could not open: $error';
+                              });
+                            }
+                          },
+                    icon: isOpening
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.greenAccent,
+                            ),
+                          )
+                        : const Icon(Icons.open_in_new, size: 16),
+                    label: const Text('Open Stripe billing'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> showReaderSuggestionDialog() async {
+    final controller = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        var isSending = false;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Suggestion',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: TextField(
+                  controller: controller,
+                  maxLines: 5,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    hintText: 'Share an idea, contribution, or issue...',
+                    hintStyle: TextStyle(color: Colors.white38),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.greenAccent),
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isSending ? null : () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            setDialogState(() {
+                              isSending = true;
+                            });
+                            try {
+                              await submitReaderSuggestion(controller.text);
+                              if (!context.mounted) return;
+                              Navigator.pop(context);
+                              refreshReaderDashboard();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Suggestion sent. Thank you.'),
+                                ),
+                              );
+                            } catch (error) {
+                              if (!context.mounted) return;
+                              setDialogState(() {
+                                isSending = false;
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Suggestion could not be sent: $error',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.greenAccent,
+                            ),
+                          )
+                        : const Icon(Icons.send_outlined, size: 16),
+                    label: const Text('Send'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(controller.dispose);
+  }
+
+  Future<void> showReaderDashboard() async {
+    final overviewFuture = readerDashboardFuture ??=
+        loadReaderDashboardOverview();
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'My Dashboard',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: SizedBox(
+              width: 720,
+              child: FutureBuilder<_ReaderDashboardOverview>(
+                future: overviewFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Text(
+                      snapshot.error.toString(),
+                      style: const TextStyle(color: Colors.redAccent),
+                    );
+                  }
+
+                  if (!snapshot.hasData) {
+                    return const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: Colors.greenAccent,
+                        ),
+                      ),
+                    );
+                  }
+
+                  final overview = snapshot.data!;
+                  return SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            buildReaderDashboardMetric(
+                              icon: Icons.person_outline,
+                              label: 'Account',
+                              value: userAccess.planLabel,
+                              detail: readerAccountName(),
+                            ),
+                            buildReaderDashboardMetric(
+                              icon: Icons.workspace_premium_outlined,
+                              label: 'Subscription',
+                              value: userAccess.subscriptionStatusLabel,
+                              detail: readerSubscriptionDetail(),
+                              color: userAccess.canAccessMainVault
+                                  ? Colors.greenAccent
+                                  : Colors.orangeAccent,
+                              onTap: userAccess.canManageStripeBilling
+                                  ? showManageStripeSubscriptionDialog
+                                  : showSubscriptionRequestDialog,
+                            ),
+                            buildReaderDashboardMetric(
+                              icon: Icons.security_outlined,
+                              label: 'Security',
+                              value: readerSecurityValue(overview),
+                              detail: readerSecurityDetail(overview),
+                              color: readerSecurityColor(overview),
+                            ),
+                            buildReaderDashboardMetric(
+                              icon: Icons.auto_graph_outlined,
+                              label: 'Activity logs',
+                              value: overview.activity.totalEventCount
+                                  .toString(),
+                              detail:
+                                  '${overview.activity.allowedAccessCount} opens | ${overview.activity.actionCount} actions',
+                              color: Colors.cyanAccent,
+                            ),
+                            buildReaderDashboardMetric(
+                              icon: Icons.favorite_border,
+                              label: 'Favourites',
+                              value: overview.bookmarks.length.toString(),
+                              detail: 'Saved bookmarks',
+                              color: Colors.orangeAccent,
+                            ),
+                            buildReaderDashboardMetric(
+                              icon: Icons.emoji_events_outlined,
+                              label: 'Achievements',
+                              value: overview.milestoneCount.toString(),
+                              detail:
+                                  '${overview.contributionCount} study contributions',
+                              color: Colors.amberAccent,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        buildReaderDashboardList(
+                          title: 'Account and security',
+                          icon: Icons.security_outlined,
+                          emptyMessage: 'No device records found yet.',
+                          children: [
+                            buildReaderDashboardItem(
+                              icon: Icons.person_outline,
+                              title: readerAccountName(),
+                              subtitle:
+                                  '${userAccess.planLabel} | ${readerSubscriptionDetail()}',
+                            ),
+                            if (overview.devices.isEmpty)
+                              buildReaderDashboardItem(
+                                icon: Icons.devices_other_outlined,
+                                title: 'Device monitoring ready',
+                                subtitle:
+                                    'Your browser device will appear here after protected reading activity is recorded.',
+                              ),
+                            ...overview.devices.take(4).map((device) {
+                              final timestamp =
+                                  device.lastSeenAt ??
+                                  device.updatedAt ??
+                                  device.createdAt;
+                              return buildReaderDashboardItem(
+                                icon: switch (device.status) {
+                                  UserDeviceStatus.pending =>
+                                    Icons.device_unknown_outlined,
+                                  UserDeviceStatus.trusted =>
+                                    Icons.verified_user_outlined,
+                                  UserDeviceStatus.blocked =>
+                                    Icons.block_outlined,
+                                },
+                                title: userDeviceRecordTitle(device),
+                                subtitle:
+                                    '${userDeviceStatusLabel(device.status)} | '
+                                    '${device.platform.isEmpty ? 'Browser device' : device.platform} | '
+                                    '${formatDashboardTimestamp(timestamp)}',
+                              );
+                            }),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        buildReaderDashboardList(
+                          title: 'Subscription',
+                          icon: Icons.workspace_premium_outlined,
+                          emptyMessage: 'No subscription requests yet.',
+                          children: [
+                            buildReaderDashboardItem(
+                              icon: userAccess.canAccessMainVault
+                                  ? Icons.verified_outlined
+                                  : Icons.lock_open_outlined,
+                              title: userAccess.subscriptionStatusLabel,
+                              subtitle: readerSubscriptionDetail(),
+                            ),
+                            if (userAccess.subscriptionProviderLabel.isNotEmpty)
+                              buildReaderDashboardItem(
+                                icon: Icons.account_balance_wallet_outlined,
+                                title: userAccess.subscriptionProviderLabel,
+                                subtitle:
+                                    userAccess
+                                        .subscriptionReferenceLabel
+                                        .isNotEmpty
+                                    ? userAccess.subscriptionReferenceLabel
+                                    : 'Payment provider recorded',
+                              ),
+                            if (userAccessSubscriptionExpiryLabel(userAccess) !=
+                                null)
+                              buildReaderDashboardItem(
+                                icon: Icons.event_available_outlined,
+                                title: 'Renewal / expiry',
+                                subtitle: userAccessSubscriptionExpiryLabel(
+                                  userAccess,
+                                )!,
+                              ),
+                            if (userAccess.stripeAttentionLabel != null)
+                              buildReaderDashboardItem(
+                                icon: Icons.warning_amber_outlined,
+                                title: userAccess.stripeAttentionLabel!,
+                                subtitle: userAccess.canManageStripeBilling
+                                    ? 'Open Stripe billing to update payment details.'
+                                    : 'Login again or contact administration for help.',
+                                onTap: userAccess.canManageStripeBilling
+                                    ? showManageStripeSubscriptionDialog
+                                    : null,
+                              ),
+                            if (userAccess.canManageStripeBilling)
+                              buildReaderDashboardItem(
+                                icon: Icons.credit_card_outlined,
+                                title: 'Stripe billing',
+                                subtitle:
+                                    'Manage payment method, invoices, and renewal in Stripe.',
+                                onTap: showManageStripeSubscriptionDialog,
+                              ),
+                            ...overview.subscriptionRequests.take(4).map((
+                              request,
+                            ) {
+                              return buildReaderDashboardItem(
+                                icon: Icons.receipt_long_outlined,
+                                title:
+                                    '${userSubscriptionRequestStatusLabel(request.status)} request',
+                                subtitle: [
+                                  'Plan: ${request.requestedPlan}',
+                                  userSubscriptionPaymentMethodLabel(
+                                    request.paymentMethod,
+                                  ),
+                                  userSubscriptionPaymentStatusLabel(
+                                    request.paymentStatus,
+                                  ),
+                                  if (request.paymentReference.isNotEmpty)
+                                    'Ref: ${request.paymentReference}',
+                                  if (request.message.isNotEmpty)
+                                    request.message,
+                                  formatDashboardTimestamp(
+                                    request.latestTimestamp,
+                                  ),
+                                ].join(' | '),
+                              );
+                            }),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        buildReaderDashboardList(
+                          title: 'Announcements and updates',
+                          icon: Icons.campaign_outlined,
+                          emptyMessage:
+                              'No administration updates have been posted yet.',
+                          children: overview.announcements.isEmpty
+                              ? [
+                                  buildReaderDashboardItem(
+                                    icon: Icons.image_outlined,
+                                    title: 'Protected image reader is active',
+                                    subtitle:
+                                        'Protected vault documents now render as non-copyable reading images.',
+                                  ),
+                                  buildReaderDashboardItem(
+                                    icon: Icons.workspace_premium_outlined,
+                                    title:
+                                        'Subscription controls are being prepared',
+                                    subtitle:
+                                        'Admins can review trial, active, pending, expired, and cancelled access states.',
+                                  ),
+                                ]
+                              : overview.announcements.take(5).map((item) {
+                                  return buildReaderDashboardItem(
+                                    icon: item.isPinned
+                                        ? Icons.push_pin_outlined
+                                        : Icons.campaign_outlined,
+                                    title: item.title.isEmpty
+                                        ? 'Administration update'
+                                        : item.title,
+                                    subtitle: item.message,
+                                  );
+                                }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        buildReaderDashboardList(
+                          title: 'Continue reading',
+                          icon: Icons.menu_book_outlined,
+                          emptyMessage: 'No reading positions saved yet.',
+                          children: overview.savedPositions.take(4).map((item) {
+                            return buildReaderDashboardItem(
+                              icon: Icons.book_outlined,
+                              title: item.pdfTitle.isEmpty
+                                  ? 'Untitled document'
+                                  : item.pdfTitle,
+                              subtitle: 'Page ${item.pageNumber}',
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        buildReaderDashboardList(
+                          title: 'Favourites',
+                          icon: Icons.bookmark_border,
+                          emptyMessage: 'No favourites saved yet.',
+                          children: overview.bookmarks.take(4).map((item) {
+                            return buildReaderDashboardItem(
+                              icon: Icons.bookmark_border,
+                              title: item.pdfTitle.isEmpty
+                                  ? item.displayLabel
+                                  : item.pdfTitle,
+                              subtitle:
+                                  '${item.displayLabel} | Page ${item.pageNumber}',
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        buildReaderDashboardList(
+                          title: 'Recent activity logs',
+                          icon: Icons.history_outlined,
+                          emptyMessage: 'No activity has been recorded yet.',
+                          children: overview.activity.recentRecords.take(5).map(
+                            (record) {
+                              return buildReaderDashboardItem(
+                                icon: record.isBlockedAccess
+                                    ? Icons.block_outlined
+                                    : Icons.check_circle_outline,
+                                title: formatActivityLabel(record),
+                                subtitle: formatActivitySubtitle(record),
+                              );
+                            },
+                          ).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        buildReaderDashboardList(
+                          title: 'Suggestions and contributions',
+                          icon: Icons.lightbulb_outline,
+                          emptyMessage: 'No suggestions submitted yet.',
+                          children: overview.suggestions.take(4).map((item) {
+                            return buildReaderDashboardItem(
+                              icon: Icons.forum_outlined,
+                              title: readerSuggestionStatusLabel(item.status),
+                              subtitle: item.message,
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        buildReaderDashboardList(
+                          title: 'Achievements and milestones',
+                          icon: Icons.emoji_events_outlined,
+                          emptyMessage: 'Start reading to unlock milestones.',
+                          children: [
+                            if (overview.savedPositions.isNotEmpty)
+                              buildReaderDashboardItem(
+                                icon: Icons.flag_outlined,
+                                title: 'Reading progress started',
+                                subtitle: 'You have saved reading positions.',
+                              ),
+                            if (overview.bookmarks.isNotEmpty)
+                              buildReaderDashboardItem(
+                                icon: Icons.bookmark_added_outlined,
+                                title: 'Favourite collector',
+                                subtitle: 'You have saved useful pages.',
+                              ),
+                            if (overview.studyAssetCount > 0)
+                              buildReaderDashboardItem(
+                                icon: Icons.edit_note_outlined,
+                                title: 'Research workspace active',
+                                subtitle:
+                                    '${overview.notes.length} notes, ${overview.highlights.length} highlights, ${overview.bookmarks.length} bookmarks',
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton.icon(
+                onPressed: showSubscriptionRequestDialog,
+                icon: const Icon(Icons.workspace_premium_outlined, size: 16),
+                label: const Text('Subscription'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.greenAccent,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: showReaderSuggestionDialog,
+                icon: const Icon(Icons.lightbulb_outline, size: 16),
+                label: const Text('Suggestion'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.orangeAccent,
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Close',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canAccessMainVault = userAccess.canAccessMainVault;
@@ -6144,6 +8923,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       freeDocuments: freePdfFiles,
       premiumDocuments: premiumPdfFiles,
     );
+    final readerOverviewFuture = readerDashboardFuture ??=
+        loadReaderDashboardOverview();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
@@ -6155,6 +8936,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
 
         actions: [
+          IconButton(
+            tooltip: 'My dashboard',
+            icon: const Icon(
+              Icons.account_circle_outlined,
+              color: Colors.greenAccent,
+            ),
+            onPressed: showReaderDashboard,
+          ),
           IconButton(
             icon: const Icon(Icons.search, color: Colors.greenAccent),
 
@@ -6232,6 +9021,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           buildAdminCommandCenter(vaultInventory),
                           const SizedBox(height: 24),
                         ],
+
+                        FutureBuilder<_ReaderDashboardOverview>(
+                          future: readerOverviewFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent.withValues(
+                                    alpha: 0.12,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.redAccent),
+                                ),
+                                child: const Text(
+                                  'My dashboard could not load right now.',
+                                  style: TextStyle(color: Colors.redAccent),
+                                ),
+                              );
+                            }
+
+                            if (!snapshot.hasData) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: LinearProgressIndicator(
+                                  color: Colors.greenAccent,
+                                  backgroundColor: Colors.white10,
+                                ),
+                              );
+                            }
+
+                            return buildReaderDashboardPreview(snapshot.data!);
+                          },
+                        ),
+
+                        const SizedBox(height: 24),
 
                         buildDashboardDocumentSearch(),
                         buildDashboardActiveFilterBar(dashboardFilterLabels),

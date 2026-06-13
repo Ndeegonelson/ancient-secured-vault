@@ -14,6 +14,13 @@ class UserAccessState {
     this.hasActiveSubscription = false,
     this.accessLevel = 'free',
     this.subscriptionStatus = UserSubscriptionStatus.none,
+    this.subscriptionProvider = '',
+    this.stripeSubscriptionStatus = '',
+    this.stripeLastPaymentStatus = '',
+    this.stripeCustomerId = '',
+    this.stripeSubscriptionId = '',
+    this.paystackCustomerId = '',
+    this.paystackReference = '',
     this.subscriptionExpiresAt,
   });
 
@@ -38,6 +45,13 @@ class UserAccessState {
       hasActiveSubscription: hasActiveSubscription,
       accessLevel: accessLevel,
       subscriptionStatus: subscriptionStatus,
+      subscriptionProvider: _readText(data?['subscriptionProvider']),
+      stripeSubscriptionStatus: _readText(data?['stripeSubscriptionStatus']),
+      stripeLastPaymentStatus: _readText(data?['stripeLastPaymentStatus']),
+      stripeCustomerId: _readIdentifier(data?['stripeCustomerId']),
+      stripeSubscriptionId: _readIdentifier(data?['stripeSubscriptionId']),
+      paystackCustomerId: _readIdentifier(data?['paystackCustomerId']),
+      paystackReference: _readIdentifier(data?['paystackReference']),
       subscriptionExpiresAt: subscriptionExpiresAt,
     );
   }
@@ -46,17 +60,95 @@ class UserAccessState {
   final bool hasActiveSubscription;
   final String accessLevel;
   final UserSubscriptionStatus subscriptionStatus;
+  final String subscriptionProvider;
+  final String stripeSubscriptionStatus;
+  final String stripeLastPaymentStatus;
+  final String stripeCustomerId;
+  final String stripeSubscriptionId;
+  final String paystackCustomerId;
+  final String paystackReference;
   final DateTime? subscriptionExpiresAt;
 
   bool get canAccessMainVault => isAdmin || hasActiveSubscription;
 
   bool get canManageVault => isAdmin;
 
+  bool get canManageStripeBilling => subscriptionProvider == 'stripe';
+
+  String get subscriptionProviderLabel {
+    return switch (subscriptionProvider) {
+      'stripe' => 'Stripe',
+      'paystack' => 'Paystack',
+      'ancient_coin' || 'ancient-coin' || 'ancientcoin' => 'Ancient Coin',
+      'admin' => 'Admin',
+      '' => '',
+      _ => subscriptionProvider,
+    };
+  }
+
+  String get subscriptionReference {
+    for (final value in [
+      paystackReference,
+      stripeSubscriptionId,
+      stripeCustomerId,
+    ]) {
+      if (value.trim().isNotEmpty) return value.trim();
+    }
+
+    return '';
+  }
+
+  String get subscriptionReferenceLabel {
+    final reference = subscriptionReference;
+    if (reference.isEmpty) return '';
+
+    return switch (subscriptionProvider) {
+      'paystack' => 'Paystack ref: $reference',
+      'stripe' =>
+        stripeSubscriptionId.isNotEmpty
+            ? 'Stripe sub: $reference'
+            : 'Stripe customer: $reference',
+      _ => 'Payment ref: $reference',
+    };
+  }
+
+  bool get hasStripePaymentIssue {
+    if (subscriptionProvider != 'stripe') return false;
+
+    return stripeLastPaymentStatus == 'failed' ||
+        stripeSubscriptionStatus == 'past_due' ||
+        stripeSubscriptionStatus == 'unpaid' ||
+        stripeSubscriptionStatus == 'incomplete';
+  }
+
+  String? get stripeAttentionLabel {
+    if (subscriptionProvider != 'stripe') return null;
+
+    if (stripeLastPaymentStatus == 'failed') {
+      return 'Stripe payment needs attention';
+    }
+
+    return switch (stripeSubscriptionStatus) {
+      'past_due' => 'Stripe payment is past due',
+      'unpaid' => 'Stripe subscription is unpaid',
+      'incomplete' => 'Stripe checkout is incomplete',
+      'canceled' || 'cancelled' => 'Stripe subscription cancelled',
+      _ => null,
+    };
+  }
+
   bool get hasSubscriptionExpiry => subscriptionExpiresAt != null;
 
   bool get isSubscriptionExpired {
     final expiresAt = subscriptionExpiresAt;
     return expiresAt != null && !expiresAt.isAfter(DateTime.now());
+  }
+
+  bool get isSubscriptionExpiringSoon {
+    final expiresAt = subscriptionExpiresAt;
+    if (expiresAt == null || isSubscriptionExpired) return false;
+
+    return expiresAt.difference(DateTime.now()) <= const Duration(days: 7);
   }
 
   int get priority {
@@ -109,6 +201,14 @@ class UserAccessState {
   static String _readAccessLevel(dynamic value) {
     final accessLevel = value?.toString().trim().toLowerCase() ?? '';
     return accessLevel.isEmpty ? 'free' : accessLevel;
+  }
+
+  static String _readText(dynamic value) {
+    return value?.toString().trim().toLowerCase() ?? '';
+  }
+
+  static String _readIdentifier(dynamic value) {
+    return value?.toString().trim() ?? '';
   }
 
   static DateTime? _readDateTime(dynamic value) {

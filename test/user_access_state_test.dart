@@ -22,6 +22,7 @@ void main() {
       'role': 'reader',
       'subscriptionStatus': 'active',
       'accessLevel': 'Premium',
+      'subscriptionProvider': 'stripe',
       'subscriptionExpiresAt': futureExpiry.toIso8601String(),
     });
 
@@ -30,6 +31,8 @@ void main() {
     expect(access.accessLevel, 'premium');
     expect(access.subscriptionStatus, UserSubscriptionStatus.active);
     expect(access.subscriptionStatusLabel, 'Active');
+    expect(access.subscriptionProvider, 'stripe');
+    expect(access.canManageStripeBilling, isTrue);
     expect(access.subscriptionExpiresAt, futureExpiry);
     expect(access.hasSubscriptionExpiry, isTrue);
     expect(access.isSubscriptionExpired, isFalse);
@@ -38,6 +41,50 @@ void main() {
     expect(access.planLabel, 'Premium');
     expect(access.priority, 2);
     expect(access.canOpenPdfWithAccessLevel('premium'), isTrue);
+  });
+
+  test('non-Stripe premium subscriptions do not open Stripe billing', () {
+    final access = UserAccessState.fromFirestore({
+      'role': 'reader',
+      'subscriptionStatus': 'active',
+      'accessLevel': 'premium',
+      'subscriptionProvider': 'admin',
+    });
+
+    expect(access.canAccessMainVault, isTrue);
+    expect(access.canManageStripeBilling, isFalse);
+  });
+
+  test('Paystack subscriptions expose provider and reference details', () {
+    final access = UserAccessState.fromFirestore({
+      'role': 'reader',
+      'subscriptionStatus': 'active',
+      'accessLevel': 'premium',
+      'subscriptionProvider': 'paystack',
+      'paystackCustomerId': 'CUS_test',
+      'paystackReference': 'paystack-ref-123',
+    });
+
+    expect(access.subscriptionProviderLabel, 'Paystack');
+    expect(access.subscriptionReference, 'paystack-ref-123');
+    expect(access.subscriptionReferenceLabel, 'Paystack ref: paystack-ref-123');
+    expect(access.canManageStripeBilling, isFalse);
+  });
+
+  test('Stripe billing stays available when payment needs attention', () {
+    final access = UserAccessState.fromFirestore({
+      'role': 'reader',
+      'subscriptionStatus': 'pending',
+      'accessLevel': 'free',
+      'subscriptionProvider': 'stripe',
+      'stripeSubscriptionStatus': 'past_due',
+      'stripeLastPaymentStatus': 'failed',
+    });
+
+    expect(access.hasActiveSubscription, isFalse);
+    expect(access.canManageStripeBilling, isTrue);
+    expect(access.hasStripePaymentIssue, isTrue);
+    expect(access.stripeAttentionLabel, 'Stripe payment needs attention');
   });
 
   test('trial subscriptions keep protected vault access until they expire', () {
@@ -54,6 +101,22 @@ void main() {
     expect(access.hasActiveSubscription, isTrue);
     expect(access.canAccessMainVault, isTrue);
     expect(access.planLabel, 'Premium');
+    expect(access.isSubscriptionExpiringSoon, isFalse);
+  });
+
+  test('subscriptions near expiry are flagged for admin review', () {
+    final access = UserAccessState.fromFirestore({
+      'role': 'reader',
+      'subscriptionStatus': 'active',
+      'accessLevel': 'premium',
+      'subscriptionExpiresAt': DateTime.now()
+          .add(const Duration(days: 3))
+          .toIso8601String(),
+    });
+
+    expect(access.hasActiveSubscription, isTrue);
+    expect(access.isSubscriptionExpired, isFalse);
+    expect(access.isSubscriptionExpiringSoon, isTrue);
   });
 
   test('expired premium subscriptions fall back to free access', () {

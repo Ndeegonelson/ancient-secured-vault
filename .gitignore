@@ -27,8 +27,11 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.dart-appdata/
+.dart-localappdata/
 .codex_appdata/
 .flutter-plugins-dependencies
+node_modules/
 .pub-cache/
 .pub/
 /build/

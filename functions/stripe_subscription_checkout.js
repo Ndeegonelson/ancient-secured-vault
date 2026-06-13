@@ -1,0 +1,566 @@
+const {FieldValue} = require("firebase-admin/firestore");
+
+const DEFAULT_PLAN = "premium";
+const DEFAULT_SUCCESS_PATH = "?subscription=stripe-success";
+const DEFAULT_CANCEL_PATH = "?subscription=stripe-cancelled";
+
+function createStripeCheckoutSessionHandler({
+  firestore,
+  verifyAuthToken,
+  stripeClientFactory = defaultStripeClientFactory,
+  getPriceId = stripePremiumPriceId,
+  getAppBaseUrl = requestAppBaseUrl,
+} = {}) {
+  if (!firestore) throw new TypeError("Firestore is required.");
+
+  return async (request, response) => {
+    try {
+      applyCors(request, response);
+      if (request.method === "OPTIONS") {
+        response.status(204).send("");
+        return;
+      }
+      requireMethod(request, "POST");
+
+      const user = await requireFirebaseUser(request, verifyAuthToken);
+      const priceId = readRequiredText(
+          getPriceId(),
+          "Stripe premium price id is not configured.",
+      );
+      const stripe = stripeClientFactory();
+      const input = readRequestData(request);
+      const appBaseUrl = normalizeBaseUrl(getAppBaseUrl(request));
+      const requestReference = await createSubscriptionRequest({
+        firestore,
+        user,
+        input,
+      });
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        customer_email: user.email,
+        client_reference_id: requestReference.id,
+        line_items: [{price: priceId, quantity: 1}],
+        success_url: input.successUrl || `${appBaseUrl}${DEFAULT_SUCCESS_PATH}`,
+        cancel_url: input.cancelUrl || `${appBaseUrl}${DEFAULT_CANCEL_PATH}`,
+        metadata: checkoutMetadata({requestReference, user}),
+        subscription_data: {
+          metadata: checkoutMetadata({requestReference, user}),
+        },
+      });
+
+      await requestReference.ref.update({
+        paymentReference: session.id,
+        stripeCheckoutSessionId: session.id,
+        paymentStatus: "pending_confirmation",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      response.json({
+        requestId: requestReference.id,
+        checkoutUrl: session.url,
+      });
+    } catch (error) {
+      sendHttpError(response, error);
+    }
+  };
+}
+
+function createStripeWebhookHandler({
+  firestore,
+  stripeClientFactory = defaultStripeClientFactory,
+  getWebhookSecret = () => process.env.STRIPE_WEBHOOK_SECRET,
+} = {}) {
+  if (!firestore) throw new TypeError("Firestore is required.");
+
+  return async (request, response) => {
+    try {
+      requireMethod(request, "POST");
+      const stripe = stripeClientFactory();
+      const webhookSecret = readRequiredText(
+          getWebhookSecret(),
+          "Stripe webhook secret is not configured.",
+      );
+      const signature = request.get("stripe-signature");
+      const event = stripe.webhooks.constructEvent(
+          request.rawBody || request.body,
+          signature,
+          webhookSecret,
+      );
+
+      await handleStripeEvent({firestore, event});
+      response.json({received: true});
+    } catch (error) {
+      sendHttpError(response, error);
+    }
+  };
+}
+
+function createStripeBillingPortalSessionHandler({
+  firestore,
+  verifyAuthToken,
+  stripeClientFactory = defaultStripeClientFactory,
+  getAppBaseUrl = requestAppBaseUrl,
+} = {}) {
+  if (!firestore) throw new TypeError("Firestore is required.");
+
+  return async (request, response) => {
+    try {
+      applyCors(request, response);
+      if (request.method === "OPTIONS") {
+        response.status(204).send("");
+        return;
+      }
+      requireMethod(request, "POST");
+
+      const user = await requireFirebaseUser(request, verifyAuthToken);
+      const input = readRequestData(request);
+      const customerId = await loadStripeCustomerId({firestore, user});
+      const stripe = stripeClientFactory();
+      const appBaseUrl = normalizeBaseUrl(getAppBaseUrl(request));
+      const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: input.returnUrl || appBaseUrl,
+      });
+
+      response.json({portalUrl: session.url});
+    } catch (error) {
+      sendHttpError(response, error);
+    }
+  };
+}
+
+async function handleStripeEvent({firestore, event}) {
+  if (!event || !event.type) return;
+
+  if (event.type === "checkout.session.completed") {
+    await approveCompletedCheckoutSession({
+      firestore,
+      session: event.data && event.data.object,
+    });
+    return;
+  }
+
+  if (event.type === "checkout.session.expired") {
+    await markCheckoutSessionFailed({
+      firestore,
+      session: event.data && event.data.object,
+    });
+    return;
+  }
+
+  if (event.type === "customer.subscription.updated" ||
+      event.type === "customer.subscription.deleted") {
+    await syncStripeSubscriptionAccess({
+      firestore,
+      subscription: event.data && event.data.object,
+      deleted: event.type === "customer.subscription.deleted",
+    });
+    return;
+  }
+
+  if (event.type === "invoice.payment_failed") {
+    await syncStripeInvoiceSubscriptionAccess({
+      firestore,
+      invoice: event.data && event.data.object,
+      paymentStatus: "failed",
+    });
+    return;
+  }
+
+  if (event.type === "invoice.paid") {
+    await syncStripeInvoiceSubscriptionAccess({
+      firestore,
+      invoice: event.data && event.data.object,
+      paymentStatus: "confirmed",
+    });
+  }
+}
+
+function checkoutMetadata({requestReference, user}) {
+  return {
+    subscriptionRequestId: requestReference.id,
+    userEmail: user.email,
+    requestedPlan: DEFAULT_PLAN,
+    source: "stripe_checkout",
+  };
+}
+
+async function approveCompletedCheckoutSession({firestore, session}) {
+  const metadata = (session && session.metadata) || {};
+  const requestId = cleanText(metadata.subscriptionRequestId);
+  const userEmail = cleanEmail(metadata.userEmail || session.customer_email);
+  if (!requestId || !userEmail) return;
+
+  const requestRef = firestore
+      .collection("user_subscription_requests")
+      .doc(requestId);
+  await requestRef.set({
+    userEmail,
+    requestedPlan: cleanText(metadata.requestedPlan) || DEFAULT_PLAN,
+    paymentMethod: "stripe",
+    paymentStatus: "confirmed",
+    paymentReference: cleanText(session.id),
+    status: "approved",
+    source: "stripe_checkout",
+    stripeCustomerId: cleanText(session.customer),
+    stripeSubscriptionId: cleanText(session.subscription),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  await firestore.collection("users").doc(userEmail).set({
+    email: userEmail,
+    role: "reader",
+    accessLevel: "premium",
+    subscriptionStatus: "active",
+    subscriptionProvider: "stripe",
+    stripeCustomerId: cleanText(session.customer),
+    stripeSubscriptionId: cleanText(session.subscription),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
+async function markCheckoutSessionFailed({firestore, session}) {
+  const metadata = (session && session.metadata) || {};
+  const requestId = cleanText(metadata.subscriptionRequestId);
+  if (!requestId) return;
+
+  await firestore
+      .collection("user_subscription_requests")
+      .doc(requestId)
+      .set({
+        paymentStatus: "failed",
+        paymentReference: cleanText(session.id),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+}
+
+async function syncStripeInvoiceSubscriptionAccess({
+  firestore,
+  invoice,
+  paymentStatus,
+}) {
+  if (!invoice) return;
+
+  const subscriptionId = cleanText(invoice.subscription);
+  if (!subscriptionId) return;
+
+  const userEmail = await resolveStripeSubscriptionUserEmail({
+    firestore,
+    subscription: {
+      id: subscriptionId,
+      customer: invoice.customer,
+      metadata: invoice.subscription_details &&
+        invoice.subscription_details.metadata,
+    },
+  });
+  if (!userEmail) return;
+
+  await firestore.collection("users").doc(userEmail).set({
+    stripeLastInvoiceId: cleanText(invoice.id),
+    stripeLastPaymentStatus: paymentStatus,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
+async function syncStripeSubscriptionAccess({
+  firestore,
+  subscription,
+  deleted = false,
+}) {
+  if (!subscription) return;
+
+  const userEmail = await resolveStripeSubscriptionUserEmail({
+    firestore,
+    subscription,
+  });
+  if (!userEmail) return;
+
+  const mappedAccess = stripeSubscriptionAccessUpdate({
+    status: deleted ? "canceled" : subscription.status,
+  });
+  const subscriptionExpiresAt = stripeTimestampToDate(
+      subscription.current_period_end,
+  );
+
+  await firestore.collection("users").doc(userEmail).set({
+    email: userEmail,
+    role: "reader",
+    ...mappedAccess,
+    subscriptionProvider: "stripe",
+    stripeCustomerId: cleanText(subscription.customer),
+    stripeSubscriptionId: cleanText(subscription.id),
+    stripeSubscriptionStatus: cleanText(subscription.status),
+    ...(subscriptionExpiresAt ? {subscriptionExpiresAt} : {}),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
+async function resolveStripeSubscriptionUserEmail({firestore, subscription}) {
+  const metadata = (subscription && subscription.metadata) || {};
+  const metadataEmail = cleanEmail(metadata.userEmail);
+  if (metadataEmail) return metadataEmail;
+
+  const subscriptionId = cleanText(subscription && subscription.id);
+  if (subscriptionId) {
+    const subscriptionEmail = await findUserEmailByStripeField({
+      firestore,
+      field: "stripeSubscriptionId",
+      value: subscriptionId,
+    });
+    if (subscriptionEmail) return subscriptionEmail;
+  }
+
+  const customerId = cleanText(subscription && subscription.customer);
+  if (customerId) {
+    return findUserEmailByStripeField({
+      firestore,
+      field: "stripeCustomerId",
+      value: customerId,
+    });
+  }
+
+  return "";
+}
+
+async function findUserEmailByStripeField({firestore, field, value}) {
+  const snapshot = await firestore
+      .collection("users")
+      .where(field, "==", value)
+      .limit(1)
+      .get();
+  const doc = snapshot.docs && snapshot.docs[0];
+  return doc ? cleanEmail(doc.id) : "";
+}
+
+function stripeSubscriptionAccessUpdate({status}) {
+  switch (cleanText(status)) {
+    case "active":
+      return {
+        accessLevel: "premium",
+        subscriptionStatus: "active",
+      };
+    case "trialing":
+      return {
+        accessLevel: "premium",
+        subscriptionStatus: "trial",
+      };
+    case "past_due":
+    case "incomplete":
+      return {
+        accessLevel: "free",
+        subscriptionStatus: "pending",
+      };
+    case "unpaid":
+    case "incomplete_expired":
+      return {
+        accessLevel: "free",
+        subscriptionStatus: "expired",
+      };
+    case "canceled":
+      return {
+        accessLevel: "free",
+        subscriptionStatus: "cancelled",
+      };
+    case "paused":
+      return {
+        accessLevel: "free",
+        subscriptionStatus: "inactive",
+      };
+    default:
+      return {
+        accessLevel: "free",
+        subscriptionStatus: "inactive",
+      };
+  }
+}
+
+function stripeTimestampToDate(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return new Date(seconds * 1000);
+}
+
+async function createSubscriptionRequest({firestore, user, input}) {
+  const reference = firestore.collection("user_subscription_requests").doc();
+  await reference.set({
+    userEmail: user.email,
+    requestedPlan: DEFAULT_PLAN,
+    paymentMethod: "stripe",
+    paymentStatus: "awaiting_payment",
+    message: cleanText(input.message),
+    source: "stripe_checkout",
+    status: "open",
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return {id: reference.id, ref: reference};
+}
+
+async function loadStripeCustomerId({firestore, user}) {
+  const snapshot = await firestore.collection("users").doc(user.email).get();
+  const data = snapshot.exists ? snapshot.data() : {};
+  const customerId = cleanText(data && data.stripeCustomerId);
+
+  if (!customerId) {
+    throw httpError(
+        400,
+        "Stripe billing management is available after a completed Stripe subscription.",
+    );
+  }
+
+  return customerId;
+}
+
+async function requireFirebaseUser(request, verifyAuthToken) {
+  const authorization = request.get("authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    throw httpError(401, "Sign in before starting checkout.");
+  }
+
+  const verifier = verifyAuthToken || defaultVerifyAuthToken;
+  const decoded = await verifier(match[1]);
+  const email = cleanEmail(decoded && decoded.email);
+  if (!email) {
+    throw httpError(403, "A verified email is required for checkout.");
+  }
+
+  return {
+    uid: cleanText(decoded.uid),
+    email,
+  };
+}
+
+function defaultVerifyAuthToken(token) {
+  return require("firebase-admin/auth").getAuth().verifyIdToken(token);
+}
+
+function defaultStripeClientFactory() {
+  const secretKey = readRequiredText(
+      stripeSecretKey(),
+      "Stripe secret key is not configured.",
+  );
+  const Stripe = require("stripe");
+  return new Stripe(secretKey);
+}
+
+function readRequestData(request) {
+  const body = request.body && request.body.data ? request.body.data : request.body;
+  if (!body || typeof body !== "object") return {};
+
+  return {
+    message: cleanText(body.message),
+    successUrl: cleanUrl(body.successUrl),
+    cancelUrl: cleanUrl(body.cancelUrl),
+    returnUrl: cleanUrl(body.returnUrl),
+  };
+}
+
+function cleanUrl(value) {
+  const text = cleanText(value);
+  if (!text) return "";
+
+  const parsed = new URL(text);
+  if (parsed.protocol !== "https:" &&
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "127.0.0.1") {
+    throw httpError(400, "Checkout return URL must be secure.");
+  }
+
+  return parsed.toString();
+}
+
+function requestAppBaseUrl(request) {
+  const configured = cleanText(
+      process.env.APP_BASE_URL ||
+      firebaseRuntimeConfig().app?.base_url,
+  );
+  if (configured) return configured;
+
+  const origin = cleanText(request.get("origin"));
+  if (origin) return origin;
+
+  return "http://localhost:63114";
+}
+
+function stripePremiumPriceId() {
+  return cleanText(
+      process.env.STRIPE_PREMIUM_PRICE_ID ||
+      firebaseRuntimeConfig().stripe?.premium_price_id,
+  );
+}
+
+function stripeSecretKey() {
+  return cleanText(
+      process.env.STRIPE_SECRET_KEY ||
+      firebaseRuntimeConfig().stripe?.secret_key,
+  );
+}
+
+function firebaseRuntimeConfig() {
+  try {
+    const functions = require("firebase-functions");
+    return functions.config ? functions.config() : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function normalizeBaseUrl(value) {
+  const parsed = new URL(cleanText(value));
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function requireMethod(request, method) {
+  if (request.method !== method) {
+    throw httpError(405, `Stripe checkout requires ${method}.`);
+  }
+}
+
+function applyCors(request, response) {
+  const origin = request.get("origin") || "*";
+  response.set("Access-Control-Allow-Origin", origin);
+  response.set("Vary", "Origin");
+  response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+}
+
+function sendHttpError(response, error) {
+  response.status(error && error.status ? error.status : 500).json({
+    error: {
+      message: error && error.message ?
+        error.message :
+        "Stripe checkout is temporarily unavailable.",
+    },
+  });
+}
+
+function httpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function readRequiredText(value, message) {
+  const text = cleanText(value);
+  if (!text) throw httpError(500, message);
+  return text;
+}
+
+function cleanText(value) {
+  return value == null ? "" : value.toString().trim();
+}
+
+function cleanEmail(value) {
+  return cleanText(value).toLowerCase();
+}
+
+module.exports = {
+  createStripeCheckoutSessionHandler,
+  createStripeBillingPortalSessionHandler,
+  createStripeWebhookHandler,
+  handleStripeEvent,
+};

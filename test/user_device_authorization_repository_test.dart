@@ -1,4 +1,5 @@
 import 'package:ancient_secure_docs/services/user_device_authorization_repository.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -91,6 +92,41 @@ void main() {
       'pending-device',
       'blocked-device',
       'trusted-device',
+    ]);
+  });
+
+  test('sorts reader devices by recent use before status fallback', () {
+    final oldTrusted = UserDeviceRecord.fromMap({
+      'email': 'reader@example.com',
+      'status': 'trusted',
+      'lastSeenAt': Timestamp.fromDate(DateTime(2026, 6, 1)),
+    }, id: 'old-trusted');
+    final newPending = UserDeviceRecord.fromMap({
+      'email': 'reader@example.com',
+      'status': 'pending',
+      'lastSeenAt': Timestamp.fromDate(DateTime(2026, 6, 9)),
+    }, id: 'new-pending');
+    final noTimestampBlocked = UserDeviceRecord.fromMap({
+      'email': 'reader@example.com',
+      'status': 'blocked',
+    }, id: 'blocked');
+    final noTimestampTrusted = UserDeviceRecord.fromMap({
+      'email': 'reader@example.com',
+      'status': 'trusted',
+    }, id: 'trusted');
+
+    final sorted = UserDeviceRecord.sortForReaderList([
+      noTimestampTrusted,
+      oldTrusted,
+      noTimestampBlocked,
+      newPending,
+    ]);
+
+    expect(sorted.map((device) => device.id), [
+      'new-pending',
+      'old-trusted',
+      'blocked',
+      'trusted',
     ]);
   });
 

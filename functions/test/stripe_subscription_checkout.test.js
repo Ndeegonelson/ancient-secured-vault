@@ -1,0 +1,372 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {
+  createStripeBillingPortalSessionHandler,
+  createStripeCheckoutSessionHandler,
+  handleStripeEvent,
+} = require("../stripe_subscription_checkout");
+
+class FakeFirestore {
+  constructor() {
+    this.collections = new Map();
+    this.generatedIds = new Map();
+  }
+
+  collection(name) {
+    if (!this.collections.has(name)) {
+      this.collections.set(name, new Map());
+    }
+    const docs = this.collections.get(name);
+    return {
+      doc: (id) => {
+        const safeId = id || this.nextId(name);
+        return new FakeDocumentReference(safeId, docs);
+      },
+      where: (field, operator, value) => {
+        assert.equal(operator, "==");
+        return {
+          limit: (count) => ({
+            get: async () => {
+              const matches = [...docs.entries()]
+                  .filter(([, data]) => data && data[field] === value)
+                  .slice(0, count)
+                  .map(([id, data]) => ({
+                    id,
+                    data: () => data,
+                  }));
+              return {docs: matches};
+            },
+          }),
+        };
+      },
+    };
+  }
+
+  nextId(name) {
+    const current = this.generatedIds.get(name) || 0;
+    const next = current + 1;
+    this.generatedIds.set(name, next);
+    return `${name}-${next}`;
+  }
+
+  data(collection, id) {
+    return this.collections.get(collection).get(id);
+  }
+}
+
+class FakeDocumentReference {
+  constructor(id, docs) {
+    this.id = id;
+    this.docs = docs;
+  }
+
+  async set(data, options = {}) {
+    const current = options.merge ? this.docs.get(this.id) || {} : {};
+    this.docs.set(this.id, {...current, ...data});
+  }
+
+  async update(data) {
+    const current = this.docs.get(this.id) || {};
+    this.docs.set(this.id, {...current, ...data});
+  }
+
+  async get() {
+    const data = this.docs.get(this.id);
+    return {
+      exists: data !== undefined,
+      data: () => data,
+    };
+  }
+}
+
+function fakeResponse() {
+  return {
+    statusCode: 200,
+    headers: {},
+    body: undefined,
+    set(name, value) {
+      this.headers[name] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return this;
+    },
+    send(body) {
+      this.body = body;
+      return this;
+    },
+  };
+}
+
+function fakeRequest({
+  method = "POST",
+  body = {},
+  authorization = "Bearer user-token",
+  origin = "https://app.test",
+} = {}) {
+  return {
+    method,
+    body,
+    get(name) {
+      const key = name.toLowerCase();
+      if (key === "authorization") return authorization;
+      if (key === "origin") return origin;
+      return "";
+    },
+  };
+}
+
+test("creates a Stripe checkout session and records the request", async () => {
+  const firestore = new FakeFirestore();
+  let capturedSessionPayload;
+  const stripe = {
+    checkout: {
+      sessions: {
+        create: async (payload) => {
+          capturedSessionPayload = payload;
+          return {
+            id: "cs_test_123",
+            url: "https://checkout.stripe.com/c/pay/cs_test_123",
+          };
+        },
+      },
+    },
+  };
+  const handler = createStripeCheckoutSessionHandler({
+    firestore,
+    verifyAuthToken: async () => ({
+      uid: "reader-1",
+      email: "Reader@Example.COM",
+    }),
+    stripeClientFactory: () => stripe,
+    getPriceId: () => "price_test_premium",
+    getAppBaseUrl: () => "https://app.test",
+  });
+  const response = fakeResponse();
+
+  await handler(
+      fakeRequest({
+        body: {
+          data: {
+            message: " Premium access ",
+            successUrl: "https://app.test/success",
+            cancelUrl: "https://app.test/cancel",
+          },
+        },
+      }),
+      response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, {
+    requestId: "user_subscription_requests-1",
+    checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_123",
+  });
+  assert.equal(capturedSessionPayload.mode, "subscription");
+  assert.equal(capturedSessionPayload.customer_email, "reader@example.com");
+  assert.deepEqual(capturedSessionPayload.line_items, [{
+    price: "price_test_premium",
+    quantity: 1,
+  }]);
+  assert.equal(
+      capturedSessionPayload.metadata.subscriptionRequestId,
+      "user_subscription_requests-1",
+  );
+  assert.deepEqual(capturedSessionPayload.subscription_data.metadata, {
+    subscriptionRequestId: "user_subscription_requests-1",
+    userEmail: "reader@example.com",
+    requestedPlan: "premium",
+    source: "stripe_checkout",
+  });
+  assert.equal(
+      firestore.data("user_subscription_requests", "user_subscription_requests-1")
+          .paymentReference,
+      "cs_test_123",
+  );
+});
+
+test("completed checkout approves the request and activates user access", async () => {
+  const firestore = new FakeFirestore();
+
+  await handleStripeEvent({
+    firestore,
+    event: {
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_test_123",
+          customer: "cus_test_123",
+          subscription: "sub_test_123",
+          customer_email: "reader@example.com",
+          metadata: {
+            subscriptionRequestId: "request-1",
+            userEmail: "reader@example.com",
+            requestedPlan: "premium",
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(
+      firestore.data("user_subscription_requests", "request-1").status,
+      "approved",
+  );
+  assert.equal(
+      firestore.data("user_subscription_requests", "request-1").paymentStatus,
+      "confirmed",
+  );
+  assert.equal(
+      firestore.data("users", "reader@example.com").subscriptionStatus,
+      "active",
+  );
+  assert.equal(
+      firestore.data("users", "reader@example.com").subscriptionProvider,
+      "stripe",
+  );
+});
+
+test("updated active subscription keeps premium vault access", async () => {
+  const firestore = new FakeFirestore();
+
+  await handleStripeEvent({
+    firestore,
+    event: {
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_test_123",
+          customer: "cus_test_123",
+          status: "active",
+          current_period_end: 1790000000,
+          metadata: {
+            userEmail: "reader@example.com",
+          },
+        },
+      },
+    },
+  });
+
+  const access = firestore.data("users", "reader@example.com");
+  assert.equal(access.accessLevel, "premium");
+  assert.equal(access.subscriptionStatus, "active");
+  assert.equal(access.stripeSubscriptionStatus, "active");
+  assert.equal(access.stripeSubscriptionId, "sub_test_123");
+  assert.ok(access.subscriptionExpiresAt instanceof Date);
+});
+
+test("deleted subscription removes protected vault access", async () => {
+  const firestore = new FakeFirestore();
+  await firestore.collection("users").doc("reader@example.com").set({
+    email: "reader@example.com",
+    accessLevel: "premium",
+    subscriptionStatus: "active",
+    stripeCustomerId: "cus_test_123",
+    stripeSubscriptionId: "sub_test_123",
+  });
+
+  await handleStripeEvent({
+    firestore,
+    event: {
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_test_123",
+          customer: "cus_test_123",
+          status: "canceled",
+        },
+      },
+    },
+  });
+
+  const access = firestore.data("users", "reader@example.com");
+  assert.equal(access.accessLevel, "free");
+  assert.equal(access.subscriptionStatus, "cancelled");
+  assert.equal(access.subscriptionProvider, "stripe");
+});
+
+test("failed invoice records the Stripe payment issue", async () => {
+  const firestore = new FakeFirestore();
+  await firestore.collection("users").doc("reader@example.com").set({
+    email: "reader@example.com",
+    accessLevel: "premium",
+    subscriptionStatus: "active",
+    stripeCustomerId: "cus_test_123",
+    stripeSubscriptionId: "sub_test_123",
+  });
+
+  await handleStripeEvent({
+    firestore,
+    event: {
+      type: "invoice.payment_failed",
+      data: {
+        object: {
+          id: "in_test_123",
+          customer: "cus_test_123",
+          subscription: "sub_test_123",
+        },
+      },
+    },
+  });
+
+  const access = firestore.data("users", "reader@example.com");
+  assert.equal(access.stripeLastInvoiceId, "in_test_123");
+  assert.equal(access.stripeLastPaymentStatus, "failed");
+});
+
+test("creates a Stripe billing portal session for a Stripe subscriber", async () => {
+  const firestore = new FakeFirestore();
+  await firestore.collection("users").doc("reader@example.com").set({
+    email: "reader@example.com",
+    accessLevel: "premium",
+    subscriptionStatus: "active",
+    stripeCustomerId: "cus_test_123",
+  });
+  let capturedPortalPayload;
+  const stripe = {
+    billingPortal: {
+      sessions: {
+        create: async (payload) => {
+          capturedPortalPayload = payload;
+          return {
+            url: "https://billing.stripe.com/p/session/test",
+          };
+        },
+      },
+    },
+  };
+  const handler = createStripeBillingPortalSessionHandler({
+    firestore,
+    verifyAuthToken: async () => ({
+      uid: "reader-1",
+      email: "Reader@Example.COM",
+    }),
+    stripeClientFactory: () => stripe,
+    getAppBaseUrl: () => "https://app.test",
+  });
+  const response = fakeResponse();
+
+  await handler(
+      fakeRequest({
+        body: {
+          data: {
+            returnUrl: "https://app.test/dashboard",
+          },
+        },
+      }),
+      response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, {
+    portalUrl: "https://billing.stripe.com/p/session/test",
+  });
+  assert.deepEqual(capturedPortalPayload, {
+    customer: "cus_test_123",
+    return_url: "https://app.test/dashboard",
+  });
+});

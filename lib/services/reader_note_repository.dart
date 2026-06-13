@@ -135,6 +135,11 @@ abstract interface class ReaderNoteStore {
     required String pdfTitle,
   });
 
+  Future<List<ReaderNote>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  });
+
   Future<void> save(ReaderNoteDraft note);
 
   Future<void> updateNote({
@@ -164,6 +169,19 @@ class ReaderNoteRepository implements ReaderNoteStore {
       (snapshot) =>
           ReaderNote.sortNewest(snapshot.docs.map(ReaderNote.fromSnapshot)),
     );
+  }
+
+  @override
+  Future<List<ReaderNote>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  }) async {
+    final snapshot = await _collection
+        .where('userEmail', isEqualTo: userEmail)
+        .limit(limit < 1 ? 1 : limit)
+        .get();
+
+    return ReaderNote.sortNewest(snapshot.docs.map(ReaderNote.fromSnapshot));
   }
 
   @override

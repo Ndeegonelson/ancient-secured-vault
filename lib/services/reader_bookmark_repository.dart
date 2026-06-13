@@ -122,6 +122,11 @@ abstract interface class ReaderBookmarkStore {
     required String pdfTitle,
   });
 
+  Future<List<ReaderBookmark>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  });
+
   Future<void> save(ReaderBookmarkDraft bookmark);
 
   Future<void> updateLabel({required String bookmarkId, required String label});
@@ -147,6 +152,21 @@ class ReaderBookmarkRepository implements ReaderBookmarkStore {
       (snapshot) => ReaderBookmark.sortNewest(
         snapshot.docs.map(ReaderBookmark.fromSnapshot),
       ),
+    );
+  }
+
+  @override
+  Future<List<ReaderBookmark>> listForUser({
+    required String userEmail,
+    int limit = 20,
+  }) async {
+    final snapshot = await _collection
+        .where('userEmail', isEqualTo: userEmail)
+        .limit(limit < 1 ? 1 : limit)
+        .get();
+
+    return ReaderBookmark.sortNewest(
+      snapshot.docs.map(ReaderBookmark.fromSnapshot),
     );
   }
 

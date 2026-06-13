@@ -1,0 +1,219 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {
+  createPaystackCheckoutSessionHandler,
+  handlePaystackEvent,
+} = require("../paystack_subscription_checkout");
+
+class FakeFirestore {
+  constructor() {
+    this.collections = new Map();
+    this.generatedIds = new Map();
+  }
+
+  collection(name) {
+    if (!this.collections.has(name)) {
+      this.collections.set(name, new Map());
+    }
+    const docs = this.collections.get(name);
+    return {
+      doc: (id) => {
+        const safeId = id || this.nextId(name);
+        return new FakeDocumentReference(safeId, docs);
+      },
+    };
+  }
+
+  nextId(name) {
+    const current = this.generatedIds.get(name) || 0;
+    const next = current + 1;
+    this.generatedIds.set(name, next);
+    return `${name}-${next}`;
+  }
+
+  data(collection, id) {
+    return this.collections.get(collection).get(id);
+  }
+}
+
+class FakeDocumentReference {
+  constructor(id, docs) {
+    this.id = id;
+    this.docs = docs;
+  }
+
+  async set(data, options = {}) {
+    const current = options.merge ? this.docs.get(this.id) || {} : {};
+    this.docs.set(this.id, {...current, ...data});
+  }
+
+  async update(data) {
+    const current = this.docs.get(this.id) || {};
+    this.docs.set(this.id, {...current, ...data});
+  }
+}
+
+function fakeResponse() {
+  return {
+    statusCode: 200,
+    headers: {},
+    body: undefined,
+    set(name, value) {
+      this.headers[name] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return this;
+    },
+    send(body) {
+      this.body = body;
+      return this;
+    },
+  };
+}
+
+function fakeRequest({
+  method = "POST",
+  body = {},
+  authorization = "Bearer user-token",
+  origin = "https://app.test",
+} = {}) {
+  return {
+    method,
+    body,
+    get(name) {
+      const key = name.toLowerCase();
+      if (key === "authorization") return authorization;
+      if (key === "origin") return origin;
+      return "";
+    },
+  };
+}
+
+test("creates a Paystack checkout session and records the request", async () => {
+  const firestore = new FakeFirestore();
+  let capturedPayload;
+  const fetchImpl = async (url, options) => {
+    assert.equal(url, "https://api.paystack.co/transaction/initialize");
+    capturedPayload = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: true,
+        data: {
+          authorization_url: "https://checkout.paystack.com/test",
+          reference: "paystack-ref-1",
+        },
+      }),
+    };
+  };
+  const handler = createPaystackCheckoutSessionHandler({
+    firestore,
+    fetchImpl,
+    verifyAuthToken: async () => ({
+      uid: "reader-1",
+      email: "Reader@Example.COM",
+    }),
+    getSecretKey: () => "sk_test_paystack",
+    getAmountSubunits: () => "100000",
+    getCurrency: () => "GHS",
+    getAppBaseUrl: () => "https://app.test",
+  });
+  const response = fakeResponse();
+
+  await handler(
+      fakeRequest({
+        body: {
+          data: {
+            message: " Premium access ",
+            successUrl: "https://app.test/success",
+          },
+        },
+      }),
+      response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, {
+    requestId: "user_subscription_requests-1",
+    checkoutUrl: "https://checkout.paystack.com/test",
+  });
+  assert.equal(capturedPayload.email, "reader@example.com");
+  assert.equal(capturedPayload.amount, 100000);
+  assert.equal(capturedPayload.currency, "GHS");
+  assert.equal(capturedPayload.callback_url, "https://app.test/success");
+  assert.deepEqual(capturedPayload.metadata, {
+    subscriptionRequestId: "user_subscription_requests-1",
+    userEmail: "reader@example.com",
+    requestedPlan: "premium",
+    source: "paystack_checkout",
+  });
+  assert.equal(
+      firestore.data("user_subscription_requests", "user_subscription_requests-1")
+          .paystackReference,
+      "paystack-ref-1",
+  );
+});
+
+test("successful Paystack charge approves request and activates access", async () => {
+  const firestore = new FakeFirestore();
+  const fetchImpl = async (url) => {
+    assert.equal(
+        url,
+        "https://api.paystack.co/transaction/verify/paystack-ref-1",
+    );
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: true,
+        data: {
+          status: "success",
+          reference: "paystack-ref-1",
+          paid_at: "2026-06-13T10:00:00.000Z",
+          customer: {
+            email: "reader@example.com",
+            customer_code: "CUS_test",
+          },
+          metadata: {
+            subscriptionRequestId: "request-1",
+            userEmail: "reader@example.com",
+            requestedPlan: "premium",
+          },
+        },
+      }),
+    };
+  };
+
+  await handlePaystackEvent({
+    firestore,
+    fetchImpl,
+    secretKey: "sk_test_paystack",
+    event: {
+      event: "charge.success",
+      data: {
+        reference: "paystack-ref-1",
+      },
+    },
+  });
+
+  assert.equal(
+      firestore.data("user_subscription_requests", "request-1").status,
+      "approved",
+  );
+  assert.equal(
+      firestore.data("user_subscription_requests", "request-1").paymentStatus,
+      "confirmed",
+  );
+  const access = firestore.data("users", "reader@example.com");
+  assert.equal(access.accessLevel, "premium");
+  assert.equal(access.subscriptionStatus, "active");
+  assert.equal(access.subscriptionProvider, "paystack");
+  assert.equal(access.paystackReference, "paystack-ref-1");
+  assert.ok(access.subscriptionExpiresAt instanceof Date);
+});
