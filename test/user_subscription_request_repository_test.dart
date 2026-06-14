@@ -13,6 +13,7 @@ void main() {
       'paymentReference': ' AC-123 ',
       'message': 'I want premium access.',
       'source': 'dashboard',
+      'reviewedByEmail': ' Admin@Example.COM ',
     }, id: ' request-1 ');
 
     expect(request.id, 'request-1');
@@ -27,6 +28,7 @@ void main() {
     expect(request.paymentReference, 'AC-123');
     expect(request.message, 'I want premium access.');
     expect(request.source, 'dashboard');
+    expect(request.reviewedByEmail, 'admin@example.com');
     expect(request.hasMessage, isTrue);
   });
 
@@ -152,5 +154,24 @@ void main() {
     expect(request.isManualProof, isTrue);
     expect(request.isOpenForReview, isTrue);
     expect(request.isManualProofAwaitingReview, isTrue);
+  });
+
+  test('flags reviewed manual proofs for admin audit history', () {
+    final approved = UserSubscriptionRequest.fromMap({
+      'userEmail': 'reader@example.com',
+      'paymentMethod': 'manual',
+      'paymentStatus': 'confirmed',
+      'status': 'approved',
+    }, id: 'approved');
+    final declined = UserSubscriptionRequest.fromMap({
+      'userEmail': 'reader@example.com',
+      'paymentMethod': 'manual',
+      'paymentStatus': 'pending_confirmation',
+      'status': 'declined',
+    }, id: 'declined');
+
+    expect(approved.isReviewedManualProof, isTrue);
+    expect(declined.isReviewedManualProof, isTrue);
+    expect(approved.isManualProofAwaitingReview, isFalse);
   });
 }

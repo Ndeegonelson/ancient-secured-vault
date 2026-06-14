@@ -32,6 +32,7 @@ class UserSubscriptionRequest {
     this.paymentReference = '',
     this.message = '',
     this.source = '',
+    this.reviewedByEmail = '',
     this.createdAt,
     this.updatedAt,
   });
@@ -54,6 +55,7 @@ class UserSubscriptionRequest {
       ),
       message: _readText(data['message']),
       source: _readText(data['source']),
+      reviewedByEmail: emailDocumentId(data['reviewedByEmail']?.toString()),
       createdAt: data['createdAt'],
       updatedAt: data['updatedAt'],
     );
@@ -68,6 +70,7 @@ class UserSubscriptionRequest {
   final String paymentReference;
   final String message;
   final String source;
+  final String reviewedByEmail;
   final dynamic createdAt;
   final dynamic updatedAt;
 
@@ -82,6 +85,10 @@ class UserSubscriptionRequest {
       isManualProof &&
       isOpenForReview &&
       paymentStatus == UserSubscriptionPaymentStatus.pendingConfirmation;
+  bool get isReviewedManualProof =>
+      isManualProof &&
+      (status == UserSubscriptionRequestStatus.approved ||
+          status == UserSubscriptionRequestStatus.declined);
 
   static List<UserSubscriptionRequest> sortNewest(
     Iterable<UserSubscriptionRequest> requests,
@@ -161,6 +168,7 @@ abstract interface class UserSubscriptionRequestStore {
   Future<void> updateStatus({
     required String requestId,
     required UserSubscriptionRequestStatus status,
+    String? changedByEmail,
   });
 
   Future<void> updatePaymentStatus({
@@ -233,14 +241,18 @@ class UserSubscriptionRequestRepository
   Future<void> updateStatus({
     required String requestId,
     required UserSubscriptionRequestStatus status,
+    String? changedByEmail,
   }) {
     final documentId = requestId.trim();
     if (documentId.isEmpty) {
       throw ArgumentError('A subscription request id is required.');
     }
 
+    final normalizedChangedByEmail = emailDocumentId(changedByEmail);
     return _collection.doc(documentId).update({
       'status': userSubscriptionRequestStatusKey(status),
+      if (normalizedChangedByEmail.isNotEmpty)
+        'reviewedByEmail': normalizedChangedByEmail,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

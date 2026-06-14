@@ -1,0 +1,214 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email is string;
+    }
+
+    function userEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(userEmail());
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        exists(userDocPath()) &&
+        get(userDocPath()).data.role == 'admin';
+    }
+
+    function isOwnerEmail(value) {
+      return signedIn() && value is string && value.lower() == userEmail();
+    }
+
+    function ownsExistingDocument() {
+      return isOwnerEmail(resource.data.userEmail);
+    }
+
+    function ownsNewDocument() {
+      return isOwnerEmail(request.resource.data.userEmail);
+    }
+
+    function ownerRead() {
+      return isAdmin() || ownsExistingDocument();
+    }
+
+    function ownerCreate() {
+      return isAdmin() || ownsNewDocument();
+    }
+
+    function ownerUpdate() {
+      return isAdmin() || (ownsExistingDocument() && ownsNewDocument());
+    }
+
+    function ownerDelete() {
+      return isAdmin() || ownsExistingDocument();
+    }
+
+    function pendingManualProof() {
+      return request.resource.data.paymentMethod == 'manual' &&
+        request.resource.data.paymentStatus == 'pending_confirmation' &&
+        request.resource.data.status == 'open';
+    }
+
+    function safeDeviceOwnerCreate() {
+      return ownsNewDocument() &&
+        request.resource.data.deviceId is string &&
+        (!request.resource.data.keys().hasAny(['status']) ||
+          request.resource.data.status == 'pending') &&
+        (!request.resource.data.keys().hasAny(['isTrusted']) ||
+          request.resource.data.isTrusted == false) &&
+        (!request.resource.data.keys().hasAny(['isBlocked']) ||
+          request.resource.data.isBlocked == false);
+    }
+
+    function safeDeviceOwnerUpdate() {
+      return ownsExistingDocument() &&
+        ownsNewDocument() &&
+        request.resource.data.status == resource.data.status &&
+        request.resource.data.isTrusted == resource.data.isTrusted &&
+        request.resource.data.isBlocked == resource.data.isBlocked &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'deviceId',
+          'email',
+          'deviceLabel',
+          'platform',
+          'lastDocumentTitle',
+          'lastOpenSource',
+          'lastSeenAt',
+        ]);
+    }
+
+    match /users/{userId} {
+      allow get: if isAdmin() || (signedIn() && userId == userEmail());
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /user_subscription_requests/{requestId} {
+      allow get, list: if ownerRead();
+      allow create: if ownsNewDocument() && (
+        pendingManualProof() ||
+        request.resource.data.status == 'open'
+      );
+      allow update, delete: if isAdmin();
+    }
+
+    match /user_subscription_audit_logs/{logId} {
+      allow get, list, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /user_access_audit_logs/{logId} {
+      allow get, list, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /user_device_authorizations/{deviceId} {
+      allow get, list: if ownerRead();
+      allow create: if isAdmin() || safeDeviceOwnerCreate();
+      allow update: if isAdmin() || safeDeviceOwnerUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /user_device_authorization_audit_logs/{logId} {
+      allow get, list, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /reader_announcements/{announcementId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /reader_suggestions/{suggestionId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update, delete: if isAdmin();
+    }
+
+    match /reader_notes/{noteId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update: if ownerUpdate();
+      allow delete: if ownerDelete();
+    }
+
+    match /reader_highlights/{highlightId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update: if ownerUpdate();
+      allow delete: if ownerDelete();
+    }
+
+    match /reader_bookmarks/{bookmarkId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update: if ownerUpdate();
+      allow delete: if ownerDelete();
+    }
+
+    match /reading_positions/{positionId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update: if ownerUpdate();
+      allow delete: if ownerDelete();
+    }
+
+    match /reader_narration_preferences/{preferenceId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update: if ownerUpdate();
+      allow delete: if ownerDelete();
+    }
+
+    match /reader_narration_progress/{progressId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update: if ownerUpdate();
+      allow delete: if ownerDelete();
+    }
+
+    match /reader_narration_sessions/{sessionId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update: if ownerUpdate();
+      allow delete: if ownerDelete();
+    }
+
+    match /reader_access_logs/{logId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update, delete: if false;
+    }
+
+    match /reader_activity_logs/{logId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update, delete: if false;
+    }
+
+    match /reader_session_logs/{logId} {
+      allow get, list: if ownerRead();
+      allow create: if ownerCreate();
+      allow update, delete: if false;
+    }
+
+    match /pdf_search_index/{documentId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /cloud_narration_usage/{usageId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

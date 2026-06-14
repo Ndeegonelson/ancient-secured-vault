@@ -1023,6 +1023,11 @@ class _DashboardAdminOverview {
     ),
   );
 
+  List<UserSubscriptionRequest> get reviewedManualProofRequests =>
+      List.unmodifiable(
+        subscriptionRequests.where((request) => request.isReviewedManualProof),
+      );
+
   int get manualProofReviewCount => manualProofRequests.length;
 }
 
@@ -1075,9 +1080,26 @@ class _ReaderDashboardOverview {
         request.status == UserSubscriptionRequestStatus.open ||
         request.status == UserSubscriptionRequestStatus.reviewing,
   );
+  List<UserSubscriptionRequest> get manualProofRequests => List.unmodifiable(
+    subscriptionRequests.where((request) => request.isManualProof),
+  );
+  UserSubscriptionRequest? get latestManualProofRequest {
+    for (final request in subscriptionRequests) {
+      if (request.isManualProof) return request;
+    }
+    return null;
+  }
 }
 
 enum _AdminAttentionTone { danger, warning, info, success }
+
+enum _PaymentProofFilter {
+  pendingAdminApproval,
+  manualPaymentList,
+  stripePaymentList,
+  paystackPaymentList,
+  allPaymentList,
+}
 
 class _AdminAttentionItem {
   const _AdminAttentionItem({
@@ -1340,13 +1362,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
-    final records = await readerActivityRepository.listRecentRecords(limit: 80);
-    final normalizedEmail = userEmail.toLowerCase();
-    final userRecords = records
-        .where(
-          (record) => record.userEmail.trim().toLowerCase() == normalizedEmail,
-        )
-        .toList(growable: false);
+    final userRecords = await readerActivityRepository.listRecentRecordsForUser(
+      userEmail: userEmail,
+      limit: 80,
+    );
 
     final savedPositions = await savedPositionRepository.listForUser(
       userEmail: userEmail,
@@ -6270,11 +6289,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       items.add(
         _AdminAttentionItem(
           icon: Icons.receipt_long_outlined,
-          title: 'Manual payment proofs pending',
+          title: 'All payment proofs',
           detail:
-              '${_pluralize(overview.manualProofReviewCount, 'proof needs', 'proofs need')} admin verification before premium access is activated.',
+              '${_pluralize(overview.manualProofReviewCount, 'manual payment proof needs', 'manual payment proofs need')} admin approval. Use the payment manager to filter manual, Stripe, Paystack, pending, or all records.',
           tone: _AdminAttentionTone.warning,
-          actionLabel: 'Review proofs',
+          actionLabel: 'Open payment proofs',
           onPressed: showSubscriptionRequestInbox,
         ),
       );
@@ -6777,13 +6796,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   final count = overview?.manualProofReviewCount;
                   return buildAdminMetricTile(
                     icon: Icons.receipt_long_outlined,
-                    label: 'Manual proofs',
+                    label: 'Payment proofs',
                     value: count?.toString() ?? '...',
                     detail: overview == null
-                        ? 'Loading payment proof queue'
+                        ? 'Loading payment proof manager'
                         : count == 0
-                        ? 'No manual payments pending'
-                        : '$count awaiting admin approval',
+                        ? 'All payment records ready'
+                        : '$count manual pending approval',
                     color: count == null || count == 0
                         ? Colors.white54
                         : Colors.orangeAccent,
@@ -7313,13 +7332,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String title,
     required String subtitle,
     IconData icon = Icons.chevron_right,
+    Color iconColor = Colors.greenAccent,
     VoidCallback? onTap,
   }) {
     return ListTile(
       dense: true,
       contentPadding: EdgeInsets.zero,
       onTap: onTap,
-      leading: Icon(icon, color: Colors.greenAccent, size: 20),
+      leading: Icon(icon, color: iconColor, size: 20),
       title: Text(
         title,
         maxLines: 1,
@@ -7355,11 +7375,174 @@ class _DashboardScreenState extends State<DashboardScreen> {
     };
   }
 
+  IconData subscriptionRequestIcon(UserSubscriptionRequest request) {
+    if (request.isManualProof) {
+      return switch (request.status) {
+        UserSubscriptionRequestStatus.approved => Icons.verified_outlined,
+        UserSubscriptionRequestStatus.declined => Icons.cancel_outlined,
+        _ => Icons.receipt_long_outlined,
+      };
+    }
+
+    return switch (request.paymentMethod) {
+      UserSubscriptionPaymentMethod.stripe => Icons.credit_card_outlined,
+      UserSubscriptionPaymentMethod.paystack =>
+        Icons.account_balance_wallet_outlined,
+      UserSubscriptionPaymentMethod.ancientCoin => Icons.token_outlined,
+      UserSubscriptionPaymentMethod.manual => Icons.receipt_long_outlined,
+    };
+  }
+
+  Color subscriptionRequestColor(UserSubscriptionRequest request) {
+    if (request.status == UserSubscriptionRequestStatus.declined ||
+        request.paymentStatus == UserSubscriptionPaymentStatus.failed) {
+      return Colors.redAccent;
+    }
+    if (request.status == UserSubscriptionRequestStatus.approved ||
+        request.paymentStatus == UserSubscriptionPaymentStatus.confirmed) {
+      return Colors.greenAccent;
+    }
+    if (request.paymentStatus == UserSubscriptionPaymentStatus.refunded) {
+      return Colors.lightBlueAccent;
+    }
+    return Colors.orangeAccent;
+  }
+
+  String subscriptionRequestTitle(UserSubscriptionRequest request) {
+    if (request.isManualProof) {
+      return switch (request.status) {
+        UserSubscriptionRequestStatus.approved => 'Manual proof approved',
+        UserSubscriptionRequestStatus.declined => 'Manual proof declined',
+        UserSubscriptionRequestStatus.archived => 'Manual proof archived',
+        _ => 'Manual proof pending review',
+      };
+    }
+
+    final method = userSubscriptionPaymentMethodLabel(request.paymentMethod);
+    return '$method subscription ${userSubscriptionRequestStatusLabel(request.status).toLowerCase()}';
+  }
+
+  String subscriptionRequestSubtitle(UserSubscriptionRequest request) {
+    final parts = [
+      'Plan: ${request.requestedPlan}',
+      userSubscriptionPaymentStatusLabel(request.paymentStatus),
+      if (request.paymentReference.isNotEmpty)
+        'Ref: ${request.paymentReference}',
+      if (request.reviewedByEmail.isNotEmpty)
+        'Reviewed by ${request.reviewedByEmail}',
+      if (request.message.isNotEmpty) request.message,
+      formatDashboardTimestamp(request.latestTimestamp),
+    ].where((part) => part.trim().isNotEmpty);
+
+    return parts.join(' | ');
+  }
+
+  String readerSubscriptionDashboardDetail(_ReaderDashboardOverview overview) {
+    final latestManualProof = overview.latestManualProofRequest;
+    if (latestManualProof != null) {
+      return switch (latestManualProof.status) {
+        UserSubscriptionRequestStatus.approved => 'Manual proof approved',
+        UserSubscriptionRequestStatus.declined => 'Manual proof declined',
+        UserSubscriptionRequestStatus.archived => 'Manual proof archived',
+        _ => 'Manual proof pending admin review',
+      };
+    }
+
+    if (overview.hasOpenSubscriptionRequest) {
+      return 'Subscription request awaiting review';
+    }
+
+    return readerSubscriptionDetail();
+  }
+
+  String paymentProofFilterLabel(_PaymentProofFilter filter) {
+    return switch (filter) {
+      _PaymentProofFilter.manualPaymentList => 'Manual payment list',
+      _PaymentProofFilter.pendingAdminApproval => 'Pending admin approval',
+      _PaymentProofFilter.stripePaymentList => 'Stripe payment list',
+      _PaymentProofFilter.paystackPaymentList => 'Paystack payment list',
+      _PaymentProofFilter.allPaymentList => 'All payment list',
+    };
+  }
+
+  String paymentProofFilterDetail(_PaymentProofFilter filter) {
+    return switch (filter) {
+      _PaymentProofFilter.manualPaymentList =>
+        'Only manual payment proof submissions.',
+      _PaymentProofFilter.pendingAdminApproval =>
+        'Manual proofs that still need an admin approve or decline decision.',
+      _PaymentProofFilter.stripePaymentList =>
+        'Stripe checkout and subscription payment records.',
+      _PaymentProofFilter.paystackPaymentList =>
+        'Paystack checkout and subscription payment records.',
+      _PaymentProofFilter.allPaymentList =>
+        'Every payment proof and subscription payment record.',
+    };
+  }
+
+  IconData paymentProofFilterIcon(_PaymentProofFilter filter) {
+    return switch (filter) {
+      _PaymentProofFilter.manualPaymentList => Icons.receipt_long_outlined,
+      _PaymentProofFilter.pendingAdminApproval =>
+        Icons.pending_actions_outlined,
+      _PaymentProofFilter.stripePaymentList => Icons.credit_card_outlined,
+      _PaymentProofFilter.paystackPaymentList =>
+        Icons.account_balance_wallet_outlined,
+      _PaymentProofFilter.allPaymentList => Icons.payments_outlined,
+    };
+  }
+
+  Color paymentProofFilterColor(_PaymentProofFilter filter) {
+    return switch (filter) {
+      _PaymentProofFilter.manualPaymentList => Colors.lightBlueAccent,
+      _PaymentProofFilter.pendingAdminApproval => Colors.orangeAccent,
+      _PaymentProofFilter.stripePaymentList => Colors.deepPurpleAccent,
+      _PaymentProofFilter.paystackPaymentList => Colors.greenAccent,
+      _PaymentProofFilter.allPaymentList => Colors.cyanAccent,
+    };
+  }
+
+  List<UserSubscriptionRequest> filterPaymentProofRequests(
+    List<UserSubscriptionRequest> requests,
+    _PaymentProofFilter filter,
+  ) {
+    return switch (filter) {
+      _PaymentProofFilter.manualPaymentList =>
+        requests
+            .where(
+              (request) =>
+                  request.paymentMethod == UserSubscriptionPaymentMethod.manual,
+            )
+            .toList(growable: false),
+      _PaymentProofFilter.pendingAdminApproval =>
+        requests
+            .where((request) => request.isManualProofAwaitingReview)
+            .toList(growable: false),
+      _PaymentProofFilter.stripePaymentList =>
+        requests
+            .where(
+              (request) =>
+                  request.paymentMethod == UserSubscriptionPaymentMethod.stripe,
+            )
+            .toList(growable: false),
+      _PaymentProofFilter.paystackPaymentList =>
+        requests
+            .where(
+              (request) =>
+                  request.paymentMethod ==
+                  UserSubscriptionPaymentMethod.paystack,
+            )
+            .toList(growable: false),
+      _PaymentProofFilter.allPaymentList => List.unmodifiable(requests),
+    };
+  }
+
   Future<void> showSubscriptionRequestInbox() async {
     if (!requireVaultManagerAccess()) return;
 
     var requestsFuture = subscriptionRequestRepository.listRecent(limit: 50);
     String? busyRequestId;
+    var paymentProofFilter = _PaymentProofFilter.pendingAdminApproval;
 
     await showDialog<void>(
       context: context,
@@ -7384,6 +7567,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   await subscriptionRequestRepository.updateStatus(
                     requestId: request.id,
                     status: status,
+                    changedByEmail: FirebaseAuth.instance.currentUser?.email,
                   );
                 }
                 if (!mounted) return;
@@ -7562,6 +7746,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 request.message,
                               ),
                               requestDetailLine(
+                                'Reviewed by',
+                                request.reviewedByEmail,
+                              ),
+                              requestDetailLine(
                                 'Submitted',
                                 formatDashboardTimestamp(
                                   request.latestTimestamp,
@@ -7621,11 +7809,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: AlertDialog(
                 backgroundColor: const Color(0xFF0F1117),
                 title: const Text(
-                  'Subscription Requests',
+                  'All Payment Proofs',
                   style: TextStyle(color: Colors.greenAccent),
                 ),
                 content: SizedBox(
-                  width: 660,
+                  width: 760,
+                  height: MediaQuery.of(context).size.height * 0.72,
                   child: FutureBuilder<List<UserSubscriptionRequest>>(
                     future: requestsFuture,
                     builder: (context, snapshot) {
@@ -7658,220 +7847,595 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }
 
-                      final manualReviewCount = requests.where((request) {
-                        return request.paymentMethod ==
-                                UserSubscriptionPaymentMethod.manual &&
-                            request.status !=
-                                UserSubscriptionRequestStatus.approved &&
-                            request.status !=
-                                UserSubscriptionRequestStatus.declined &&
-                            request.status !=
-                                UserSubscriptionRequestStatus.archived;
-                      }).length;
+                      final manualReviewCount = requests
+                          .where(
+                            (request) => request.isManualProofAwaitingReview,
+                          )
+                          .length;
+                      final filteredRequests = filterPaymentProofRequests(
+                        requests,
+                        paymentProofFilter,
+                      );
+                      final filterColor = paymentProofFilterColor(
+                        paymentProofFilter,
+                      );
 
-                      return SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (manualReviewCount > 0) ...[
-                              Container(
-                                width: double.infinity,
-                                margin: const EdgeInsets.only(bottom: 12),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.amberAccent.withValues(
-                                    alpha: 0.08,
-                                  ),
-                                  border: Border.all(
-                                    color: Colors.amberAccent.withValues(
-                                      alpha: 0.55,
-                                    ),
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
+                      Widget requestSectionHeader(
+                        String title,
+                        String detail,
+                        IconData icon,
+                        Color color,
+                      ) {
+                        return Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(top: 12, bottom: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: color.withValues(alpha: 0.28),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(icon, color: color, size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Icon(
-                                      Icons.receipt_long_outlined,
-                                      color: Colors.amberAccent,
-                                      size: 20,
+                                    Text(
+                                      title,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        '$manualReviewCount manual payment proof ${manualReviewCount == 1 ? 'request needs' : 'requests need'} admin verification before premium access is activated.',
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                          height: 1.35,
-                                        ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      detail,
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
                             ],
-                            ...requests.map((request) {
-                              final isBusy = busyRequestId == request.id;
-                              final isManualProof =
-                                  request.paymentMethod ==
-                                  UserSubscriptionPaymentMethod.manual;
-                              final isManualReviewPending =
-                                  isManualProof &&
-                                  request.status !=
-                                      UserSubscriptionRequestStatus.approved &&
-                                  request.status !=
-                                      UserSubscriptionRequestStatus.declined &&
-                                  request.status !=
-                                      UserSubscriptionRequestStatus.archived;
-                              return ListTile(
-                                onTap: () => showRequestReviewDetails(request),
-                                isThreeLine: true,
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(
-                                  isManualProof
-                                      ? Icons.receipt_long_outlined
-                                      : Icons.workspace_premium_outlined,
-                                  color: subscriptionPaymentStatusColor(
-                                    request.paymentStatus,
+                          ),
+                        );
+                      }
+
+                      Widget requestChip(
+                        String label,
+                        Color color, {
+                        IconData? icon,
+                      }) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: color.withValues(alpha: 0.42),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (icon != null) ...[
+                                Icon(icon, color: color, size: 13),
+                                const SizedBox(width: 4),
+                              ],
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      Widget requestField({
+                        required String label,
+                        required String value,
+                        int maxLines = 2,
+                      }) {
+                        final cleanValue = value.trim();
+                        if (cleanValue.isEmpty) return const SizedBox.shrink();
+
+                        return Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(top: 7),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 86,
+                                child: Text(
+                                  label,
+                                  style: const TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                title: Text(
-                                  request.userEmail,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Colors.white70),
+                              ),
+                              Expanded(
+                                child: SelectableText(
+                                  cleanValue,
+                                  maxLines: maxLines,
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                    height: 1.3,
+                                  ),
                                 ),
-                                subtitle: Text(
-                                  [
-                                    'Plan: ${request.requestedPlan}',
-                                    if (isManualReviewPending)
-                                      'Manual proof awaiting admin verification',
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      Widget requestTile(UserSubscriptionRequest request) {
+                        final isBusy = busyRequestId == request.id;
+                        final isManualReviewPending =
+                            request.isManualProofAwaitingReview;
+                        final color = subscriptionRequestColor(request);
+                        final reference = request.paymentReference.trim();
+                        final note = request.message.trim();
+
+                        return Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF151821),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: color.withValues(alpha: 0.38),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 34,
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      color: color.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      subscriptionRequestIcon(request),
+                                      color: color,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          request.userEmail,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          subscriptionRequestTitle(request),
+                                          style: TextStyle(
+                                            color: color,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isBusy)
+                                    const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.greenAccent,
+                                      ),
+                                    )
+                                  else
+                                    PopupMenuButton<Object>(
+                                      tooltip: 'Update request status',
+                                      color: const Color(0xFF1A1D25),
+                                      icon: const Icon(
+                                        Icons.more_vert,
+                                        color: Colors.white70,
+                                      ),
+                                      onSelected: (value) {
+                                        if (value
+                                            is UserSubscriptionRequestStatus) {
+                                          updateRequestStatus(request, value);
+                                          return;
+                                        }
+                                        if (value
+                                            is UserSubscriptionPaymentStatus) {
+                                          updatePaymentStatus(request, value);
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem<Object>(
+                                          enabled: false,
+                                          child: Text(
+                                            'Request status',
+                                            style: TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                        ...UserSubscriptionRequestStatus.values
+                                            .where(
+                                              (status) =>
+                                                  status != request.status,
+                                            )
+                                            .map(
+                                              (status) => PopupMenuItem<Object>(
+                                                value: status,
+                                                child: Text(
+                                                  request.isManualProof &&
+                                                          status ==
+                                                              UserSubscriptionRequestStatus
+                                                                  .approved
+                                                      ? 'Approve proof and activate premium'
+                                                      : userSubscriptionRequestStatusLabel(
+                                                          status,
+                                                        ),
+                                                  style: const TextStyle(
+                                                    color: Colors.white70,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                        const PopupMenuDivider(),
+                                        const PopupMenuItem<Object>(
+                                          enabled: false,
+                                          child: Text(
+                                            'Payment status',
+                                            style: TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                        ...UserSubscriptionPaymentStatus.values
+                                            .where(
+                                              (status) =>
+                                                  status !=
+                                                  request.paymentStatus,
+                                            )
+                                            .map(
+                                              (status) => PopupMenuItem<Object>(
+                                                value: status,
+                                                child: Text(
+                                                  userSubscriptionPaymentStatusLabel(
+                                                    status,
+                                                  ),
+                                                  style: const TextStyle(
+                                                    color: Colors.white70,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                      ],
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  requestChip(
                                     userSubscriptionPaymentMethodLabel(
                                       request.paymentMethod,
                                     ),
-                                    userSubscriptionPaymentStatusLabel(
-                                      request.paymentStatus,
-                                    ),
+                                    Colors.lightBlueAccent,
+                                    icon: Icons.payments_outlined,
+                                  ),
+                                  requestChip(
                                     userSubscriptionRequestStatusLabel(
                                       request.status,
                                     ),
-                                    if (request.paymentReference.isNotEmpty)
-                                      'Ref: ${request.paymentReference}',
-                                    if (request.message.isNotEmpty)
-                                      request.message,
-                                    formatDashboardTimestamp(
-                                      request.latestTimestamp,
-                                    ),
-                                  ].join(' | '),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white38,
-                                    fontSize: 12,
+                                    color,
+                                    icon: Icons.fact_check_outlined,
                                   ),
+                                  requestChip(
+                                    userSubscriptionPaymentStatusLabel(
+                                      request.paymentStatus,
+                                    ),
+                                    subscriptionPaymentStatusColor(
+                                      request.paymentStatus,
+                                    ),
+                                    icon: Icons.receipt_long_outlined,
+                                  ),
+                                ],
+                              ),
+                              requestField(
+                                label: 'Plan',
+                                value: request.requestedPlan,
+                                maxLines: 1,
+                              ),
+                              requestField(
+                                label: 'Reference',
+                                value: reference,
+                                maxLines: request.isManualProof ? 3 : 2,
+                              ),
+                              requestField(
+                                label: 'Note',
+                                value: note,
+                                maxLines: 3,
+                              ),
+                              requestField(
+                                label: 'Reviewed',
+                                value: request.reviewedByEmail,
+                                maxLines: 1,
+                              ),
+                              requestField(
+                                label: 'Updated',
+                                value: formatDashboardTimestamp(
+                                  request.latestTimestamp,
                                 ),
-                                trailing: isBusy
-                                    ? const SizedBox(
-                                        width: 24,
-                                        height: 24,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.greenAccent,
-                                        ),
-                                      )
-                                    : PopupMenuButton<Object>(
-                                        tooltip: 'Update request status',
-                                        color: const Color(0xFF1A1D25),
-                                        icon: const Icon(
-                                          Icons.more_vert,
+                                maxLines: 1,
+                              ),
+                              if (isManualReviewPending) ...[
+                                const SizedBox(height: 10),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    TextButton.icon(
+                                      onPressed: isBusy
+                                          ? null
+                                          : () => updateRequestStatus(
+                                              request,
+                                              UserSubscriptionRequestStatus
+                                                  .declined,
+                                            ),
+                                      icon: const Icon(
+                                        Icons.cancel_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('Decline'),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.redAccent,
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    TextButton.icon(
+                                      onPressed: isBusy
+                                          ? null
+                                          : () => updateRequestStatus(
+                                              request,
+                                              UserSubscriptionRequestStatus
+                                                  .approved,
+                                            ),
+                                      icon: const Icon(
+                                        Icons.verified_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text('Approve'),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.greenAccent,
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child:
+                                      DropdownButtonFormField<
+                                        _PaymentProofFilter
+                                      >(
+                                        initialValue: paymentProofFilter,
+                                        dropdownColor: const Color(0xFF1A1D25),
+                                        iconEnabledColor: Colors.greenAccent,
+                                        style: const TextStyle(
                                           color: Colors.white70,
                                         ),
-                                        onSelected: (value) {
-                                          if (value
-                                              is UserSubscriptionRequestStatus) {
-                                            updateRequestStatus(request, value);
-                                            return;
-                                          }
-                                          if (value
-                                              is UserSubscriptionPaymentStatus) {
-                                            updatePaymentStatus(request, value);
-                                          }
+                                        decoration: const InputDecoration(
+                                          labelText: 'Sort payment proofs',
+                                          labelStyle: TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderSide: BorderSide(
+                                              color: Colors.white24,
+                                            ),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderSide: BorderSide(
+                                              color: Colors.greenAccent,
+                                            ),
+                                          ),
+                                        ),
+                                        items: _PaymentProofFilter.values
+                                            .map((filter) {
+                                              return DropdownMenuItem(
+                                                value: filter,
+                                                child: Text(
+                                                  paymentProofFilterLabel(
+                                                    filter,
+                                                  ),
+                                                ),
+                                              );
+                                            })
+                                            .toList(growable: false),
+                                        onChanged: (value) {
+                                          setDialogState(() {
+                                            paymentProofFilter =
+                                                value ??
+                                                _PaymentProofFilter
+                                                    .pendingAdminApproval;
+                                          });
                                         },
-                                        itemBuilder: (context) => [
-                                          const PopupMenuItem<Object>(
-                                            enabled: false,
-                                            child: Text(
-                                              'Request status',
-                                              style: TextStyle(
-                                                color: Colors.white38,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                          ...UserSubscriptionRequestStatus
-                                              .values
-                                              .where(
-                                                (status) =>
-                                                    status != request.status,
-                                              )
-                                              .map(
-                                                (
-                                                  status,
-                                                ) => PopupMenuItem<Object>(
-                                                  value: status,
-                                                  child: Text(
-                                                    isManualProof &&
-                                                            status ==
-                                                                UserSubscriptionRequestStatus
-                                                                    .approved
-                                                        ? 'Approve proof and activate premium'
-                                                        : userSubscriptionRequestStatusLabel(
-                                                            status,
-                                                          ),
-                                                    style: const TextStyle(
-                                                      color: Colors.white70,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                          const PopupMenuDivider(),
-                                          const PopupMenuItem<Object>(
-                                            enabled: false,
-                                            child: Text(
-                                              'Payment status',
-                                              style: TextStyle(
-                                                color: Colors.white38,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                          ...UserSubscriptionPaymentStatus
-                                              .values
-                                              .where(
-                                                (status) =>
-                                                    status !=
-                                                    request.paymentStatus,
-                                              )
-                                              .map(
-                                                (
-                                                  status,
-                                                ) => PopupMenuItem<Object>(
-                                                  value: status,
-                                                  child: Text(
-                                                    userSubscriptionPaymentStatusLabel(
-                                                      status,
-                                                    ),
-                                                    style: const TextStyle(
-                                                      color: Colors.white70,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                        ],
                                       ),
-                              );
-                            }),
+                                ),
+                                const SizedBox(width: 12),
+                                Container(
+                                  width: 150,
+                                  padding: const EdgeInsets.all(11),
+                                  decoration: BoxDecoration(
+                                    color: filterColor.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: filterColor.withValues(
+                                        alpha: 0.36,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        paymentProofFilterIcon(
+                                          paymentProofFilter,
+                                        ),
+                                        color: filterColor,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        filteredRequests.length.toString(),
+                                        style: TextStyle(
+                                          color: filterColor,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const Text(
+                                        'records shown',
+                                        style: TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: filterColor.withValues(alpha: 0.08),
+                                border: Border.all(
+                                  color: filterColor.withValues(alpha: 0.34),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    paymentProofFilterIcon(paymentProofFilter),
+                                    color: filterColor,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          paymentProofFilterLabel(
+                                            paymentProofFilter,
+                                          ),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          paymentProofFilterDetail(
+                                            paymentProofFilter,
+                                          ),
+                                          style: const TextStyle(
+                                            color: Colors.white60,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                        if (manualReviewCount > 0 &&
+                                            paymentProofFilter !=
+                                                _PaymentProofFilter
+                                                    .pendingAdminApproval) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            '$manualReviewCount manual payment proof ${manualReviewCount == 1 ? 'still needs' : 'still need'} admin approval.',
+                                            style: const TextStyle(
+                                              color: Colors.orangeAccent,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            requestSectionHeader(
+                              paymentProofFilterLabel(paymentProofFilter),
+                              '${filteredRequests.length} ${filteredRequests.length == 1 ? 'record' : 'records'} in this view.',
+                              paymentProofFilterIcon(paymentProofFilter),
+                              filterColor,
+                            ),
+                            if (filteredRequests.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 18),
+                                child: Text(
+                                  'No payment records match this filter.',
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              )
+                            else
+                              ...filteredRequests.map(requestTile),
                           ],
                         ),
                       );
@@ -8933,7 +9497,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: Icons.workspace_premium_outlined,
                               label: 'Subscription',
                               value: userAccess.subscriptionStatusLabel,
-                              detail: readerSubscriptionDetail(),
+                              detail: readerSubscriptionDashboardDetail(
+                                overview,
+                              ),
                               color: userAccess.canAccessMainVault
                                   ? Colors.greenAccent
                                   : Colors.orangeAccent,
@@ -9027,8 +9593,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ? Icons.verified_outlined
                                   : Icons.lock_open_outlined,
                               title: userAccess.subscriptionStatusLabel,
-                              subtitle: readerSubscriptionDetail(),
+                              subtitle: readerSubscriptionDashboardDetail(
+                                overview,
+                              ),
+                              iconColor: userAccess.canAccessMainVault
+                                  ? Colors.greenAccent
+                                  : Colors.orangeAccent,
                             ),
+                            if (overview.latestManualProofRequest != null)
+                              buildReaderDashboardItem(
+                                icon: subscriptionRequestIcon(
+                                  overview.latestManualProofRequest!,
+                                ),
+                                iconColor: subscriptionRequestColor(
+                                  overview.latestManualProofRequest!,
+                                ),
+                                title: subscriptionRequestTitle(
+                                  overview.latestManualProofRequest!,
+                                ),
+                                subtitle: subscriptionRequestSubtitle(
+                                  overview.latestManualProofRequest!,
+                                ),
+                              ),
                             if (userAccess.subscriptionProviderLabel.isNotEmpty)
                               buildReaderDashboardItem(
                                 icon: Icons.account_balance_wallet_outlined,
@@ -9072,25 +9658,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               request,
                             ) {
                               return buildReaderDashboardItem(
-                                icon: Icons.receipt_long_outlined,
-                                title:
-                                    '${userSubscriptionRequestStatusLabel(request.status)} request',
-                                subtitle: [
-                                  'Plan: ${request.requestedPlan}',
-                                  userSubscriptionPaymentMethodLabel(
-                                    request.paymentMethod,
-                                  ),
-                                  userSubscriptionPaymentStatusLabel(
-                                    request.paymentStatus,
-                                  ),
-                                  if (request.paymentReference.isNotEmpty)
-                                    'Ref: ${request.paymentReference}',
-                                  if (request.message.isNotEmpty)
-                                    request.message,
-                                  formatDashboardTimestamp(
-                                    request.latestTimestamp,
-                                  ),
-                                ].join(' | '),
+                                icon: subscriptionRequestIcon(request),
+                                iconColor: subscriptionRequestColor(request),
+                                title: subscriptionRequestTitle(request),
+                                subtitle: subscriptionRequestSubtitle(request),
                               );
                             }),
                           ],

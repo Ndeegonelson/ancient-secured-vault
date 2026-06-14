@@ -231,10 +231,54 @@ class ReaderActivityRepository implements ReaderActivityLogStore {
     );
   }
 
+  Future<List<ReaderActivityRecord>> listRecentRecordsForUser({
+    required String userEmail,
+    int limit = 50,
+  }) async {
+    final normalizedEmail = userEmail.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) return const [];
+
+    final safeLimit = limit < 1 ? 1 : limit;
+    final snapshots = await Future.wait([
+      _userQuery('reader_access_logs', normalizedEmail, safeLimit).get(),
+      _userQuery('reader_activity_logs', normalizedEmail, safeLimit).get(),
+      _userQuery('reader_session_logs', normalizedEmail, safeLimit).get(),
+    ]);
+
+    final records = <ReaderActivityRecord>[
+      ...snapshots[0].docs.map(
+        (doc) => ReaderActivityRecord.fromAccessLog(doc.data(), id: doc.id),
+      ),
+      ...snapshots[1].docs.map(
+        (doc) => ReaderActivityRecord.fromActionLog(doc.data(), id: doc.id),
+      ),
+      ...snapshots[2].docs.map(
+        (doc) => ReaderActivityRecord.fromSessionLog(doc.data(), id: doc.id),
+      ),
+    ];
+
+    return List.unmodifiable(
+      const ReaderActivityAnalytics()
+          .summarize(records, recentLimit: records.length)
+          .recentRecords,
+    );
+  }
+
   Query<Map<String, dynamic>> _recentQuery(String collection, int limit) {
     return _firestore
         .collection(collection)
         .orderBy('createdAt', descending: true)
+        .limit(limit);
+  }
+
+  Query<Map<String, dynamic>> _userQuery(
+    String collection,
+    String userEmail,
+    int limit,
+  ) {
+    return _firestore
+        .collection(collection)
+        .where('userEmail', isEqualTo: userEmail)
         .limit(limit);
   }
 }
