@@ -7749,6 +7749,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return readerSubscriptionDetail();
   }
 
+  bool canOpenReaderSubscriptionAction() {
+    if (userAccess.canManageStripeBilling &&
+        userAccess.stripeAttentionLabel != null) {
+      return true;
+    }
+
+    return !userAccess.canAccessMainVault || userAccess.isSubscriptionExpired;
+  }
+
+  VoidCallback? readerSubscriptionAction() {
+    if (!canOpenReaderSubscriptionAction()) return null;
+
+    return userAccess.canManageStripeBilling
+        ? showManageStripeSubscriptionDialog
+        : showSubscriptionRequestDialog;
+  }
+
+  String readerSubscriptionActionLabel() {
+    if (canOpenReaderSubscriptionAction()) return 'Subscription';
+    return 'Active';
+  }
+
   String paymentProofFilterLabel(_PaymentProofFilter filter) {
     return switch (filter) {
       _PaymentProofFilter.manualPaymentList => 'Manual payment list',
@@ -9717,6 +9739,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required UserSubscriptionPaymentMethod paymentMethod,
     String paymentReference = '',
   }) async {
+    if (!canOpenReaderSubscriptionAction()) {
+      throw StateError(
+        'Premium access is already active. Renewals open after the current access expires.',
+      );
+    }
+
     if (paymentMethod == UserSubscriptionPaymentMethod.stripe) {
       final currentUrl = Uri.base;
       final checkout = await subscriptionCheckoutClient
@@ -10347,9 +10375,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               color: userAccess.canAccessMainVault
                                   ? Colors.greenAccent
                                   : Colors.orangeAccent,
-                              onTap: userAccess.canManageStripeBilling
-                                  ? showManageStripeSubscriptionDialog
-                                  : showSubscriptionRequestDialog,
+                              onTap: readerSubscriptionAction(),
                             ),
                             buildReaderDashboardMetric(
                               icon: Icons.security_outlined,
@@ -10640,9 +10666,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             actions: [
               TextButton.icon(
-                onPressed: showSubscriptionRequestDialog,
+                onPressed: readerSubscriptionAction(),
                 icon: const Icon(Icons.workspace_premium_outlined, size: 16),
-                label: const Text('Subscription'),
+                label: Text(readerSubscriptionActionLabel()),
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.greenAccent,
                 ),

@@ -23,6 +23,7 @@ function createStripeCheckoutSessionHandler({
       requireMethod(request, "POST");
 
       const user = await requireFirebaseUser(request, verifyAuthToken);
+      await requireSubscriptionCanStart({firestore, user});
       const priceId = readRequiredText(
           getPriceId(),
           "Stripe premium price id is not configured.",
@@ -530,6 +531,44 @@ async function loadStripeCustomerId({firestore, user}) {
   }
 
   return customerId;
+}
+
+async function requireSubscriptionCanStart({firestore, user}) {
+  const snapshot = await firestore.collection("users").doc(user.email).get();
+  const data = snapshot.exists ? snapshot.data() : {};
+
+  if (hasCurrentPremiumAccess(data)) {
+    throw httpError(
+        409,
+        "Premium access is already active. Renewals open after the current access expires.",
+    );
+  }
+}
+
+function hasCurrentPremiumAccess(data) {
+  if (!data || typeof data !== "object") return false;
+
+  const expiresAt = readDate(data.subscriptionExpiresAt);
+  if (expiresAt && expiresAt <= new Date()) return false;
+
+  const role = cleanText(data.role).toLowerCase();
+  const accessLevel = cleanText(data.accessLevel).toLowerCase();
+  const status = cleanText(data.subscriptionStatus).toLowerCase();
+
+  return role === "admin" ||
+    accessLevel === "premium" ||
+    status === "active" ||
+    status === "trial";
+}
+
+function readDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value.toDate === "function") return value.toDate();
+  if (typeof value.seconds === "number") return new Date(value.seconds * 1000);
+
+  const parsed = new Date(cleanText(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 async function requireFirebaseUser(request, verifyAuthToken) {

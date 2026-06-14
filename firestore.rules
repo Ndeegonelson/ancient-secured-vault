@@ -62,6 +62,20 @@ service cloud.firestore {
         request.resource.data.status == 'open';
     }
 
+    function canStartSubscriptionRequest() {
+      return !exists(userDocPath()) ||
+        (
+          get(userDocPath()).data.role != 'admin' &&
+          get(userDocPath()).data.accessLevel != 'premium' &&
+          !(
+            get(userDocPath()).data.subscriptionStatus in [
+              'active',
+              'trial',
+            ]
+          )
+        );
+    }
+
     function safeDeviceOwnerCreate() {
       return ownsNewDevice() &&
         request.resource.data.deviceId is string &&
@@ -98,10 +112,9 @@ service cloud.firestore {
 
     match /user_subscription_requests/{requestId} {
       allow get, list: if ownerRead();
-      allow create: if ownsNewDocument() && (
-        pendingManualProof() ||
-        request.resource.data.status == 'open'
-      );
+      allow create: if ownsNewDocument() &&
+        pendingManualProof() &&
+        canStartSubscriptionRequest();
       allow update, delete: if isAdmin();
     }
 

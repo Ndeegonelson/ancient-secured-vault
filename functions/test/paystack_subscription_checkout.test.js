@@ -168,6 +168,43 @@ test("creates a Paystack checkout session and records the request", async () => 
   );
 });
 
+test("active premium users cannot start a Paystack checkout", async () => {
+  const firestore = new FakeFirestore();
+  await firestore.collection("users").doc("reader@example.com").set({
+    email: "reader@example.com",
+    accessLevel: "premium",
+    subscriptionStatus: "active",
+    subscriptionExpiresAt: "2026-07-14T12:00:00.000Z",
+  });
+  let paystackWasCalled = false;
+  const handler = createPaystackCheckoutSessionHandler({
+    firestore,
+    fetchImpl: async () => {
+      paystackWasCalled = true;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({status: true, data: {}}),
+      };
+    },
+    verifyAuthToken: async () => ({
+      uid: "reader-1",
+      email: "reader@example.com",
+    }),
+    getSecretKey: () => "sk_test_paystack",
+    getAmountSubunits: () => "100000",
+    getCurrency: () => "GHS",
+    getAppBaseUrl: () => "https://app.test",
+  });
+  const response = fakeResponse();
+
+  await handler(fakeRequest(), response);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(paystackWasCalled, false);
+  assert.match(response.body.error.message, /already active/i);
+});
+
 test("successful Paystack charge approves request and activates access", async () => {
   const firestore = new FakeFirestore();
   const fetchImpl = async (url) => {
