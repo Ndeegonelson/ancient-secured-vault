@@ -147,6 +147,24 @@ class UserAccessState {
 
   bool get hasSubscriptionExpiry => subscriptionExpiresAt != null;
 
+  bool get isAdminManagedSubscription {
+    return switch (subscriptionProvider) {
+      'paystack' ||
+      'manual' ||
+      'manual_payment' ||
+      'manual-payment' ||
+      'ancient_coin' ||
+      'ancient-coin' ||
+      'ancientcoin' => true,
+      _ => false,
+    };
+  }
+
+  bool get needsAdminRenewalDate =>
+      hasActiveSubscription &&
+      isAdminManagedSubscription &&
+      !hasSubscriptionExpiry;
+
   bool get isSubscriptionExpired {
     final expiresAt = subscriptionExpiresAt;
     return expiresAt != null && !expiresAt.isAfter(DateTime.now());

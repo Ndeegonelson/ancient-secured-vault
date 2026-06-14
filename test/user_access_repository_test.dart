@@ -92,13 +92,19 @@ void main() {
         'subscriptionStatus': 'cancelled',
         'accessLevel': 'premium',
       }, email: 'cancelled@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'active',
+        'accessLevel': 'premium',
+        'subscriptionProvider': 'paystack',
+      }, email: 'missing-renewal@example.com'),
     ];
 
     final summary = UserAccessSummary.fromUsers(users);
 
-    expect(summary.totalCount, 7);
+    expect(summary.totalCount, 8);
     expect(summary.adminCount, 1);
-    expect(summary.premiumCount, 2);
+    expect(summary.premiumCount, 3);
     expect(summary.freeCount, 4);
     expect(summary.trialCount, 1);
     expect(summary.pendingCount, 1);
@@ -106,21 +112,24 @@ void main() {
     expect(summary.cancelledCount, 1);
     expect(summary.expiredByDateCount, 0);
     expect(summary.expiringSoonCount, 0);
+    expect(summary.missingRenewalDateCount, 1);
     expect(summary.hasSubscriptionAttention, isTrue);
-    expect(summary.subscriptionReviewCount, 3);
+    expect(summary.subscriptionReviewCount, 4);
     expect(userAccessSubscriptionAttentionParts(summary), [
+      '1 missing renewal date',
       '1 pending',
       '1 expired',
       '1 cancelled',
     ]);
     expect(
       userAccessSubscriptionAttentionLabel(summary),
-      '1 pending | 1 expired | 1 cancelled',
+      '1 missing renewal date | 1 pending | 1 expired | 1 cancelled',
     );
     expect(summary.hasUsers, isTrue);
     expect(summary.hasRecentSubscriptionChanges, isFalse);
     expect(summary.users.map((user) => user.email), [
       'admin@example.com',
+      'missing-renewal@example.com',
       'premium@example.com',
       'trial@example.com',
       'cancelled@example.com',
@@ -159,6 +168,40 @@ void main() {
     expect(userAccessSubscriptionAttentionParts(summary), [
       '1 expired by date',
       '1 expiring soon',
+    ]);
+  });
+
+  test('summarizes admin-managed subscriptions missing renewal dates', () {
+    final summary = UserAccessSummary.fromUsers([
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'active',
+        'accessLevel': 'premium',
+        'subscriptionProvider': 'manual',
+      }, email: 'manual@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'subscriptionStatus': 'active',
+        'accessLevel': 'premium',
+        'subscriptionProvider': 'paystack',
+        'subscriptionExpiresAt': DateTime.now()
+            .add(const Duration(days: 30))
+            .toIso8601String(),
+      }, email: 'paystack@example.com'),
+      UserAccessRecord.fromMap({
+        'role': 'reader',
+        'accessLevel': 'premium',
+      }, email: 'legacy@example.com'),
+    ]);
+
+    expect(summary.missingRenewalDateCount, 1);
+    expect(summary.subscriptionReviewCount, 1);
+    expect(
+      summary.filteredUsers(subscriptionReviewOnly: true).single.email,
+      ['manual@example.com'].single,
+    );
+    expect(userAccessSubscriptionAttentionParts(summary), [
+      '1 missing renewal date',
     ]);
   });
 
@@ -401,6 +444,10 @@ void main() {
     expect(
       userAccessRecordDetailParts(paid),
       contains('Paystack ref: paystack-ref-123'),
+    );
+    expect(
+      userAccessRecordDetailParts(paid),
+      contains('Review: renewal date missing'),
     );
   });
 

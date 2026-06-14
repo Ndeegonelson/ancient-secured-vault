@@ -368,6 +368,7 @@ class UserAccessSummary {
     this.cancelledCount = 0,
     this.expiredByDateCount = 0,
     this.expiringSoonCount = 0,
+    this.missingRenewalDateCount = 0,
     this.recentChanges = const [],
     this.recentSubscriptionChanges = const [],
   });
@@ -388,6 +389,7 @@ class UserAccessSummary {
     var cancelledCount = 0;
     var expiredByDateCount = 0;
     var expiringSoonCount = 0;
+    var missingRenewalDateCount = 0;
 
     for (final user in sortedUsers) {
       if (user.access.isAdmin) {
@@ -418,6 +420,9 @@ class UserAccessSummary {
       } else if (user.access.isSubscriptionExpiringSoon) {
         expiringSoonCount++;
       }
+      if (user.access.needsAdminRenewalDate) {
+        missingRenewalDateCount++;
+      }
     }
 
     return UserAccessSummary(
@@ -431,6 +436,7 @@ class UserAccessSummary {
       cancelledCount: cancelledCount,
       expiredByDateCount: expiredByDateCount,
       expiringSoonCount: expiringSoonCount,
+      missingRenewalDateCount: missingRenewalDateCount,
       recentChanges: List.unmodifiable(recentChanges),
       recentSubscriptionChanges: List.unmodifiable(recentSubscriptionChanges),
     );
@@ -446,6 +452,7 @@ class UserAccessSummary {
   final int cancelledCount;
   final int expiredByDateCount;
   final int expiringSoonCount;
+  final int missingRenewalDateCount;
   final List<UserAccessChangeRecord> recentChanges;
   final List<UserSubscriptionStatusChangeRecord> recentSubscriptionChanges;
 
@@ -458,13 +465,15 @@ class UserAccessSummary {
       expiredCount > 0 ||
       cancelledCount > 0 ||
       expiredByDateCount > 0 ||
-      expiringSoonCount > 0;
+      expiringSoonCount > 0 ||
+      missingRenewalDateCount > 0;
   int get subscriptionReviewCount =>
       pendingCount +
       expiredCount +
       cancelledCount +
       expiredByDateCount +
-      expiringSoonCount;
+      expiringSoonCount +
+      missingRenewalDateCount;
   List<String> get countryOptions {
     final countries = users
         .map((user) => user.country.trim())
@@ -509,6 +518,7 @@ class UserAccessSummary {
 bool userAccessNeedsSubscriptionReview(UserAccessRecord user) {
   return user.access.isSubscriptionExpired ||
       user.access.isSubscriptionExpiringSoon ||
+      user.access.needsAdminRenewalDate ||
       user.access.subscriptionStatus == UserSubscriptionStatus.pending ||
       user.access.subscriptionStatus == UserSubscriptionStatus.expired ||
       user.access.subscriptionStatus == UserSubscriptionStatus.cancelled;
@@ -659,6 +669,10 @@ List<String> userAccessSubscriptionReviewReasons(UserAccessRecord user) {
     reasons.add('Stripe payment issue');
   }
 
+  if (access.needsAdminRenewalDate) {
+    reasons.add('renewal date missing');
+  }
+
   switch (access.subscriptionStatus) {
     case UserSubscriptionStatus.pending:
       reasons.add('pending payment');
@@ -714,6 +728,9 @@ List<String> userAccessSubscriptionAttentionParts(UserAccessSummary summary) {
   }
   if (summary.expiringSoonCount > 0) {
     parts.add('${summary.expiringSoonCount} expiring soon');
+  }
+  if (summary.missingRenewalDateCount > 0) {
+    parts.add('${summary.missingRenewalDateCount} missing renewal date');
   }
   if (summary.pendingCount > 0) {
     parts.add('${summary.pendingCount} pending');

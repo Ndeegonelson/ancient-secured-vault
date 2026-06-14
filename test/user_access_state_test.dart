@@ -35,6 +35,8 @@ void main() {
     expect(access.canManageStripeBilling, isTrue);
     expect(access.subscriptionExpiresAt, futureExpiry);
     expect(access.hasSubscriptionExpiry, isTrue);
+    expect(access.isAdminManagedSubscription, isFalse);
+    expect(access.needsAdminRenewalDate, isFalse);
     expect(access.isSubscriptionExpired, isFalse);
     expect(access.canAccessMainVault, isTrue);
     expect(access.canManageVault, isFalse);
@@ -53,6 +55,8 @@ void main() {
 
     expect(access.canAccessMainVault, isTrue);
     expect(access.canManageStripeBilling, isFalse);
+    expect(access.isAdminManagedSubscription, isFalse);
+    expect(access.needsAdminRenewalDate, isFalse);
   });
 
   test('Paystack subscriptions expose provider and reference details', () {
@@ -69,6 +73,8 @@ void main() {
     expect(access.subscriptionReference, 'paystack-ref-123');
     expect(access.subscriptionReferenceLabel, 'Paystack ref: paystack-ref-123');
     expect(access.canManageStripeBilling, isFalse);
+    expect(access.isAdminManagedSubscription, isTrue);
+    expect(access.needsAdminRenewalDate, isTrue);
   });
 
   test('manual subscriptions expose provider and proof reference', () {
@@ -84,7 +90,28 @@ void main() {
     expect(access.subscriptionReference, 'MOMO-7788');
     expect(access.subscriptionReferenceLabel, 'Manual proof: MOMO-7788');
     expect(access.canManageStripeBilling, isFalse);
+    expect(access.isAdminManagedSubscription, isTrue);
+    expect(access.needsAdminRenewalDate, isTrue);
   });
+
+  test(
+    'Paystack subscriptions with expiry do not need renewal date review',
+    () {
+      final access = UserAccessState.fromFirestore({
+        'role': 'reader',
+        'subscriptionStatus': 'active',
+        'accessLevel': 'premium',
+        'subscriptionProvider': 'paystack',
+        'subscriptionExpiresAt': DateTime.now()
+            .add(const Duration(days: 30))
+            .toIso8601String(),
+      });
+
+      expect(access.hasActiveSubscription, isTrue);
+      expect(access.isAdminManagedSubscription, isTrue);
+      expect(access.needsAdminRenewalDate, isFalse);
+    },
+  );
 
   test('Stripe billing stays available when payment needs attention', () {
     final access = UserAccessState.fromFirestore({
@@ -172,6 +199,7 @@ void main() {
 
     expect(access.subscriptionStatus, UserSubscriptionStatus.none);
     expect(access.hasActiveSubscription, isTrue);
+    expect(access.needsAdminRenewalDate, isFalse);
     expect(access.canAccessMainVault, isTrue);
   });
 
