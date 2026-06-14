@@ -1151,6 +1151,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> premiumPdfFiles = [];
 
   bool isLoading = false;
+  bool isDashboardBootstrapping = true;
   UserAccessState userAccess = const UserAccessState();
   String? pdfLoadError;
   String searchMode = 'all';
@@ -1219,7 +1220,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> loadDashboardData() async {
     await checkUserRole();
     await handleSubscriptionReturn();
-    await loadPDFs();
+    if (!mounted) return;
+
+    setState(() {
+      isDashboardBootstrapping = false;
+    });
+    unawaited(loadPDFs());
   }
 
   Future<void> handleSubscriptionReturn() async {
@@ -10663,6 +10669,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget buildDocumentListLoading(String label) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.greenAccent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(label, style: const TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canAccessMainVault = userAccess.canAccessMainVault;
@@ -10734,8 +10769,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: SizedBox.expand(
           child: Padding(
             padding: const EdgeInsets.all(20),
-            child: isLoading
-                ? const Center(child: CircularProgressIndicator())
+            child: isDashboardBootstrapping
+                ? const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: Colors.greenAccent),
+                        SizedBox(height: 14),
+                        Text(
+                          'Preparing your secure dashboard...',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  )
                 : SingleChildScrollView(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -10862,7 +10909,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           },
                         ),
 
-                        if (freePdfFiles.isEmpty)
+                        if (isLoading && freePdfFiles.isEmpty)
+                          buildDocumentListLoading('Loading free PDFs...')
+                        else if (freePdfFiles.isEmpty)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
                             child: Text(
@@ -10994,7 +11043,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             },
                           ),
 
-                          if (premiumPdfFiles.isEmpty)
+                          if (isLoading && premiumPdfFiles.isEmpty)
+                            buildDocumentListLoading(
+                              'Loading protected PDFs...',
+                            )
+                          else if (premiumPdfFiles.isEmpty)
                             const Padding(
                               padding: EdgeInsets.symmetric(vertical: 12),
                               child: Text(
