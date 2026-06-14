@@ -101,13 +101,18 @@ class ReaderNarrationPlaybackRouter {
   bool get isPaused => _state == ReaderNarrationRouterState.paused;
   ReaderNarrationPlaybackStatus get status {
     final source = _activeStatusSource;
+    final shouldShowSourceError =
+        _state == ReaderNarrationRouterState.error ||
+        _state == ReaderNarrationRouterState.idle;
     return ReaderNarrationPlaybackStatus(
       state: _state,
       engine: _activeEngine,
       progressPercent: source?.playbackProgressPercent ?? 0,
       currentCharacterStart: source?.playbackCharacterStart ?? 0,
       currentCharacterEnd: source?.playbackCharacterEnd ?? 0,
-      errorMessage: _errorMessage ?? source?.playbackErrorMessage,
+      errorMessage:
+          _errorMessage ??
+          (shouldShowSourceError ? source?.playbackErrorMessage : null),
     );
   }
 

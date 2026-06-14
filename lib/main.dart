@@ -12958,6 +12958,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     int pageNumber, {
     String? searchQuery,
     String source = 'reader_navigation',
+    bool forceReload = false,
   }) {
     final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
     final nextSearchQuery = searchQuery ?? currentSearchQuery;
@@ -12988,6 +12989,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       updatePdfIframeSource(
         pageNumber: currentPdfPage,
         searchQuery: currentSearchQuery,
+        forceReload: forceReload,
       );
     }
     preloadNarrationTextForPage(safePageNumber);
@@ -17493,8 +17495,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                               color: const Color(0xFF1A1D26),
                                               child: ListTile(
                                                 onTap: () {
-                                                  Navigator.pop(resultContext);
-
                                                   final page =
                                                       data['pageNumber'] is int
                                                       ? data['pageNumber']
@@ -17505,12 +17505,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                             ) ??
                                                             1;
 
-                                                  openPdfPage(
-                                                    page,
-                                                    searchQuery: keyword,
-                                                    source:
-                                                        'internal_search_result',
-                                                  );
+                                                  Navigator.of(
+                                                    resultContext,
+                                                  ).pop();
+                                                  WidgetsBinding.instance
+                                                      .addPostFrameCallback((
+                                                        _,
+                                                      ) {
+                                                        if (!mounted) return;
+                                                        openPdfPage(
+                                                          page,
+                                                          searchQuery: keyword,
+                                                          source:
+                                                              'internal_search_result',
+                                                          forceReload:
+                                                              !readerProtectionPolicy
+                                                                  .usesProtectedImageReader,
+                                                        );
+                                                      });
                                                 },
 
                                                 title: Text(
