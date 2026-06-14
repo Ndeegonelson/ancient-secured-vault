@@ -51,6 +51,14 @@ class FakeDocumentReference {
     const current = this.docs.get(this.id) || {};
     this.docs.set(this.id, {...current, ...data});
   }
+
+  async get() {
+    const data = this.docs.get(this.id);
+    return {
+      exists: data !== undefined,
+      data: () => data,
+    };
+  }
 }
 
 function fakeResponse() {
@@ -197,6 +205,7 @@ test("successful Paystack charge approves request and activates access", async (
     event: {
       event: "charge.success",
       data: {
+        id: "paystack-event-1",
         reference: "paystack-ref-1",
       },
     },
@@ -216,4 +225,73 @@ test("successful Paystack charge approves request and activates access", async (
   assert.equal(access.subscriptionProvider, "paystack");
   assert.equal(access.paystackReference, "paystack-ref-1");
   assert.ok(access.subscriptionExpiresAt instanceof Date);
+  assert.equal(
+      firestore.data("payment_webhook_events", "paystack_paystack-event-1")
+          .status,
+      "processed",
+  );
+  assert.equal(
+      firestore.data("payment_webhook_events", "paystack_paystack-event-1")
+          .requestId,
+      "request-1",
+  );
+});
+
+test("duplicate Paystack charge webhooks do not re-verify or re-approve", async () => {
+  const firestore = new FakeFirestore();
+  let verifyCount = 0;
+  const fetchImpl = async () => {
+    verifyCount += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: true,
+        data: {
+          status: "success",
+          reference: "paystack-ref-1",
+          paid_at: "2026-06-13T10:00:00.000Z",
+          customer: {
+            email: "reader@example.com",
+            customer_code: "CUS_test",
+          },
+          metadata: {
+            subscriptionRequestId: "request-1",
+            userEmail: "reader@example.com",
+            requestedPlan: "premium",
+          },
+        },
+      }),
+    };
+  };
+  const event = {
+    event: "charge.success",
+    data: {
+      id: "paystack-event-1",
+      reference: "paystack-ref-1",
+    },
+  };
+
+  await handlePaystackEvent({
+    firestore,
+    fetchImpl,
+    secretKey: "sk_test_paystack",
+    event,
+  });
+  await firestore.collection("user_subscription_requests").doc("request-1").set({
+    status: "already-reviewed",
+  }, {merge: true});
+
+  await handlePaystackEvent({
+    firestore,
+    fetchImpl,
+    secretKey: "sk_test_paystack",
+    event,
+  });
+
+  assert.equal(verifyCount, 1);
+  assert.equal(
+      firestore.data("user_subscription_requests", "request-1").status,
+      "already-reviewed",
+  );
 });

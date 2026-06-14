@@ -133,48 +133,72 @@ function createStripeBillingPortalSessionHandler({
 async function handleStripeEvent({firestore, event}) {
   if (!event || !event.type) return;
 
+  const eventRecord = await startPaymentWebhookEvent({
+    firestore,
+    provider: "stripe",
+    eventId: stripeEventId(event),
+    eventType: event.type,
+  });
+  if (!eventRecord.shouldProcess) return;
+
+  try {
+    const result = await dispatchStripeEvent({firestore, event});
+    await finishPaymentWebhookEvent({
+      eventRef: eventRecord.ref,
+      status: "processed",
+      result,
+    });
+  } catch (error) {
+    await finishPaymentWebhookEvent({
+      eventRef: eventRecord.ref,
+      status: "failed",
+      result: {errorMessage: cleanText(error && error.message)},
+    });
+    throw error;
+  }
+}
+
+async function dispatchStripeEvent({firestore, event}) {
   if (event.type === "checkout.session.completed") {
-    await approveCompletedCheckoutSession({
+    return approveCompletedCheckoutSession({
       firestore,
       session: event.data && event.data.object,
     });
-    return;
   }
 
   if (event.type === "checkout.session.expired") {
-    await markCheckoutSessionFailed({
+    return markCheckoutSessionFailed({
       firestore,
       session: event.data && event.data.object,
     });
-    return;
   }
 
   if (event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted") {
-    await syncStripeSubscriptionAccess({
+    return syncStripeSubscriptionAccess({
       firestore,
       subscription: event.data && event.data.object,
       deleted: event.type === "customer.subscription.deleted",
     });
-    return;
   }
 
   if (event.type === "invoice.payment_failed") {
-    await syncStripeInvoiceSubscriptionAccess({
+    return syncStripeInvoiceSubscriptionAccess({
       firestore,
       invoice: event.data && event.data.object,
       paymentStatus: "failed",
     });
-    return;
   }
 
   if (event.type === "invoice.paid") {
-    await syncStripeInvoiceSubscriptionAccess({
+    return syncStripeInvoiceSubscriptionAccess({
       firestore,
       invoice: event.data && event.data.object,
       paymentStatus: "confirmed",
     });
   }
+
+  return {ignored: true, reason: "unsupported_event_type"};
 }
 
 function checkoutMetadata({requestReference, user}) {
@@ -190,7 +214,9 @@ async function approveCompletedCheckoutSession({firestore, session}) {
   const metadata = (session && session.metadata) || {};
   const requestId = cleanText(metadata.subscriptionRequestId);
   const userEmail = cleanEmail(metadata.userEmail || session.customer_email);
-  if (!requestId || !userEmail) return;
+  if (!requestId || !userEmail) {
+    return {ignored: true, reason: "missing_checkout_metadata"};
+  }
 
   const requestRef = firestore
       .collection("user_subscription_requests")
@@ -218,12 +244,19 @@ async function approveCompletedCheckoutSession({firestore, session}) {
     stripeSubscriptionId: cleanText(session.subscription),
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
+
+  return {
+    requestId,
+    userEmail,
+    paymentReference: cleanText(session.id),
+    subscriptionId: cleanText(session.subscription),
+  };
 }
 
 async function markCheckoutSessionFailed({firestore, session}) {
   const metadata = (session && session.metadata) || {};
   const requestId = cleanText(metadata.subscriptionRequestId);
-  if (!requestId) return;
+  if (!requestId) return {ignored: true, reason: "missing_checkout_request"};
 
   await firestore
       .collection("user_subscription_requests")
@@ -233,6 +266,12 @@ async function markCheckoutSessionFailed({firestore, session}) {
         paymentReference: cleanText(session.id),
         updatedAt: FieldValue.serverTimestamp(),
       }, {merge: true});
+
+  return {
+    requestId,
+    paymentReference: cleanText(session && session.id),
+    paymentStatus: "failed",
+  };
 }
 
 async function syncStripeInvoiceSubscriptionAccess({
@@ -243,7 +282,9 @@ async function syncStripeInvoiceSubscriptionAccess({
   if (!invoice) return;
 
   const subscriptionId = cleanText(invoice.subscription);
-  if (!subscriptionId) return;
+  if (!subscriptionId) {
+    return {ignored: true, reason: "missing_invoice_subscription"};
+  }
 
   const userEmail = await resolveStripeSubscriptionUserEmail({
     firestore,
@@ -254,13 +295,22 @@ async function syncStripeInvoiceSubscriptionAccess({
         invoice.subscription_details.metadata,
     },
   });
-  if (!userEmail) return;
+  if (!userEmail) {
+    return {ignored: true, reason: "unknown_stripe_subscription_user"};
+  }
 
   await firestore.collection("users").doc(userEmail).set({
     stripeLastInvoiceId: cleanText(invoice.id),
     stripeLastPaymentStatus: paymentStatus,
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
+
+  return {
+    userEmail,
+    invoiceId: cleanText(invoice.id),
+    subscriptionId,
+    paymentStatus,
+  };
 }
 
 async function syncStripeSubscriptionAccess({
@@ -268,13 +318,15 @@ async function syncStripeSubscriptionAccess({
   subscription,
   deleted = false,
 }) {
-  if (!subscription) return;
+  if (!subscription) return {ignored: true, reason: "missing_subscription"};
 
   const userEmail = await resolveStripeSubscriptionUserEmail({
     firestore,
     subscription,
   });
-  if (!userEmail) return;
+  if (!userEmail) {
+    return {ignored: true, reason: "unknown_stripe_subscription_user"};
+  }
 
   const mappedAccess = stripeSubscriptionAccessUpdate({
     status: deleted ? "canceled" : subscription.status,
@@ -294,6 +346,74 @@ async function syncStripeSubscriptionAccess({
     ...(subscriptionExpiresAt ? {subscriptionExpiresAt} : {}),
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
+
+  return {
+    userEmail,
+    subscriptionId: cleanText(subscription.id),
+    subscriptionStatus: deleted ? "canceled" : cleanText(subscription.status),
+  };
+}
+
+async function startPaymentWebhookEvent({
+  firestore,
+  provider,
+  eventId,
+  eventType,
+}) {
+  const safeEventId = paymentWebhookEventId({provider, eventId, eventType});
+  const ref = firestore.collection("payment_webhook_events").doc(safeEventId);
+  const snapshot = await ref.get();
+  const data = snapshot.exists ? snapshot.data() : {};
+  if (data && data.status === "processed") {
+    return {shouldProcess: false, ref};
+  }
+
+  await ref.set({
+    provider,
+    eventId: cleanText(eventId),
+    eventType: cleanText(eventType),
+    status: "processing",
+    receivedAt: data && data.receivedAt ?
+      data.receivedAt :
+      FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {shouldProcess: true, ref};
+}
+
+async function finishPaymentWebhookEvent({eventRef, status, result = {}}) {
+  await eventRef.set({
+    status,
+    ...cleanResultPayload(result),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
+function cleanResultPayload(result) {
+  const payload = {};
+  for (const [key, value] of Object.entries(result || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    payload[key] = value;
+  }
+  return payload;
+}
+
+function stripeEventId(event) {
+  const object = event && event.data && event.data.object;
+  return cleanText(event && event.id) ||
+    [
+      cleanText(event && event.type),
+      cleanText(object && (object.id || object.subscription)),
+    ].filter(Boolean).join("_");
+}
+
+function paymentWebhookEventId({provider, eventId, eventType}) {
+  const rawId = cleanText(eventId) ||
+    `${cleanText(eventType) || "event"}_${Date.now()}`;
+  return `${provider}_${rawId}`
+      .replace(/[^A-Za-z0-9_-]/g, "_")
+      .slice(0, 240);
 }
 
 async function resolveStripeSubscriptionUserEmail({firestore, subscription}) {

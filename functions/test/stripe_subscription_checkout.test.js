@@ -195,6 +195,7 @@ test("completed checkout approves the request and activates user access", async 
   await handleStripeEvent({
     firestore,
     event: {
+      id: "evt_checkout_complete",
       type: "checkout.session.completed",
       data: {
         object: {
@@ -227,6 +228,56 @@ test("completed checkout approves the request and activates user access", async 
   assert.equal(
       firestore.data("users", "reader@example.com").subscriptionProvider,
       "stripe",
+  );
+  assert.equal(
+      firestore.data("payment_webhook_events", "stripe_evt_checkout_complete")
+          .status,
+      "processed",
+  );
+  assert.equal(
+      firestore.data("payment_webhook_events", "stripe_evt_checkout_complete")
+          .requestId,
+      "request-1",
+  );
+});
+
+test("duplicate Stripe checkout webhooks are ignored after processing", async () => {
+  const firestore = new FakeFirestore();
+  const event = {
+    id: "evt_duplicate_checkout",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: "cs_test_123",
+        customer: "cus_test_123",
+        subscription: "sub_test_123",
+        customer_email: "reader@example.com",
+        metadata: {
+          subscriptionRequestId: "request-1",
+          userEmail: "reader@example.com",
+          requestedPlan: "premium",
+        },
+      },
+    },
+  };
+
+  await handleStripeEvent({firestore, event});
+  await firestore.collection("user_subscription_requests").doc("request-1").set({
+    status: "already-reviewed",
+  }, {merge: true});
+  await firestore.collection("users").doc("reader@example.com").set({
+    subscriptionStatus: "already-active",
+  }, {merge: true});
+
+  await handleStripeEvent({firestore, event});
+
+  assert.equal(
+      firestore.data("user_subscription_requests", "request-1").status,
+      "already-reviewed",
+  );
+  assert.equal(
+      firestore.data("users", "reader@example.com").subscriptionStatus,
+      "already-active",
   );
 });
 

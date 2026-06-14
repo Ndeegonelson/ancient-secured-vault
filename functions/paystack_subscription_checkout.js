@@ -112,17 +112,50 @@ async function handlePaystackEvent({firestore, event, fetchImpl = fetch, secretK
   const reference = cleanText(data.reference);
   if (!reference) return;
 
-  const verified = await verifyPaystackTransaction({
-    fetchImpl,
-    secretKey,
-    reference,
-  });
-  if (cleanText(verified.status).toLowerCase() !== "success") return;
-
-  await approveSuccessfulPaystackCharge({
+  const eventRecord = await startPaymentWebhookEvent({
     firestore,
-    charge: verified,
+    provider: DEFAULT_PAYMENT_METHOD,
+    eventId: paystackEventId(event),
+    eventType: event.event,
   });
+  if (!eventRecord.shouldProcess) return;
+
+  try {
+    const verified = await verifyPaystackTransaction({
+      fetchImpl,
+      secretKey,
+      reference,
+    });
+    if (cleanText(verified.status).toLowerCase() !== "success") {
+      await finishPaymentWebhookEvent({
+        eventRef: eventRecord.ref,
+        status: "processed",
+        result: {
+          ignored: true,
+          reason: "verified_transaction_not_successful",
+          paymentReference: reference,
+        },
+      });
+      return;
+    }
+
+    const result = await approveSuccessfulPaystackCharge({
+      firestore,
+      charge: verified,
+    });
+    await finishPaymentWebhookEvent({
+      eventRef: eventRecord.ref,
+      status: "processed",
+      result,
+    });
+  } catch (error) {
+    await finishPaymentWebhookEvent({
+      eventRef: eventRecord.ref,
+      status: "failed",
+      result: {errorMessage: cleanText(error && error.message)},
+    });
+    throw error;
+  }
 }
 
 async function approveSuccessfulPaystackCharge({firestore, charge}) {
@@ -130,7 +163,9 @@ async function approveSuccessfulPaystackCharge({firestore, charge}) {
   const requestId = cleanText(metadata.subscriptionRequestId);
   const customer = charge.customer || {};
   const userEmail = cleanEmail(metadata.userEmail || customer.email);
-  if (!requestId || !userEmail) return;
+  if (!requestId || !userEmail) {
+    return {ignored: true, reason: "missing_charge_metadata"};
+  }
 
   const paidAt = cleanText(charge.paid_at || charge.paidAt);
   const expiresAt = paidAt ?
@@ -165,6 +200,71 @@ async function approveSuccessfulPaystackCharge({firestore, charge}) {
       {}),
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
+
+  return {
+    requestId,
+    userEmail,
+    paymentReference: cleanText(charge.reference),
+  };
+}
+
+async function startPaymentWebhookEvent({
+  firestore,
+  provider,
+  eventId,
+  eventType,
+}) {
+  const safeEventId = paymentWebhookEventId({provider, eventId, eventType});
+  const ref = firestore.collection("payment_webhook_events").doc(safeEventId);
+  const snapshot = await ref.get();
+  const data = snapshot.exists ? snapshot.data() : {};
+  if (data && data.status === "processed") {
+    return {shouldProcess: false, ref};
+  }
+
+  await ref.set({
+    provider,
+    eventId: cleanText(eventId),
+    eventType: cleanText(eventType),
+    status: "processing",
+    receivedAt: data && data.receivedAt ?
+      data.receivedAt :
+      FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {shouldProcess: true, ref};
+}
+
+async function finishPaymentWebhookEvent({eventRef, status, result = {}}) {
+  await eventRef.set({
+    status,
+    ...cleanResultPayload(result),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
+function cleanResultPayload(result) {
+  const payload = {};
+  for (const [key, value] of Object.entries(result || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    payload[key] = value;
+  }
+  return payload;
+}
+
+function paystackEventId(event) {
+  const data = event && event.data;
+  return cleanText(data && (data.id || data.reference)) ||
+    cleanText(event && event.event);
+}
+
+function paymentWebhookEventId({provider, eventId, eventType}) {
+  const rawId = cleanText(eventId) ||
+    `${cleanText(eventType) || "event"}_${Date.now()}`;
+  return `${provider}_${rawId}`
+      .replace(/[^A-Za-z0-9_-]/g, "_")
+      .slice(0, 240);
 }
 
 async function verifyPaystackTransaction({fetchImpl, secretKey, reference}) {

@@ -110,6 +110,11 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /payment_webhook_events/{eventId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
     match /user_access_audit_logs/{logId} {
       allow get, list, create: if isAdmin();
       allow update, delete: if false;
