@@ -93,7 +93,7 @@ class ReaderNarrationVoiceCatalogPresenter {
 
     if (catalog.accessPolicy.canUseCloudNarration && !catalog.hasCloudVoices) {
       return '$browserSummary | $cloudSummary | '
-          '${catalog.cloudAvailabilityMessage}';
+          'cloud voices unavailable';
     }
 
     return '$browserSummary | $cloudSummary';
@@ -133,7 +133,7 @@ class ReaderNarrationVoiceCatalogPresenter {
     }
 
     if (!catalog.hasCloudVoices) {
-      return catalog.cloudAvailabilityMessage;
+      return 'Browser narration is active. Cloud voices are unavailable right now.';
     }
 
     return 'Browser voices are best for word-by-word read-along. '
