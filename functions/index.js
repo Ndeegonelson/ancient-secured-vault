@@ -1,5 +1,6 @@
 const {setGlobalOptions} = require("firebase-functions");
 const {onCall, onRequest} = require("firebase-functions/v2/https");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
 const {
@@ -27,6 +28,9 @@ const {
   createPaystackCheckoutSessionHandler,
   createPaystackWebhookHandler,
 } = require("./paystack_subscription_checkout");
+const {
+  createExpireSubscriptionsHandler,
+} = require("./subscription_expiry_maintenance");
 
 initializeApp();
 const firestore = getFirestore();
@@ -171,6 +175,16 @@ exports.paystackWebhook = onRequest(
       secrets: ["PAYSTACK_SECRET_KEY"],
     },
     createPaystackWebhookHandler({firestore}),
+);
+
+exports.expireAdminManagedSubscriptions = onSchedule(
+    {
+      schedule: "every 24 hours",
+      timeZone: "Africa/Accra",
+      maxInstances: 1,
+      timeoutSeconds: 120,
+    },
+    createExpireSubscriptionsHandler({firestore}),
 );
 
 async function requireNarrationHttpAccess(request) {
