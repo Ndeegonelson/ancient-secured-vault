@@ -1852,6 +1852,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> showUserAccessOverview({
     UserAccessPlan? initialPlanFilter,
+    bool initialSubscriptionReviewOnly = false,
   }) async {
     if (!requireVaultManagerAccess()) return;
 
@@ -1861,7 +1862,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     UserAccessPlan? accessPlanFilter = initialPlanFilter;
     var countryFilter = '';
     UserSubscriptionStatus? subscriptionFilter;
-    var subscriptionReviewOnly = false;
+    var subscriptionReviewOnly = initialSubscriptionReviewOnly;
     final accessSearchController = TextEditingController();
     final currentUserEmail = UserAccessRepository.emailDocumentId(
       FirebaseAuth.instance.currentUser?.email,
@@ -2610,40 +2611,157 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   user.updatedAt ?? user.createdAt;
                               final needsSubscriptionReview =
                                   userAccessNeedsSubscriptionReview(user);
+                              final isCurrentUser =
+                                  user.email == currentUserEmail;
+                              final canUpdateSubscription =
+                                  busyUserEmail == null && !isCurrentUser;
 
-                              return ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(
-                                  user.access.isAdmin
-                                      ? Icons.admin_panel_settings_outlined
-                                      : user.access.hasActiveSubscription
-                                      ? Icons.workspace_premium_outlined
-                                      : Icons.person_outline,
-                                  color: user.access.canAccessMainVault
-                                      ? needsSubscriptionReview
-                                            ? Colors.orangeAccent
-                                            : Colors.greenAccent
-                                      : Colors.orangeAccent,
-                                ),
-                                title: Text(
-                                  user.email.isEmpty
-                                      ? 'Unknown user'
-                                      : user.email,
-                                  style: const TextStyle(color: Colors.white70),
-                                ),
-                                subtitle: Text(
-                                  userAccessRecordDetailLabel(
-                                    user,
-                                    isCurrentUser:
-                                        user.email == currentUserEmail,
-                                    timestampLabel: formatDashboardTimestamp(
-                                      timestamp,
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: Icon(
+                                      user.access.isAdmin
+                                          ? Icons.admin_panel_settings_outlined
+                                          : user.access.hasActiveSubscription
+                                          ? Icons.workspace_premium_outlined
+                                          : Icons.person_outline,
+                                      color: user.access.canAccessMainVault
+                                          ? needsSubscriptionReview
+                                                ? Colors.orangeAccent
+                                                : Colors.greenAccent
+                                          : Colors.orangeAccent,
                                     ),
+                                    title: Text(
+                                      user.email.isEmpty
+                                          ? 'Unknown user'
+                                          : user.email,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      userAccessRecordDetailLabel(
+                                        user,
+                                        isCurrentUser: isCurrentUser,
+                                        timestampLabel:
+                                            formatDashboardTimestamp(timestamp),
+                                      ),
+                                      style: const TextStyle(
+                                        color: Colors.white38,
+                                      ),
+                                    ),
+                                    trailing: accessActions(user),
                                   ),
-                                  style: const TextStyle(color: Colors.white38),
-                                ),
-                                trailing: accessActions(user),
+                                  if (user.access.needsAdminRenewalDate) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                        left: 40,
+                                        bottom: 8,
+                                      ),
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orangeAccent.withValues(
+                                            alpha: 0.08,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.orangeAccent
+                                                .withValues(alpha: 0.28),
+                                          ),
+                                        ),
+                                        child: Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.center,
+                                          children: [
+                                            const Icon(
+                                              Icons.event_available_outlined,
+                                              color: Colors.orangeAccent,
+                                              size: 18,
+                                            ),
+                                            const Text(
+                                              'Renewal date missing',
+                                              style: TextStyle(
+                                                color: Colors.white70,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            TextButton(
+                                              onPressed: canUpdateSubscription
+                                                  ? () =>
+                                                        applySubscriptionExpiry(
+                                                          user,
+                                                          expiresAt:
+                                                              DateTime.now().add(
+                                                                const Duration(
+                                                                  days: 30,
+                                                                ),
+                                                              ),
+                                                        )
+                                                  : null,
+                                              style: TextButton.styleFrom(
+                                                foregroundColor:
+                                                    Colors.greenAccent,
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                              ),
+                                              child: const Text('Set 30 days'),
+                                            ),
+                                            TextButton(
+                                              onPressed: canUpdateSubscription
+                                                  ? () =>
+                                                        applySubscriptionExpiry(
+                                                          user,
+                                                          expiresAt:
+                                                              DateTime.now().add(
+                                                                const Duration(
+                                                                  days: 365,
+                                                                ),
+                                                              ),
+                                                        )
+                                                  : null,
+                                              style: TextButton.styleFrom(
+                                                foregroundColor:
+                                                    Colors.greenAccent,
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                              ),
+                                              child: const Text('Set 1 year'),
+                                            ),
+                                            TextButton(
+                                              onPressed: canUpdateSubscription
+                                                  ? () =>
+                                                        applySubscriptionStatus(
+                                                          user,
+                                                          UserSubscriptionStatus
+                                                              .cancelled,
+                                                        )
+                                                  : null,
+                                              style: TextButton.styleFrom(
+                                                foregroundColor:
+                                                    Colors.redAccent,
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                              ),
+                                              child: const Text(
+                                                'Mark cancelled',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               );
                             }),
                             if (listLimitMessage != null) ...[
@@ -6032,13 +6150,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 6),
             buildAdminPanelAction(
               icon: Icons.manage_accounts_outlined,
-              label: users.freeCount > 0
+              label: users.hasSubscriptionAttention
+                  ? 'Review subscriptions'
+                  : users.freeCount > 0
                   ? 'Review free readers'
                   : 'Review access',
               onPressed: () => showUserAccessOverview(
-                initialPlanFilter: users.freeCount > 0
+                initialPlanFilter:
+                    !users.hasSubscriptionAttention && users.freeCount > 0
                     ? UserAccessPlan.free
                     : null,
+                initialSubscriptionReviewOnly: users.hasSubscriptionAttention,
               ),
             ),
           ],
@@ -6414,7 +6536,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               'Payment states are waiting for admin review: $subscriptionAttentionLabel.',
           tone: _AdminAttentionTone.warning,
           actionLabel: 'User access',
-          onPressed: showUserAccessOverview,
+          onPressed: () =>
+              showUserAccessOverview(initialSubscriptionReviewOnly: true),
         ),
       );
     }
