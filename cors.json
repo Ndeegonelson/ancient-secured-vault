@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["http://localhost:*"],
+    "origin": ["http://localhost:*", "https://vault.ancientsociety.tech"],
     "method": ["GET"],
     "maxAgeSeconds": 3600
   }
