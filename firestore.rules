@@ -32,6 +32,14 @@ service cloud.firestore {
       return isOwnerEmail(request.resource.data.userEmail);
     }
 
+    function ownsExistingDevice() {
+      return isOwnerEmail(resource.data.email);
+    }
+
+    function ownsNewDevice() {
+      return isOwnerEmail(request.resource.data.email);
+    }
+
     function ownerRead() {
       return isAdmin() || ownsExistingDocument();
     }
@@ -55,7 +63,7 @@ service cloud.firestore {
     }
 
     function safeDeviceOwnerCreate() {
-      return ownsNewDocument() &&
+      return ownsNewDevice() &&
         request.resource.data.deviceId is string &&
         (!request.resource.data.keys().hasAny(['status']) ||
           request.resource.data.status == 'pending') &&
@@ -66,8 +74,8 @@ service cloud.firestore {
     }
 
     function safeDeviceOwnerUpdate() {
-      return ownsExistingDocument() &&
-        ownsNewDocument() &&
+      return ownsExistingDevice() &&
+        ownsNewDevice() &&
         request.resource.data.status == resource.data.status &&
         request.resource.data.isTrusted == resource.data.isTrusted &&
         request.resource.data.isBlocked == resource.data.isBlocked &&
@@ -108,7 +116,7 @@ service cloud.firestore {
     }
 
     match /user_device_authorizations/{deviceId} {
-      allow get, list: if ownerRead();
+      allow get, list: if isAdmin() || ownsExistingDevice();
       allow create: if isAdmin() || safeDeviceOwnerCreate();
       allow update: if isAdmin() || safeDeviceOwnerUpdate();
       allow delete: if isAdmin();
