@@ -196,6 +196,9 @@ void main() {
 
     expect(summary.missingRenewalDateCount, 1);
     expect(summary.subscriptionReviewCount, 1);
+    expect(summary.missingRenewalDateUsers.map((user) => user.email), [
+      'manual@example.com',
+    ]);
     expect(
       summary.filteredUsers(subscriptionReviewOnly: true).single.email,
       ['manual@example.com'].single,

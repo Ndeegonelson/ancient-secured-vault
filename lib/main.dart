@@ -2050,6 +2050,67 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             }
 
+            Future<void> applyMissingRenewalDates(
+              UserAccessSummary summary,
+            ) async {
+              final targetUsers = summary.missingRenewalDateUsers
+                  .where((user) => user.email != currentUserEmail)
+                  .toList(growable: false);
+              if (targetUsers.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('No missing renewal dates to update.'),
+                  ),
+                );
+                return;
+              }
+
+              setDialogState(() {
+                busyUserEmail = '__missing_renewals__';
+              });
+
+              final expiresAt = DateTime.now().add(const Duration(days: 30));
+              var updatedCount = 0;
+
+              try {
+                for (final user in targetUsers) {
+                  await userAccessRepository.saveSubscriptionExpiry(
+                    email: user.email,
+                    expiresAt: expiresAt,
+                    changedByEmail: currentUserEmail,
+                    previousExpiresAt: user.access.subscriptionExpiresAt,
+                  );
+                  updatedCount++;
+                }
+
+                if (!mounted) return;
+
+                setDialogState(() {
+                  summaryFuture = userAccessRepository.loadSummary(limit: 100);
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '$updatedCount renewal ${updatedCount == 1 ? 'date' : 'dates'} set for 30 days.',
+                    ),
+                  ),
+                );
+                await checkUserRole();
+              } catch (error) {
+                if (!mounted) return;
+
+                setDialogState(() {
+                  summaryFuture = userAccessRepository.loadSummary(limit: 100);
+                  busyUserEmail = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Renewal date update failed: $error')),
+                );
+              }
+            }
+
             Widget accessActions(UserAccessRecord user) {
               final isCurrentUser = user.email == currentUserEmail;
               final isBusy = busyUserEmail == user.email;
@@ -2377,20 +2438,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ),
                                   if (summary.hasSubscriptionAttention) ...[
                                     const SizedBox(width: 8),
-                                    TextButton(
-                                      onPressed: () {
-                                        setDialogState(() {
-                                          subscriptionReviewOnly = true;
-                                          accessPlanFilter = null;
-                                          subscriptionFilter = null;
-                                        });
-                                      },
+                                    TextButton.icon(
+                                      onPressed: busyUserEmail == null
+                                          ? () {
+                                              setDialogState(() {
+                                                subscriptionReviewOnly = true;
+                                                accessPlanFilter = null;
+                                                subscriptionFilter = null;
+                                              });
+                                            }
+                                          : null,
+                                      icon: const Icon(
+                                        Icons.manage_search,
+                                        size: 16,
+                                      ),
+                                      label: const Text('Review'),
                                       style: TextButton.styleFrom(
                                         foregroundColor: Colors.orangeAccent,
                                         visualDensity: VisualDensity.compact,
                                       ),
-                                      child: const Text('Review'),
                                     ),
+                                    if (summary.missingRenewalDateCount > 0)
+                                      TextButton.icon(
+                                        onPressed: busyUserEmail == null
+                                            ? () => applyMissingRenewalDates(
+                                                summary,
+                                              )
+                                            : null,
+                                        icon: const Icon(
+                                          Icons.event_available_outlined,
+                                          size: 16,
+                                        ),
+                                        label: const Text('Set missing dates'),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: Colors.greenAccent,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                      ),
                                   ],
                                 ],
                               ),

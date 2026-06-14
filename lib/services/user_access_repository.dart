@@ -474,6 +474,9 @@ class UserAccessSummary {
       expiredByDateCount +
       expiringSoonCount +
       missingRenewalDateCount;
+  List<UserAccessRecord> get missingRenewalDateUsers => List.unmodifiable(
+    users.where((user) => user.access.needsAdminRenewalDate),
+  );
   List<String> get countryOptions {
     final countries = users
         .map((user) => user.country.trim())
