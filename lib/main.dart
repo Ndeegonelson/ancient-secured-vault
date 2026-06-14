@@ -36,6 +36,7 @@ import 'services/user_device_authorization_repository.dart';
 import 'services/user_access_state.dart';
 import 'services/user_subscription_checkout_client.dart';
 import 'services/user_subscription_request_repository.dart';
+import 'services/payment_webhook_event_repository.dart';
 import 'services/vault_document_metadata.dart';
 import 'services/vault_search_snippet.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
@@ -1010,12 +1011,14 @@ class _DashboardAdminOverview {
     required this.devices,
     required this.activity,
     required this.subscriptionRequests,
+    required this.webhookEvents,
   });
 
   final UserAccessSummary users;
   final UserDeviceSummary devices;
   final ReaderActivitySummary activity;
   final List<UserSubscriptionRequest> subscriptionRequests;
+  final List<PaymentWebhookEventRecord> webhookEvents;
 
   List<UserSubscriptionRequest> get manualProofRequests => List.unmodifiable(
     subscriptionRequests.where(
@@ -1029,6 +1032,10 @@ class _DashboardAdminOverview {
       );
 
   int get manualProofReviewCount => manualProofRequests.length;
+  int get webhookIssueCount =>
+      webhookEvents.where((event) => event.hasIssue).length;
+  int get webhookProcessingCount =>
+      webhookEvents.where((event) => event.isProcessing).length;
 }
 
 class _ReaderDashboardOverview {
@@ -1101,6 +1108,14 @@ enum _PaymentProofFilter {
   allPaymentList,
 }
 
+enum _PaymentWebhookFilter {
+  recentEvents,
+  failedEvents,
+  processingEvents,
+  stripeEvents,
+  paystackEvents,
+}
+
 class _AdminAttentionItem {
   const _AdminAttentionItem({
     required this.icon,
@@ -1152,6 +1167,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ReaderSuggestionRepository();
   final UserSubscriptionRequestRepository subscriptionRequestRepository =
       UserSubscriptionRequestRepository();
+  final PaymentWebhookEventRepository paymentWebhookEventRepository =
+      PaymentWebhookEventRepository();
   final UserSubscriptionCheckoutClient
   subscriptionCheckoutClient = UserSubscriptionCheckoutClient.firebase(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -1337,12 +1354,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final subscriptionRequests = await subscriptionRequestRepository.listRecent(
       limit: 50,
     );
+    final webhookEvents = await paymentWebhookEventRepository.listRecent(
+      limit: 40,
+    );
 
     return _DashboardAdminOverview(
       users: users,
       devices: devices,
       activity: activity,
       subscriptionRequests: subscriptionRequests,
+      webhookEvents: webhookEvents,
     );
   }
 
@@ -6299,6 +6320,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
+    if (overview.webhookIssueCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.webhook_outlined,
+          title: 'Payment webhook events need review',
+          detail:
+              '${_pluralize(overview.webhookIssueCount, 'webhook event has', 'webhook events have')} failed processing. Check Stripe and Paystack webhook audit records.',
+          tone: _AdminAttentionTone.danger,
+          actionLabel: 'Webhook events',
+          onPressed: showPaymentWebhookAudit,
+        ),
+      );
+    } else if (overview.webhookProcessingCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.sync_outlined,
+          title: 'Payment webhooks processing',
+          detail:
+              '${_pluralize(overview.webhookProcessingCount, 'webhook event is', 'webhook events are')} still marked as processing.',
+          tone: _AdminAttentionTone.warning,
+          actionLabel: 'Webhook events',
+          onPressed: showPaymentWebhookAudit,
+        ),
+      );
+    }
+
     if (overview.devices.pendingCount > 0) {
       items.add(
         _AdminAttentionItem(
@@ -6810,6 +6857,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   );
                 },
               ),
+              FutureBuilder<_DashboardAdminOverview>(
+                future: overviewFuture,
+                builder: (context, snapshot) {
+                  final overview = snapshot.data;
+                  final issueCount = overview?.webhookIssueCount;
+                  final processingCount = overview?.webhookProcessingCount;
+                  return buildAdminMetricTile(
+                    icon: Icons.webhook_outlined,
+                    label: 'Webhooks',
+                    value: overview?.webhookEvents.length.toString() ?? '...',
+                    detail: overview == null
+                        ? 'Loading webhook audit'
+                        : issueCount! > 0
+                        ? '$issueCount failed event${issueCount == 1 ? '' : 's'}'
+                        : processingCount! > 0
+                        ? '$processingCount processing'
+                        : 'Stripe and Paystack clear',
+                    color: overview == null
+                        ? Colors.white54
+                        : issueCount! > 0
+                        ? Colors.redAccent
+                        : processingCount! > 0
+                        ? Colors.orangeAccent
+                        : Colors.cyanAccent,
+                    onTap: showPaymentWebhookAudit,
+                  );
+                },
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -6897,6 +6972,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 label: 'Requests',
                 detail: 'Review subscription asks',
                 onPressed: showSubscriptionRequestInbox,
+              ),
+              buildAdminActionButton(
+                icon: Icons.webhook_outlined,
+                label: 'Webhooks',
+                detail: 'Payment event audit',
+                onPressed: showPaymentWebhookAudit,
               ),
             ],
           ),
@@ -7535,6 +7616,556 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .toList(growable: false),
       _PaymentProofFilter.allPaymentList => List.unmodifiable(requests),
     };
+  }
+
+  String paymentWebhookFilterLabel(_PaymentWebhookFilter filter) {
+    return switch (filter) {
+      _PaymentWebhookFilter.recentEvents => 'Recent webhook events',
+      _PaymentWebhookFilter.failedEvents => 'Failed webhook events',
+      _PaymentWebhookFilter.processingEvents => 'Processing webhook events',
+      _PaymentWebhookFilter.stripeEvents => 'Stripe webhook events',
+      _PaymentWebhookFilter.paystackEvents => 'Paystack webhook events',
+    };
+  }
+
+  String paymentWebhookFilterDetail(_PaymentWebhookFilter filter) {
+    return switch (filter) {
+      _PaymentWebhookFilter.recentEvents =>
+        'Latest Stripe and Paystack webhook deliveries recorded by the backend.',
+      _PaymentWebhookFilter.failedEvents =>
+        'Webhook deliveries that ended with an error and need admin review.',
+      _PaymentWebhookFilter.processingEvents =>
+        'Webhook deliveries currently marked as processing or retryable.',
+      _PaymentWebhookFilter.stripeEvents =>
+        'Stripe checkout, invoice, and subscription webhook deliveries.',
+      _PaymentWebhookFilter.paystackEvents =>
+        'Paystack charge webhook deliveries and verification results.',
+    };
+  }
+
+  IconData paymentWebhookFilterIcon(_PaymentWebhookFilter filter) {
+    return switch (filter) {
+      _PaymentWebhookFilter.recentEvents => Icons.webhook_outlined,
+      _PaymentWebhookFilter.failedEvents => Icons.error_outline,
+      _PaymentWebhookFilter.processingEvents => Icons.sync_outlined,
+      _PaymentWebhookFilter.stripeEvents => Icons.credit_card_outlined,
+      _PaymentWebhookFilter.paystackEvents =>
+        Icons.account_balance_wallet_outlined,
+    };
+  }
+
+  Color paymentWebhookFilterColor(_PaymentWebhookFilter filter) {
+    return switch (filter) {
+      _PaymentWebhookFilter.recentEvents => Colors.cyanAccent,
+      _PaymentWebhookFilter.failedEvents => Colors.redAccent,
+      _PaymentWebhookFilter.processingEvents => Colors.orangeAccent,
+      _PaymentWebhookFilter.stripeEvents => Colors.deepPurpleAccent,
+      _PaymentWebhookFilter.paystackEvents => Colors.greenAccent,
+    };
+  }
+
+  Color paymentWebhookStatusColor(PaymentWebhookStatus status) {
+    return switch (status) {
+      PaymentWebhookStatus.processed => Colors.greenAccent,
+      PaymentWebhookStatus.processing => Colors.orangeAccent,
+      PaymentWebhookStatus.failed => Colors.redAccent,
+      PaymentWebhookStatus.unknown => Colors.white54,
+    };
+  }
+
+  IconData paymentWebhookProviderIcon(PaymentWebhookProvider provider) {
+    return switch (provider) {
+      PaymentWebhookProvider.stripe => Icons.credit_card_outlined,
+      PaymentWebhookProvider.paystack => Icons.account_balance_wallet_outlined,
+      PaymentWebhookProvider.unknown => Icons.help_outline,
+    };
+  }
+
+  List<PaymentWebhookEventRecord> filterPaymentWebhookEvents(
+    List<PaymentWebhookEventRecord> events,
+    _PaymentWebhookFilter filter,
+  ) {
+    return switch (filter) {
+      _PaymentWebhookFilter.recentEvents => List.unmodifiable(events),
+      _PaymentWebhookFilter.failedEvents =>
+        events.where((event) => event.hasIssue).toList(growable: false),
+      _PaymentWebhookFilter.processingEvents =>
+        events.where((event) => event.isProcessing).toList(growable: false),
+      _PaymentWebhookFilter.stripeEvents =>
+        events
+            .where((event) => event.provider == PaymentWebhookProvider.stripe)
+            .toList(growable: false),
+      _PaymentWebhookFilter.paystackEvents =>
+        events
+            .where((event) => event.provider == PaymentWebhookProvider.paystack)
+            .toList(growable: false),
+    };
+  }
+
+  Future<void> showPaymentWebhookAudit() async {
+    if (!requireVaultManagerAccess()) return;
+
+    var eventsFuture = paymentWebhookEventRepository.listRecent(limit: 50);
+    var webhookFilter = _PaymentWebhookFilter.recentEvents;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Widget eventChip(String label, Color color, {IconData? icon}) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: color.withValues(alpha: 0.42)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, color: color, size: 13),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            Widget eventField({
+              required String label,
+              required String value,
+              int maxLines = 2,
+            }) {
+              final cleanValue = value.trim();
+              if (cleanValue.isEmpty) return const SizedBox.shrink();
+
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 7),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 88,
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: SelectableText(
+                        cleanValue,
+                        maxLines: maxLines,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            Widget eventTile(PaymentWebhookEventRecord event) {
+              final statusColor = paymentWebhookStatusColor(event.status);
+              final providerColor =
+                  event.provider == PaymentWebhookProvider.paystack
+                  ? Colors.greenAccent
+                  : event.provider == PaymentWebhookProvider.stripe
+                  ? Colors.deepPurpleAccent
+                  : Colors.white54;
+              final borderColor = event.hasIssue
+                  ? Colors.redAccent
+                  : statusColor;
+
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF151821),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: borderColor.withValues(alpha: 0.38),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: borderColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            event.hasIssue
+                                ? Icons.error_outline
+                                : paymentWebhookProviderIcon(event.provider),
+                            color: borderColor,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                event.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                event.primaryReference.isEmpty
+                                    ? event.id
+                                    : event.primaryReference,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: borderColor,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        eventChip(
+                          event.providerLabel,
+                          providerColor,
+                          icon: paymentWebhookProviderIcon(event.provider),
+                        ),
+                        eventChip(
+                          event.statusLabel,
+                          statusColor,
+                          icon: event.hasIssue
+                              ? Icons.error_outline
+                              : Icons.fact_check_outlined,
+                        ),
+                      ],
+                    ),
+                    eventField(label: 'Event ID', value: event.eventId),
+                    eventField(label: 'User', value: event.userEmail),
+                    eventField(label: 'Request', value: event.requestId),
+                    eventField(label: 'Payment', value: event.paymentReference),
+                    eventField(
+                      label: 'Sub / invoice',
+                      value: [
+                        event.subscriptionId,
+                        event.invoiceId,
+                      ].where((value) => value.trim().isNotEmpty).join(' | '),
+                    ),
+                    eventField(
+                      label: 'Issue',
+                      value: event.errorMessage.isNotEmpty
+                          ? event.errorMessage
+                          : event.reason,
+                      maxLines: 3,
+                    ),
+                    eventField(
+                      label: 'Updated',
+                      value: formatDashboardTimestamp(event.latestTimestamp),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return PointerInterceptor(
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF0F1117),
+                title: const Text(
+                  'Webhook Events',
+                  style: TextStyle(color: Colors.greenAccent),
+                ),
+                content: SizedBox(
+                  width: 760,
+                  height: MediaQuery.of(context).size.height * 0.70,
+                  child: FutureBuilder<List<PaymentWebhookEventRecord>>(
+                    future: eventsFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Text(
+                          snapshot.error.toString(),
+                          style: const TextStyle(color: Colors.redAccent),
+                        );
+                      }
+
+                      if (!snapshot.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                        );
+                      }
+
+                      final events = snapshot.data!;
+                      final filteredEvents = filterPaymentWebhookEvents(
+                        events,
+                        webhookFilter,
+                      );
+                      final filterColor = paymentWebhookFilterColor(
+                        webhookFilter,
+                      );
+                      final failedCount = events
+                          .where((event) => event.hasIssue)
+                          .length;
+                      final processingCount = events
+                          .where((event) => event.isProcessing)
+                          .length;
+
+                      return SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child:
+                                      DropdownButtonFormField<
+                                        _PaymentWebhookFilter
+                                      >(
+                                        initialValue: webhookFilter,
+                                        dropdownColor: const Color(0xFF1A1D25),
+                                        iconEnabledColor: Colors.greenAccent,
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                        ),
+                                        decoration: const InputDecoration(
+                                          labelText: 'Sort webhook events',
+                                          labelStyle: TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderSide: BorderSide(
+                                              color: Colors.white24,
+                                            ),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderSide: BorderSide(
+                                              color: Colors.greenAccent,
+                                            ),
+                                          ),
+                                        ),
+                                        items: _PaymentWebhookFilter.values
+                                            .map((filter) {
+                                              return DropdownMenuItem(
+                                                value: filter,
+                                                child: Text(
+                                                  paymentWebhookFilterLabel(
+                                                    filter,
+                                                  ),
+                                                ),
+                                              );
+                                            })
+                                            .toList(growable: false),
+                                        onChanged: (value) {
+                                          setDialogState(() {
+                                            webhookFilter =
+                                                value ??
+                                                _PaymentWebhookFilter
+                                                    .recentEvents;
+                                          });
+                                        },
+                                      ),
+                                ),
+                                const SizedBox(width: 12),
+                                Container(
+                                  width: 150,
+                                  padding: const EdgeInsets.all(11),
+                                  decoration: BoxDecoration(
+                                    color: filterColor.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: filterColor.withValues(
+                                        alpha: 0.36,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        paymentWebhookFilterIcon(webhookFilter),
+                                        color: filterColor,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        filteredEvents.length.toString(),
+                                        style: TextStyle(
+                                          color: filterColor,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const Text(
+                                        'events shown',
+                                        style: TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: filterColor.withValues(alpha: 0.08),
+                                border: Border.all(
+                                  color: filterColor.withValues(alpha: 0.34),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    paymentWebhookFilterIcon(webhookFilter),
+                                    color: filterColor,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          paymentWebhookFilterLabel(
+                                            webhookFilter,
+                                          ),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          paymentWebhookFilterDetail(
+                                            webhookFilter,
+                                          ),
+                                          style: const TextStyle(
+                                            color: Colors.white60,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                        if (failedCount > 0) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            '$failedCount webhook ${failedCount == 1 ? 'event needs' : 'events need'} review.',
+                                            style: const TextStyle(
+                                              color: Colors.redAccent,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ] else if (processingCount > 0) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            '$processingCount webhook ${processingCount == 1 ? 'event is' : 'events are'} still processing.',
+                                            style: const TextStyle(
+                                              color: Colors.orangeAccent,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            if (filteredEvents.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 18),
+                                child: Text(
+                                  'No webhook events match this filter.',
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              )
+                            else
+                              ...filteredEvents.map(eventTile),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                actions: [
+                  TextButton.icon(
+                    onPressed: () {
+                      setDialogState(() {
+                        eventsFuture = paymentWebhookEventRepository.listRecent(
+                          limit: 50,
+                        );
+                      });
+                    },
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Refresh'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.greenAccent,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(color: Colors.greenAccent),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> showSubscriptionRequestInbox() async {
