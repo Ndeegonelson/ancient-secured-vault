@@ -11228,11 +11228,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final String viewId;
   html.IFrameElement? pdfIframe;
   html.DivElement? protectedPdfImageContainer;
+  Timer? standardPdfLoadTimer;
   int currentPdfPage = 1;
   int? pdfPageCount;
   String currentSearchQuery = '';
   bool isCheckingViewerAccess = true;
   bool canViewDocument = false;
+  bool isStandardPdfLoading = false;
+  bool standardPdfLoadTimedOut = false;
   UserAccessState readerUserAccess = const UserAccessState();
   bool readerSessionStarted = false;
   bool showReaderStatusOverlay = true;
@@ -11495,9 +11498,91 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Widget buildPdfDocumentSurface() {
+    return Stack(
+      children: [
+        IgnorePointer(
+          ignoring: shouldShowReaderPrivacyShield,
+          child: HtmlElementView(viewType: viewId),
+        ),
+        if (!readerProtectionPolicy.usesProtectedImageReader &&
+            (isStandardPdfLoading || standardPdfLoadTimedOut))
+          Positioned.fill(child: buildStandardPdfLoadingOverlay()),
+      ],
+    );
+  }
+
+  Widget buildStandardPdfLoadingOverlay() {
+    final hasTimedOut = standardPdfLoadTimedOut;
+
     return IgnorePointer(
-      ignoring: shouldShowReaderPrivacyShield,
-      child: HtmlElementView(viewType: viewId),
+      ignoring: !hasTimedOut,
+      child: AnimatedOpacity(
+        opacity: hasTimedOut ? 1 : 0.88,
+        duration: const Duration(milliseconds: 200),
+        child: Container(
+          color: const Color(0xDD111217),
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Card(
+              color: const Color(0xFF171A22),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(
+                  color: hasTimedOut ? Colors.orangeAccent : Colors.white12,
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      hasTimedOut
+                          ? Icons.refresh
+                          : Icons.picture_as_pdf_outlined,
+                      color: hasTimedOut
+                          ? Colors.orangeAccent
+                          : Colors.greenAccent,
+                      size: 34,
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      hasTimedOut
+                          ? 'This PDF is taking longer than expected.'
+                          : 'Opening PDF...',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: hasTimedOut
+                            ? Colors.orangeAccent
+                            : Colors.greenAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      hasTimedOut
+                          ? 'Check the connection, then retry the document.'
+                          : 'Preparing the reader for this document.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    if (hasTimedOut) ...[
+                      const SizedBox(height: 16),
+                      TextButton.icon(
+                        onPressed: retryCurrentPdfLoad,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry PDF'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -11782,6 +11867,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
         handleProtectedReaderAction(source: 'pdf_right_click', event: event);
       });
+      iframe.onLoad.listen((_) {
+        if (iframe.src == 'about:blank') return;
+        standardPdfLoadTimer?.cancel();
+        if (!mounted) {
+          isStandardPdfLoading = false;
+          standardPdfLoadTimedOut = false;
+          return;
+        }
+        setState(() {
+          isStandardPdfLoading = false;
+          standardPdfLoadTimedOut = false;
+        });
+      });
 
       pdfIframe = iframe;
       protectedPdfImageContainer = null;
@@ -11801,6 +11899,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final iframe = pdfIframe;
     if (iframe == null) return;
 
+    standardPdfLoadTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        isStandardPdfLoading = true;
+        standardPdfLoadTimedOut = false;
+      });
+    } else {
+      isStandardPdfLoading = true;
+      standardPdfLoadTimedOut = false;
+    }
+    standardPdfLoadTimer = Timer(const Duration(seconds: 18), () {
+      if (!mounted || pdfIframe != iframe) return;
+      setState(() {
+        isStandardPdfLoading = false;
+        standardPdfLoadTimedOut = true;
+      });
+    });
+
     final url = buildPdfViewerUrl(
       pageNumber: pageNumber,
       searchQuery: searchQuery,
@@ -11817,6 +11933,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
 
     iframe.src = url;
+  }
+
+  void retryCurrentPdfLoad() {
+    updatePdfIframeSource(
+      pageNumber: currentPdfPage,
+      searchQuery: currentSearchQuery,
+      forceReload: true,
+    );
   }
 
   Future<void> ensurePdfJsReady() {
@@ -12061,7 +12185,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       await renderProtectedPdfPagesAroundPage(
         currentPdfPage,
         renderGeneration: renderGeneration,
-        radius: 1,
+        radius: 0,
+      );
+      unawaited(
+        renderProtectedPdfPagesAroundPage(
+          currentPdfPage,
+          renderGeneration: renderGeneration,
+          radius: 2,
+        ),
       );
     } catch (error) {
       if (renderGeneration != protectedPdfRenderGeneration) return;
@@ -16810,6 +16941,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   void dispose() {
     saveNarrationSessionSummary(finished: true);
     readerVisibilitySubscription?.cancel();
+    standardPdfLoadTimer?.cancel();
     readerWindowBlurSubscription?.cancel();
     readerWindowFocusSubscription?.cancel();
     readerContextMenuSubscription?.cancel();
