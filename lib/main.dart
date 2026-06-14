@@ -11229,6 +11229,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   html.IFrameElement? pdfIframe;
   html.DivElement? protectedPdfImageContainer;
   Timer? standardPdfLoadTimer;
+  Timer? protectedPdfPreloadTimer;
+  Timer? protectedPageJumpTimer;
   int currentPdfPage = 1;
   int? pdfPageCount;
   String currentSearchQuery = '';
@@ -11236,6 +11238,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool canViewDocument = false;
   bool isStandardPdfLoading = false;
   bool standardPdfLoadTimedOut = false;
+  bool isProtectedPageJumping = false;
+  int? protectedPageJumpTarget;
   UserAccessState readerUserAccess = const UserAccessState();
   bool readerSessionStarted = false;
   bool showReaderStatusOverlay = true;
@@ -11507,7 +11511,61 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         if (!readerProtectionPolicy.usesProtectedImageReader &&
             (isStandardPdfLoading || standardPdfLoadTimedOut))
           Positioned.fill(child: buildStandardPdfLoadingOverlay()),
+        if (readerProtectionPolicy.usesProtectedImageReader &&
+            isProtectedPageJumping)
+          Positioned.fill(child: buildProtectedPageJumpOverlay()),
       ],
+    );
+  }
+
+  Widget buildProtectedPageJumpOverlay() {
+    final targetPage = protectedPageJumpTarget ?? currentPdfPage;
+
+    return IgnorePointer(
+      child: Container(
+        alignment: Alignment.topCenter,
+        padding: const EdgeInsets.only(top: 18),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xEE111217),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: Colors.greenAccent.withValues(alpha: 0.5),
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black54,
+                blurRadius: 18,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.greenAccent,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Opening page $targetPage...',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -11943,6 +12001,62 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
   }
 
+  void showProtectedPageJumpOverlay(int pageNumber) {
+    if (!readerProtectionPolicy.usesProtectedImageReader) return;
+
+    protectedPageJumpTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        isProtectedPageJumping = true;
+        protectedPageJumpTarget = pageNumber;
+      });
+    } else {
+      isProtectedPageJumping = true;
+      protectedPageJumpTarget = pageNumber;
+    }
+
+    protectedPageJumpTimer = Timer(const Duration(seconds: 10), () {
+      clearProtectedPageJumpOverlay(pageNumber);
+    });
+  }
+
+  void clearProtectedPageJumpOverlay([int? pageNumber]) {
+    if (pageNumber != null &&
+        protectedPageJumpTarget != null &&
+        protectedPageJumpTarget != pageNumber) {
+      return;
+    }
+
+    protectedPageJumpTimer?.cancel();
+    protectedPageJumpTimer = null;
+    if (mounted) {
+      setState(() {
+        isProtectedPageJumping = false;
+        protectedPageJumpTarget = null;
+      });
+    } else {
+      isProtectedPageJumping = false;
+      protectedPageJumpTarget = null;
+    }
+  }
+
+  void scheduleProtectedPdfPreloadAroundPage(
+    int pageNumber, {
+    int radius = 2,
+    Duration delay = const Duration(milliseconds: 180),
+  }) {
+    protectedPdfPreloadTimer?.cancel();
+    protectedPdfPreloadTimer = Timer(delay, () {
+      unawaited(
+        renderProtectedPdfPagesAroundPage(
+          pageNumber,
+          renderGeneration: protectedPdfRenderGeneration,
+          radius: radius,
+        ),
+      );
+    });
+  }
+
   Future<void> ensurePdfJsReady() {
     final existing = _pdfJsReady;
     if (existing != null) return existing;
@@ -12187,13 +12301,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         renderGeneration: renderGeneration,
         radius: 0,
       );
-      unawaited(
-        renderProtectedPdfPagesAroundPage(
-          currentPdfPage,
-          renderGeneration: renderGeneration,
-          radius: 2,
-        ),
-      );
+      scheduleProtectedPdfPreloadAroundPage(currentPdfPage);
     } catch (error) {
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
@@ -12307,9 +12415,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         if (renderGeneration != protectedPdfRenderGeneration) return;
 
         final job = protectedPdfRenderJobs[page];
-        if (job == null || job.isRendered || job.isRendering) continue;
+        if (job == null) continue;
+
+        if (job.isRendered || job.isRendering) {
+          if (page == safePageNumber && job.isRendered) {
+            clearProtectedPageJumpOverlay(page);
+          }
+          continue;
+        }
 
         await renderProtectedPdfPage(job, renderGeneration: renderGeneration);
+        if (page == safePageNumber) {
+          clearProtectedPageJumpOverlay(page);
+        }
       }
 
       releaseDistantProtectedPdfPages(safePageNumber);
@@ -12472,8 +12590,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       renderProtectedPdfPagesAroundPage(
         visiblePage,
         renderGeneration: protectedPdfRenderGeneration,
+        radius: 0,
       ),
     );
+    scheduleProtectedPdfPreloadAroundPage(visiblePage);
   }
 
   void scrollProtectedPdfImageReaderToPage(int pageNumber) {
@@ -12490,8 +12610,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       renderProtectedPdfPagesAroundPage(
         pageNumber,
         renderGeneration: protectedPdfRenderGeneration,
+        radius: 0,
       ),
     );
+    scheduleProtectedPdfPreloadAroundPage(pageNumber);
   }
 
   void centerProtectedPdfImageReaderHorizontally() {
@@ -12568,6 +12690,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     protectedPdfRenderStarted = false;
     protectedPdfRenderQueueActive = false;
     pendingProtectedPdfRenderPage = null;
+    protectedPdfPreloadTimer?.cancel();
     protectedPdfRenderJobs.clear();
     container.children.clear();
     container.children.add(
@@ -12859,6 +12982,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
 
     if (readerProtectionPolicy.usesProtectedImageReader) {
+      showProtectedPageJumpOverlay(safePageNumber);
       scrollProtectedPdfImageReaderToPage(currentPdfPage);
     } else {
       updatePdfIframeSource(
@@ -16942,6 +17066,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     saveNarrationSessionSummary(finished: true);
     readerVisibilitySubscription?.cancel();
     standardPdfLoadTimer?.cancel();
+    protectedPdfPreloadTimer?.cancel();
+    protectedPageJumpTimer?.cancel();
     readerWindowBlurSubscription?.cancel();
     readerWindowFocusSubscription?.cancel();
     readerContextMenuSubscription?.cancel();
