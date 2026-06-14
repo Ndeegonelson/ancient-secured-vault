@@ -97,6 +97,18 @@ void main() {
       'Paystack',
     );
     expect(
+      userSubscriptionPaymentMethodKey(UserSubscriptionPaymentMethod.manual),
+      'manual',
+    );
+    expect(
+      userSubscriptionPaymentMethodLabel(UserSubscriptionPaymentMethod.manual),
+      'Manual proof',
+    );
+    expect(
+      readUserSubscriptionPaymentMethod('bank transfer'),
+      UserSubscriptionPaymentMethod.manual,
+    );
+    expect(
       readUserSubscriptionPaymentStatus('paid'),
       UserSubscriptionPaymentStatus.confirmed,
     );
@@ -112,5 +124,33 @@ void main() {
       ),
       'Awaiting payment',
     );
+  });
+
+  test('manual payment proof starts in pending confirmation', () {
+    final payload = const UserSubscriptionRequestDraft(
+      userEmail: 'reader@example.com',
+      paymentMethod: UserSubscriptionPaymentMethod.manual,
+      paymentStatus: UserSubscriptionPaymentStatus.pendingConfirmation,
+      paymentReference: 'MOMO-7788',
+      message: 'Paid through mobile money.',
+    ).toFirestore(createdAt: 'now');
+
+    expect(payload['paymentMethod'], 'manual');
+    expect(payload['paymentStatus'], 'pending_confirmation');
+    expect(payload['paymentReference'], 'MOMO-7788');
+    expect(payload['message'], 'Paid through mobile money.');
+  });
+
+  test('flags manual proofs that need admin review', () {
+    final request = UserSubscriptionRequest.fromMap({
+      'userEmail': 'reader@example.com',
+      'paymentMethod': 'manual',
+      'paymentStatus': 'pending_confirmation',
+      'status': 'open',
+    }, id: 'request-1');
+
+    expect(request.isManualProof, isTrue);
+    expect(request.isOpenForReview, isTrue);
+    expect(request.isManualProofAwaitingReview, isTrue);
   });
 }

@@ -1009,11 +1009,21 @@ class _DashboardAdminOverview {
     required this.users,
     required this.devices,
     required this.activity,
+    required this.subscriptionRequests,
   });
 
   final UserAccessSummary users;
   final UserDeviceSummary devices;
   final ReaderActivitySummary activity;
+  final List<UserSubscriptionRequest> subscriptionRequests;
+
+  List<UserSubscriptionRequest> get manualProofRequests => List.unmodifiable(
+    subscriptionRequests.where(
+      (request) => request.isManualProofAwaitingReview,
+    ),
+  );
+
+  int get manualProofReviewCount => manualProofRequests.length;
 }
 
 class _ReaderDashboardOverview {
@@ -1302,11 +1312,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       recentLimit: 6,
       topDocumentLimit: 4,
     );
+    final subscriptionRequests = await subscriptionRequestRepository.listRecent(
+      limit: 50,
+    );
 
     return _DashboardAdminOverview(
       users: users,
       devices: devices,
       activity: activity,
+      subscriptionRequests: subscriptionRequests,
     );
   }
 
@@ -5318,8 +5332,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String value,
     required String detail,
     required Color color,
+    VoidCallback? onTap,
   }) {
-    return Container(
+    final tile = Container(
       width: 210,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -5362,6 +5377,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
+    );
+
+    if (onTap == null) return tile;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: tile,
     );
   }
 
@@ -6243,6 +6266,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (overview == null) return items;
 
+    if (overview.manualProofReviewCount > 0) {
+      items.add(
+        _AdminAttentionItem(
+          icon: Icons.receipt_long_outlined,
+          title: 'Manual payment proofs pending',
+          detail:
+              '${_pluralize(overview.manualProofReviewCount, 'proof needs', 'proofs need')} admin verification before premium access is activated.',
+          tone: _AdminAttentionTone.warning,
+          actionLabel: 'Review proofs',
+          onPressed: showSubscriptionRequestInbox,
+        ),
+      );
+    }
+
     if (overview.devices.pendingCount > 0) {
       items.add(
         _AdminAttentionItem(
@@ -6730,6 +6767,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ? 'Loading reader activity'
                         : '${overview.activity.uniqueReaderCount} readers | ${overview.activity.blockedAccessCount} blocked',
                     color: Colors.cyanAccent,
+                  );
+                },
+              ),
+              FutureBuilder<_DashboardAdminOverview>(
+                future: overviewFuture,
+                builder: (context, snapshot) {
+                  final overview = snapshot.data;
+                  final count = overview?.manualProofReviewCount;
+                  return buildAdminMetricTile(
+                    icon: Icons.receipt_long_outlined,
+                    label: 'Manual proofs',
+                    value: count?.toString() ?? '...',
+                    detail: overview == null
+                        ? 'Loading payment proof queue'
+                        : count == 0
+                        ? 'No manual payments pending'
+                        : '$count awaiting admin approval',
+                    color: count == null || count == 0
+                        ? Colors.white54
+                        : Colors.orangeAccent,
+                    onTap: showSubscriptionRequestInbox,
                   );
                 },
               ),
@@ -7317,10 +7375,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               });
 
               try {
-                await subscriptionRequestRepository.updateStatus(
-                  requestId: request.id,
-                  status: status,
-                );
+                if (status == UserSubscriptionRequestStatus.approved) {
+                  await subscriptionRequestRepository.approveRequest(
+                    request: request,
+                    changedByEmail: FirebaseAuth.instance.currentUser?.email,
+                  );
+                } else {
+                  await subscriptionRequestRepository.updateStatus(
+                    requestId: request.id,
+                    status: status,
+                  );
+                }
                 if (!mounted) return;
                 setDialogState(() {
                   requestsFuture = subscriptionRequestRepository.listRecent(
@@ -7388,6 +7453,170 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             }
 
+            Widget requestDetailLine(String label, String value) {
+              final cleanValue = value.trim();
+              if (cleanValue.isEmpty) return const SizedBox.shrink();
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 130,
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: SelectableText(
+                        cleanValue,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            Future<void> showRequestReviewDetails(
+              UserSubscriptionRequest request,
+            ) async {
+              await showDialog<void>(
+                context: context,
+                builder: (detailContext) {
+                  return PointerInterceptor(
+                    child: AlertDialog(
+                      backgroundColor: const Color(0xFF0F1117),
+                      title: Text(
+                        request.isManualProof
+                            ? 'Review manual payment proof'
+                            : 'Review subscription request',
+                        style: const TextStyle(color: Colors.greenAccent),
+                      ),
+                      content: SizedBox(
+                        width: 520,
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (request.isManualProofAwaitingReview) ...[
+                                Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.only(bottom: 14),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amberAccent.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    border: Border.all(
+                                      color: Colors.amberAccent.withValues(
+                                        alpha: 0.55,
+                                      ),
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Text(
+                                    'This proof is awaiting admin verification. Approving it activates premium vault access for this user.',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              requestDetailLine('User', request.userEmail),
+                              requestDetailLine('Plan', request.requestedPlan),
+                              requestDetailLine(
+                                'Method',
+                                userSubscriptionPaymentMethodLabel(
+                                  request.paymentMethod,
+                                ),
+                              ),
+                              requestDetailLine(
+                                'Payment status',
+                                userSubscriptionPaymentStatusLabel(
+                                  request.paymentStatus,
+                                ),
+                              ),
+                              requestDetailLine(
+                                'Request status',
+                                userSubscriptionRequestStatusLabel(
+                                  request.status,
+                                ),
+                              ),
+                              requestDetailLine(
+                                'Proof / reference',
+                                request.paymentReference,
+                              ),
+                              requestDetailLine(
+                                'Submitted note',
+                                request.message,
+                              ),
+                              requestDetailLine(
+                                'Submitted',
+                                formatDashboardTimestamp(
+                                  request.latestTimestamp,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(detailContext),
+                          child: const Text(
+                            'Close',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                        if (request.status !=
+                            UserSubscriptionRequestStatus.declined)
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(detailContext);
+                              updateRequestStatus(
+                                request,
+                                UserSubscriptionRequestStatus.declined,
+                              );
+                            },
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.redAccent,
+                            ),
+                            child: const Text('Decline'),
+                          ),
+                        if (request.status !=
+                            UserSubscriptionRequestStatus.approved)
+                          TextButton.icon(
+                            onPressed: () {
+                              Navigator.pop(detailContext);
+                              updateRequestStatus(
+                                request,
+                                UserSubscriptionRequestStatus.approved,
+                              );
+                            },
+                            icon: const Icon(Icons.verified_outlined, size: 18),
+                            label: const Text('Approve premium'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.greenAccent,
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            }
+
             return PointerInterceptor(
               child: AlertDialog(
                 backgroundColor: const Color(0xFF0F1117),
@@ -7429,142 +7658,221 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }
 
+                      final manualReviewCount = requests.where((request) {
+                        return request.paymentMethod ==
+                                UserSubscriptionPaymentMethod.manual &&
+                            request.status !=
+                                UserSubscriptionRequestStatus.approved &&
+                            request.status !=
+                                UserSubscriptionRequestStatus.declined &&
+                            request.status !=
+                                UserSubscriptionRequestStatus.archived;
+                      }).length;
+
                       return SingleChildScrollView(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
-                          children: requests.map((request) {
-                            final isBusy = busyRequestId == request.id;
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: Icon(
-                                Icons.workspace_premium_outlined,
-                                color: subscriptionPaymentStatusColor(
-                                  request.paymentStatus,
+                          children: [
+                            if (manualReviewCount > 0) ...[
+                              Container(
+                                width: double.infinity,
+                                margin: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.amberAccent.withValues(
+                                    alpha: 0.08,
+                                  ),
+                                  border: Border.all(
+                                    color: Colors.amberAccent.withValues(
+                                      alpha: 0.55,
+                                    ),
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(
+                                      Icons.receipt_long_outlined,
+                                      color: Colors.amberAccent,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        '$manualReviewCount manual payment proof ${manualReviewCount == 1 ? 'request needs' : 'requests need'} admin verification before premium access is activated.',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              title: Text(
-                                request.userEmail,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              subtitle: Text(
-                                [
-                                  'Plan: ${request.requestedPlan}',
-                                  userSubscriptionPaymentMethodLabel(
-                                    request.paymentMethod,
-                                  ),
-                                  userSubscriptionPaymentStatusLabel(
+                            ],
+                            ...requests.map((request) {
+                              final isBusy = busyRequestId == request.id;
+                              final isManualProof =
+                                  request.paymentMethod ==
+                                  UserSubscriptionPaymentMethod.manual;
+                              final isManualReviewPending =
+                                  isManualProof &&
+                                  request.status !=
+                                      UserSubscriptionRequestStatus.approved &&
+                                  request.status !=
+                                      UserSubscriptionRequestStatus.declined &&
+                                  request.status !=
+                                      UserSubscriptionRequestStatus.archived;
+                              return ListTile(
+                                onTap: () => showRequestReviewDetails(request),
+                                isThreeLine: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(
+                                  isManualProof
+                                      ? Icons.receipt_long_outlined
+                                      : Icons.workspace_premium_outlined,
+                                  color: subscriptionPaymentStatusColor(
                                     request.paymentStatus,
                                   ),
-                                  userSubscriptionRequestStatusLabel(
-                                    request.status,
-                                  ),
-                                  if (request.paymentReference.isNotEmpty)
-                                    'Ref: ${request.paymentReference}',
-                                  if (request.message.isNotEmpty)
-                                    request.message,
-                                  formatDashboardTimestamp(
-                                    request.latestTimestamp,
-                                  ),
-                                ].join(' | '),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white38,
-                                  fontSize: 12,
                                 ),
-                              ),
-                              trailing: isBusy
-                                  ? const SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.greenAccent,
-                                      ),
-                                    )
-                                  : PopupMenuButton<Object>(
-                                      tooltip: 'Update request status',
-                                      color: const Color(0xFF1A1D25),
-                                      icon: const Icon(
-                                        Icons.more_vert,
-                                        color: Colors.white70,
-                                      ),
-                                      onSelected: (value) {
-                                        if (value
-                                            is UserSubscriptionRequestStatus) {
-                                          updateRequestStatus(request, value);
-                                          return;
-                                        }
-                                        if (value
-                                            is UserSubscriptionPaymentStatus) {
-                                          updatePaymentStatus(request, value);
-                                        }
-                                      },
-                                      itemBuilder: (context) => [
-                                        const PopupMenuItem<Object>(
-                                          enabled: false,
-                                          child: Text(
-                                            'Request status',
-                                            style: TextStyle(
-                                              color: Colors.white38,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ),
-                                        ...UserSubscriptionRequestStatus.values
-                                            .where(
-                                              (status) =>
-                                                  status != request.status,
-                                            )
-                                            .map(
-                                              (status) => PopupMenuItem<Object>(
-                                                value: status,
-                                                child: Text(
-                                                  userSubscriptionRequestStatusLabel(
-                                                    status,
-                                                  ),
-                                                  style: const TextStyle(
-                                                    color: Colors.white70,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                        const PopupMenuDivider(),
-                                        const PopupMenuItem<Object>(
-                                          enabled: false,
-                                          child: Text(
-                                            'Payment status',
-                                            style: TextStyle(
-                                              color: Colors.white38,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ),
-                                        ...UserSubscriptionPaymentStatus.values
-                                            .where(
-                                              (status) =>
-                                                  status !=
-                                                  request.paymentStatus,
-                                            )
-                                            .map(
-                                              (status) => PopupMenuItem<Object>(
-                                                value: status,
-                                                child: Text(
-                                                  userSubscriptionPaymentStatusLabel(
-                                                    status,
-                                                  ),
-                                                  style: const TextStyle(
-                                                    color: Colors.white70,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                      ],
+                                title: Text(
+                                  request.userEmail,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                                subtitle: Text(
+                                  [
+                                    'Plan: ${request.requestedPlan}',
+                                    if (isManualReviewPending)
+                                      'Manual proof awaiting admin verification',
+                                    userSubscriptionPaymentMethodLabel(
+                                      request.paymentMethod,
                                     ),
-                            );
-                          }).toList(),
+                                    userSubscriptionPaymentStatusLabel(
+                                      request.paymentStatus,
+                                    ),
+                                    userSubscriptionRequestStatusLabel(
+                                      request.status,
+                                    ),
+                                    if (request.paymentReference.isNotEmpty)
+                                      'Ref: ${request.paymentReference}',
+                                    if (request.message.isNotEmpty)
+                                      request.message,
+                                    formatDashboardTimestamp(
+                                      request.latestTimestamp,
+                                    ),
+                                  ].join(' | '),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                trailing: isBusy
+                                    ? const SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.greenAccent,
+                                        ),
+                                      )
+                                    : PopupMenuButton<Object>(
+                                        tooltip: 'Update request status',
+                                        color: const Color(0xFF1A1D25),
+                                        icon: const Icon(
+                                          Icons.more_vert,
+                                          color: Colors.white70,
+                                        ),
+                                        onSelected: (value) {
+                                          if (value
+                                              is UserSubscriptionRequestStatus) {
+                                            updateRequestStatus(request, value);
+                                            return;
+                                          }
+                                          if (value
+                                              is UserSubscriptionPaymentStatus) {
+                                            updatePaymentStatus(request, value);
+                                          }
+                                        },
+                                        itemBuilder: (context) => [
+                                          const PopupMenuItem<Object>(
+                                            enabled: false,
+                                            child: Text(
+                                              'Request status',
+                                              style: TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          ...UserSubscriptionRequestStatus
+                                              .values
+                                              .where(
+                                                (status) =>
+                                                    status != request.status,
+                                              )
+                                              .map(
+                                                (
+                                                  status,
+                                                ) => PopupMenuItem<Object>(
+                                                  value: status,
+                                                  child: Text(
+                                                    isManualProof &&
+                                                            status ==
+                                                                UserSubscriptionRequestStatus
+                                                                    .approved
+                                                        ? 'Approve proof and activate premium'
+                                                        : userSubscriptionRequestStatusLabel(
+                                                            status,
+                                                          ),
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                          const PopupMenuDivider(),
+                                          const PopupMenuItem<Object>(
+                                            enabled: false,
+                                            child: Text(
+                                              'Payment status',
+                                              style: TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          ...UserSubscriptionPaymentStatus
+                                              .values
+                                              .where(
+                                                (status) =>
+                                                    status !=
+                                                    request.paymentStatus,
+                                              )
+                                              .map(
+                                                (
+                                                  status,
+                                                ) => PopupMenuItem<Object>(
+                                                  value: status,
+                                                  child: Text(
+                                                    userSubscriptionPaymentStatusLabel(
+                                                      status,
+                                                    ),
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                        ],
+                                      ),
+                              );
+                            }),
+                          ],
                         ),
                       );
                     },
@@ -8039,12 +8347,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
+    final cleanMessage = message.trim();
+    final cleanReference = paymentReference.trim();
+    if (paymentMethod == UserSubscriptionPaymentMethod.manual &&
+        cleanMessage.isEmpty &&
+        cleanReference.isEmpty) {
+      throw ArgumentError('Add a payment proof, reference, or note.');
+    }
+
     await subscriptionRequestRepository.save(
       UserSubscriptionRequestDraft(
         userEmail: FirebaseAuth.instance.currentUser?.email,
         paymentMethod: paymentMethod,
-        paymentReference: paymentReference,
-        message: message.trim(),
+        paymentStatus: paymentMethod == UserSubscriptionPaymentMethod.manual
+            ? UserSubscriptionPaymentStatus.pendingConfirmation
+            : UserSubscriptionPaymentStatus.awaitingPayment,
+        paymentReference: cleanReference,
+        message: cleanMessage,
       ),
     );
   }
@@ -8056,11 +8375,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
     html.window.location.assign(portal.portalUrl.toString());
   }
 
+  Future<void> showManualPaymentPendingDialog() async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return PointerInterceptor(
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF0F1117),
+            title: const Text(
+              'Payment Proof Submitted',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+            content: const Text(
+              'Your manual payment proof has been received and is now pending admin review. Premium access will activate after the payment is verified.',
+              style: TextStyle(color: Colors.white70, height: 1.4),
+            ),
+            actions: [
+              TextButton.icon(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                icon: const Icon(Icons.hourglass_top_outlined, size: 18),
+                label: const Text('Awaiting review'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.greenAccent,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> showSubscriptionRequestDialog() async {
     final controller = TextEditingController();
     final referenceController = TextEditingController();
     var paymentMethod = UserSubscriptionPaymentMethod.stripe;
     String? checkoutErrorMessage;
+    const selectablePaymentMethods = [
+      UserSubscriptionPaymentMethod.stripe,
+      UserSubscriptionPaymentMethod.paystack,
+      UserSubscriptionPaymentMethod.manual,
+    ];
 
     await showDialog<void>(
       context: context,
@@ -8090,6 +8447,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             : paymentMethod ==
                                   UserSubscriptionPaymentMethod.paystack
                             ? 'Continue to secure Paystack checkout to unlock the protected vault.'
+                            : paymentMethod ==
+                                  UserSubscriptionPaymentMethod.manual
+                            ? 'Send payment proof for admin verification. Your account stays pending until payment is approved.'
                             : 'Request premium access to unlock the protected vault.',
                         style: const TextStyle(color: Colors.white70),
                       ),
@@ -8109,7 +8469,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             borderSide: BorderSide(color: Colors.greenAccent),
                           ),
                         ),
-                        items: UserSubscriptionPaymentMethod.values
+                        items: selectablePaymentMethods
                             .map((method) {
                               return DropdownMenuItem(
                                 value: method,
@@ -8128,15 +8488,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         },
                       ),
                       if (paymentMethod ==
-                          UserSubscriptionPaymentMethod.ancientCoin) ...[
+                          UserSubscriptionPaymentMethod.manual) ...[
                         const SizedBox(height: 12),
                         TextField(
                           controller: referenceController,
                           style: const TextStyle(color: Colors.white),
                           decoration: const InputDecoration(
-                            labelText: 'Payment reference',
+                            labelText: 'Payment proof or reference',
                             hintText:
-                                'Optional transaction, checkout, or Ancient Coin reference',
+                                'Receipt number, mobile money reference, bank transfer ID, or proof link',
                             labelStyle: TextStyle(color: Colors.white70),
                             hintStyle: TextStyle(color: Colors.white38),
                             enabledBorder: OutlineInputBorder(
@@ -8146,6 +8506,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               borderSide: BorderSide(color: Colors.greenAccent),
                             ),
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Admin will review the proof before premium access is activated.',
+                          style: TextStyle(color: Colors.white54),
                         ),
                       ] else if (paymentMethod ==
                           UserSubscriptionPaymentMethod.stripe) ...[
@@ -8228,13 +8593,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               if (!context.mounted) return;
                               Navigator.pop(context);
                               refreshReaderDashboard();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Subscription request sent for review.',
-                                  ),
-                                ),
-                              );
+                              await showManualPaymentPendingDialog();
                             } catch (error) {
                               if (!context.mounted) return;
                               setDialogState(() {
@@ -8246,7 +8605,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     : paymentMethod ==
                                           UserSubscriptionPaymentMethod.paystack
                                     ? 'Paystack checkout could not start: $error'
-                                    : null;
+                                    : 'Manual payment proof could not be sent: $error';
                               });
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -8283,6 +8642,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           : paymentMethod ==
                                 UserSubscriptionPaymentMethod.paystack
                           ? 'Continue to Paystack'
+                          : paymentMethod ==
+                                UserSubscriptionPaymentMethod.manual
+                          ? 'Submit proof'
                           : 'Send request',
                     ),
                     style: TextButton.styleFrom(

@@ -71,6 +71,21 @@ void main() {
     expect(access.canManageStripeBilling, isFalse);
   });
 
+  test('manual subscriptions expose provider and proof reference', () {
+    final access = UserAccessState.fromFirestore({
+      'role': 'reader',
+      'subscriptionStatus': 'active',
+      'accessLevel': 'premium',
+      'subscriptionProvider': 'manual',
+      'manualPaymentReference': 'MOMO-7788',
+    });
+
+    expect(access.subscriptionProviderLabel, 'Manual proof');
+    expect(access.subscriptionReference, 'MOMO-7788');
+    expect(access.subscriptionReferenceLabel, 'Manual proof: MOMO-7788');
+    expect(access.canManageStripeBilling, isFalse);
+  });
+
   test('Stripe billing stays available when payment needs attention', () {
     final access = UserAccessState.fromFirestore({
       'role': 'reader',

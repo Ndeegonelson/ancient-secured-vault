@@ -21,6 +21,7 @@ class UserAccessState {
     this.stripeSubscriptionId = '',
     this.paystackCustomerId = '',
     this.paystackReference = '',
+    this.manualPaymentReference = '',
     this.subscriptionExpiresAt,
   });
 
@@ -52,6 +53,7 @@ class UserAccessState {
       stripeSubscriptionId: _readIdentifier(data?['stripeSubscriptionId']),
       paystackCustomerId: _readIdentifier(data?['paystackCustomerId']),
       paystackReference: _readIdentifier(data?['paystackReference']),
+      manualPaymentReference: _readIdentifier(data?['manualPaymentReference']),
       subscriptionExpiresAt: subscriptionExpiresAt,
     );
   }
@@ -67,6 +69,7 @@ class UserAccessState {
   final String stripeSubscriptionId;
   final String paystackCustomerId;
   final String paystackReference;
+  final String manualPaymentReference;
   final DateTime? subscriptionExpiresAt;
 
   bool get canAccessMainVault => isAdmin || hasActiveSubscription;
@@ -79,6 +82,7 @@ class UserAccessState {
     return switch (subscriptionProvider) {
       'stripe' => 'Stripe',
       'paystack' => 'Paystack',
+      'manual' || 'manual_payment' || 'manual-payment' => 'Manual proof',
       'ancient_coin' || 'ancient-coin' || 'ancientcoin' => 'Ancient Coin',
       'admin' => 'Admin',
       '' => '',
@@ -89,6 +93,7 @@ class UserAccessState {
   String get subscriptionReference {
     for (final value in [
       paystackReference,
+      manualPaymentReference,
       stripeSubscriptionId,
       stripeCustomerId,
     ]) {
@@ -104,6 +109,9 @@ class UserAccessState {
 
     return switch (subscriptionProvider) {
       'paystack' => 'Paystack ref: $reference',
+      'manual' ||
+      'manual_payment' ||
+      'manual-payment' => 'Manual proof: $reference',
       'stripe' =>
         stripeSubscriptionId.isNotEmpty
             ? 'Stripe sub: $reference'
