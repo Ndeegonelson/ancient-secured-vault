@@ -215,8 +215,18 @@ class ReaderNarrationDialog extends StatelessWidget {
                       : liveProgressPercent;
                   final sessionSummary = sessionTracker.snapshot();
                   final voiceCatalogView = voiceCatalog();
-                  final errorMessage =
+                  final rawErrorMessage =
                       playbackStatus.errorMessage ?? service.errorMessage;
+                  final hasNarrationProgress =
+                      displayProgressPercent > 0 ||
+                      playbackCoordinator.isPlaying ||
+                      playbackCoordinator.isPaused ||
+                      sessionSummary.hasActivity;
+                  final errorMessage =
+                      rawErrorMessage == 'Browser narration could not start.' &&
+                          hasNarrationProgress
+                      ? null
+                      : rawErrorMessage;
 
                   return SingleChildScrollView(
                     child: Column(

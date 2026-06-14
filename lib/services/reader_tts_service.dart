@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
@@ -63,6 +65,9 @@ class ReaderTtsService extends ChangeNotifier {
   List<String> _availableLanguages = [];
   int _restartRequestId = 0;
   DateTime? _ignoreInterruptedErrorsUntil;
+  DateTime? _speechStartedAt;
+  DateTime? _lastProgressEventAt;
+  Timer? _estimatedProgressTimer;
   bool _initialized = false;
   bool _disposed = false;
   bool _continueAcrossPages = true;
@@ -324,7 +329,8 @@ class ReaderTtsService extends ChangeNotifier {
       final result = await _flutterTts.speak(
         narrationText.substring(_speechStartCharacter),
       );
-      return result == 1;
+      _beginEstimatedProgressFallback();
+      return result == 1 || result == true || result == null;
     } catch (error) {
       _setError(_friendlyErrorMessage(error));
       return false;
@@ -336,6 +342,7 @@ class ReaderTtsService extends ChangeNotifier {
       _restartRequestId++;
       _continuousPlaybackRequested = false;
       await _flutterTts.pause();
+      _estimatedProgressTimer?.cancel();
     } catch (error) {
       _setError(error.toString());
     }
@@ -349,7 +356,8 @@ class ReaderTtsService extends ChangeNotifier {
       _continuousPlaybackRequested = _continueAcrossPages;
       _errorMessage = null;
       final result = await _flutterTts.speak(_lastText);
-      return result == 1;
+      _beginEstimatedProgressFallback();
+      return result == 1 || result == true || result == null;
     } catch (error) {
       _setError(_friendlyErrorMessage(error));
       return false;
@@ -364,6 +372,7 @@ class ReaderTtsService extends ChangeNotifier {
         const Duration(seconds: 1),
       );
       await _flutterTts.stop();
+      _estimatedProgressTimer?.cancel();
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
       _currentPassage = '';
@@ -381,11 +390,14 @@ class ReaderTtsService extends ChangeNotifier {
     _flutterTts.setStartHandler(() {
       _state = ReaderNarrationState.playing;
       _errorMessage = null;
+      _speechStartedAt = DateTime.now();
+      _beginEstimatedProgressFallback();
       _notifyListeners();
     });
 
     _flutterTts.setCompletionHandler(() {
       final completedPage = _pageNumber;
+      _estimatedProgressTimer?.cancel();
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
       _clearCurrentPassageHighlight();
@@ -399,15 +411,18 @@ class ReaderTtsService extends ChangeNotifier {
 
     _flutterTts.setPauseHandler(() {
       _state = ReaderNarrationState.paused;
+      _estimatedProgressTimer?.cancel();
       _notifyListeners();
     });
 
     _flutterTts.setContinueHandler(() {
       _state = ReaderNarrationState.playing;
+      _beginEstimatedProgressFallback();
       _notifyListeners();
     });
 
     _flutterTts.setCancelHandler(() {
+      _estimatedProgressTimer?.cancel();
       _state = ReaderNarrationState.stopped;
       _currentWord = '';
       _clearCurrentPassageHighlight();
@@ -415,6 +430,7 @@ class ReaderTtsService extends ChangeNotifier {
     });
 
     _flutterTts.setProgressHandler((text, start, end, word) {
+      _lastProgressEventAt = DateTime.now();
       _currentWord = word;
       final absoluteStart = (_speechStartCharacter + start).clamp(
         0,
@@ -645,7 +661,54 @@ class ReaderTtsService extends ChangeNotifier {
     _currentCharacterEnd = restartOffset;
     _speechStartCharacter = restartOffset;
     _errorMessage = null;
-    await _flutterTts.speak(_lastText.substring(restartOffset));
+    final result = await _flutterTts.speak(_lastText.substring(restartOffset));
+    if (result == 1 || result == true || result == null) {
+      _beginEstimatedProgressFallback();
+    }
+  }
+
+  void _beginEstimatedProgressFallback() {
+    _estimatedProgressTimer?.cancel();
+    if (_lastText.isEmpty || _currentCharacterEnd >= _lastText.length) return;
+
+    _speechStartedAt = DateTime.now();
+    _lastProgressEventAt = null;
+    final startOffset = _currentCharacterEnd;
+    _estimatedProgressTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_disposed ||
+          _state != ReaderNarrationState.playing ||
+          _lastText.isEmpty) {
+        _estimatedProgressTimer?.cancel();
+        return;
+      }
+
+      final lastProgressEventAt = _lastProgressEventAt;
+      if (lastProgressEventAt != null &&
+          DateTime.now().difference(lastProgressEventAt) <
+              const Duration(seconds: 2)) {
+        return;
+      }
+
+      final startedAt = _speechStartedAt;
+      if (startedAt == null) return;
+
+      final elapsedSeconds = DateTime.now().difference(startedAt).inSeconds;
+      if (elapsedSeconds <= 0) return;
+
+      final charactersPerSecond = (12 + (_rate * 18)).round();
+      final estimatedEnd =
+          (startOffset + (elapsedSeconds * charactersPerSecond))
+              .clamp(startOffset, _lastText.length)
+              .toInt();
+      if (estimatedEnd <= _currentCharacterEnd) return;
+
+      _currentCharacterEnd = estimatedEnd;
+      final estimatedStart = startOffset > estimatedEnd - 32
+          ? startOffset
+          : estimatedEnd - 32;
+      _updateCurrentPassage(_lastText, estimatedStart, estimatedEnd);
+      _notifyListeners();
+    });
   }
 
   Future<void> _stopForReplacement() async {
@@ -834,6 +897,7 @@ class ReaderTtsService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _estimatedProgressTimer?.cancel();
     _flutterTts.stop().catchError((_) {});
     super.dispose();
   }
