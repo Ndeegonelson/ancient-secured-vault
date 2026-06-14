@@ -6,6 +6,7 @@ const DEFAULT_SUCCESS_PATH = "?subscription=paystack-success";
 const DEFAULT_PAYMENT_METHOD = "paystack";
 const PAYSTACK_INITIALIZE_URL = "https://api.paystack.co/transaction/initialize";
 const PAYSTACK_VERIFY_URL = "https://api.paystack.co/transaction/verify";
+const DEFAULT_SUBSCRIPTION_DAYS = 30;
 
 function createPaystackCheckoutSessionHandler({
   firestore,
@@ -167,10 +168,7 @@ async function approveSuccessfulPaystackCharge({firestore, charge}) {
     return {ignored: true, reason: "missing_charge_metadata"};
   }
 
-  const paidAt = cleanText(charge.paid_at || charge.paidAt);
-  const expiresAt = paidAt ?
-    new Date(Date.parse(paidAt) + 30 * 24 * 60 * 60 * 1000) :
-    null;
+  const expiresAt = paystackSubscriptionExpiresAt(charge);
 
   await firestore
       .collection("user_subscription_requests")
@@ -195,9 +193,7 @@ async function approveSuccessfulPaystackCharge({firestore, charge}) {
     subscriptionProvider: DEFAULT_PAYMENT_METHOD,
     paystackCustomerId: cleanText(customer.customer_code || customer.id),
     paystackReference: cleanText(charge.reference),
-    ...(expiresAt && Number.isFinite(expiresAt.getTime()) ?
-      {subscriptionExpiresAt: expiresAt} :
-      {}),
+    subscriptionExpiresAt: expiresAt,
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
 
@@ -206,6 +202,16 @@ async function approveSuccessfulPaystackCharge({firestore, charge}) {
     userEmail,
     paymentReference: cleanText(charge.reference),
   };
+}
+
+function paystackSubscriptionExpiresAt(charge, now = new Date()) {
+  const paidAt = cleanText(charge && (charge.paid_at || charge.paidAt));
+  const baseDate = paidAt ? new Date(Date.parse(paidAt)) : now;
+  const safeBaseDate = Number.isFinite(baseDate.getTime()) ? baseDate : now;
+  return new Date(
+      safeBaseDate.getTime() +
+      DEFAULT_SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000,
+  );
 }
 
 async function startPaymentWebhookEvent({

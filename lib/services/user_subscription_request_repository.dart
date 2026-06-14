@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'user_access_repository.dart';
 import 'user_access_state.dart';
 
+const Duration defaultAdminManagedSubscriptionDuration = Duration(days: 30);
+
 enum UserSubscriptionRequestStatus {
   open,
   reviewing,
@@ -301,6 +303,7 @@ class UserSubscriptionRequestRepository
       request.paymentMethod,
     );
     final paymentReference = request.paymentReference.trim();
+    final subscriptionExpiresAt = defaultAdminManagedSubscriptionExpiresAt();
 
     batch.set(requestDoc, {
       'status': userSubscriptionRequestStatusKey(
@@ -326,6 +329,8 @@ class UserSubscriptionRequestRepository
         'manualPaymentReference': paymentReference,
       if (paymentMethod == 'ancient_coin' && paymentReference.isNotEmpty)
         'ancientCoinReference': paymentReference,
+      if (isAdminManagedSubscriptionPaymentMethod(request.paymentMethod))
+        'subscriptionExpiresAt': subscriptionExpiresAt,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
@@ -341,6 +346,8 @@ class UserSubscriptionRequestRepository
         'subscriptionChangeType': 'manual_payment_approval',
         'paymentMethod': paymentMethod,
         if (paymentReference.isNotEmpty) 'paymentReference': paymentReference,
+        if (isAdminManagedSubscriptionPaymentMethod(request.paymentMethod))
+          'nextSubscriptionExpiresAt': subscriptionExpiresAt.toIso8601String(),
         'createdAt': FieldValue.serverTimestamp(),
       });
     }
@@ -420,6 +427,21 @@ String userSubscriptionPaymentMethodLabel(
     UserSubscriptionPaymentMethod.manual => 'Manual proof',
     UserSubscriptionPaymentMethod.ancientCoin => 'Ancient Coin',
   };
+}
+
+bool isAdminManagedSubscriptionPaymentMethod(
+  UserSubscriptionPaymentMethod method,
+) {
+  return switch (method) {
+    UserSubscriptionPaymentMethod.paystack ||
+    UserSubscriptionPaymentMethod.manual ||
+    UserSubscriptionPaymentMethod.ancientCoin => true,
+    UserSubscriptionPaymentMethod.stripe => false,
+  };
+}
+
+DateTime defaultAdminManagedSubscriptionExpiresAt({DateTime? now}) {
+  return (now ?? DateTime.now()).add(defaultAdminManagedSubscriptionDuration);
 }
 
 UserSubscriptionPaymentStatus readUserSubscriptionPaymentStatus(dynamic value) {

@@ -107,6 +107,24 @@ void main() {
       'Manual proof',
     );
     expect(
+      isAdminManagedSubscriptionPaymentMethod(
+        UserSubscriptionPaymentMethod.manual,
+      ),
+      isTrue,
+    );
+    expect(
+      isAdminManagedSubscriptionPaymentMethod(
+        UserSubscriptionPaymentMethod.paystack,
+      ),
+      isTrue,
+    );
+    expect(
+      isAdminManagedSubscriptionPaymentMethod(
+        UserSubscriptionPaymentMethod.stripe,
+      ),
+      isFalse,
+    );
+    expect(
       readUserSubscriptionPaymentMethod('bank transfer'),
       UserSubscriptionPaymentMethod.manual,
     );
@@ -125,6 +143,15 @@ void main() {
         UserSubscriptionPaymentStatus.awaitingPayment,
       ),
       'Awaiting payment',
+    );
+  });
+
+  test('admin-managed subscription approvals default to 30 days', () {
+    final now = DateTime(2026, 6, 14, 12);
+
+    expect(
+      defaultAdminManagedSubscriptionExpiresAt(now: now),
+      DateTime(2026, 7, 14, 12),
     );
   });
 

@@ -226,6 +226,10 @@ test("successful Paystack charge approves request and activates access", async (
   assert.equal(access.paystackReference, "paystack-ref-1");
   assert.ok(access.subscriptionExpiresAt instanceof Date);
   assert.equal(
+      access.subscriptionExpiresAt.toISOString(),
+      "2026-07-13T10:00:00.000Z",
+  );
+  assert.equal(
       firestore.data("payment_webhook_events", "paystack_paystack-event-1")
           .status,
       "processed",
@@ -235,6 +239,48 @@ test("successful Paystack charge approves request and activates access", async (
           .requestId,
       "request-1",
   );
+});
+
+test("successful Paystack charge without paid_at still sets a renewal date", async () => {
+  const firestore = new FakeFirestore();
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      status: true,
+      data: {
+        status: "success",
+        reference: "paystack-ref-no-date",
+        customer: {
+          email: "reader@example.com",
+          customer_code: "CUS_test",
+        },
+        metadata: {
+          subscriptionRequestId: "request-1",
+          userEmail: "reader@example.com",
+          requestedPlan: "premium",
+        },
+      },
+    }),
+  });
+
+  await handlePaystackEvent({
+    firestore,
+    fetchImpl,
+    secretKey: "sk_test_paystack",
+    event: {
+      event: "charge.success",
+      data: {
+        id: "paystack-event-no-date",
+        reference: "paystack-ref-no-date",
+      },
+    },
+  });
+
+  const access = firestore.data("users", "reader@example.com");
+  assert.equal(access.subscriptionProvider, "paystack");
+  assert.ok(access.subscriptionExpiresAt instanceof Date);
+  assert.ok(access.subscriptionExpiresAt.getTime() > Date.now());
 });
 
 test("duplicate Paystack charge webhooks do not re-verify or re-approve", async () => {
