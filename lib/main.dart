@@ -11307,6 +11307,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final String viewId;
   html.IFrameElement? pdfIframe;
   html.DivElement? protectedPdfImageContainer;
+  Timer? viewerAccessFallbackTimer;
   Timer? standardPdfLoadTimer;
   Timer? protectedPdfPreloadTimer;
   Timer? protectedPageJumpTimer;
@@ -11743,23 +11744,53 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   Future<UserAccessState> loadCurrentUserAccess() async {
     final user = FirebaseAuth.instance.currentUser;
-    return userAccessRepository.loadForEmail(user?.email);
+    final access = await userAccessRepository
+        .loadForEmail(user?.email)
+        .timeout(const Duration(seconds: 8));
+    readerUserAccess = access;
+    return access;
   }
 
   Future<void> checkViewerAccess() async {
-    final access = await loadCurrentUserAccess();
-    final deviceStatus = await recordReaderDeviceSeen();
-    final accessDecision = ReaderAccessDecision.evaluate(
-      userAccess: access,
-      documentAccessLevel: widget.accessLevel,
-      deviceStatus: deviceStatus,
-      enforceDeviceAuthorization: userDeviceAuthorizationIsEnforced(
-        readerDeviceAuthorizationMode,
-      ),
-    );
+    late final UserAccessState access;
+    late final ReaderAccessDecision accessDecision;
+
+    try {
+      access = await loadCurrentUserAccess();
+      final deviceStatus = await recordReaderDeviceSeen().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => null,
+      );
+      accessDecision = ReaderAccessDecision.evaluate(
+        userAccess: access,
+        documentAccessLevel: widget.accessLevel,
+        deviceStatus: deviceStatus,
+        enforceDeviceAuthorization: userDeviceAuthorizationIsEnforced(
+          readerDeviceAuthorizationMode,
+        ),
+      );
+    } catch (error) {
+      final normalizedAccessLevel = widget.accessLevel.trim().toLowerCase();
+      final freeDocument = normalizedAccessLevel != 'premium';
+      access = const UserAccessState();
+      accessDecision = ReaderAccessDecision(
+        allowed: freeDocument,
+        reason: freeDocument
+            ? ReaderAccessDecisionReason.allowed
+            : ReaderAccessDecisionReason.subscriptionRequired,
+        documentAccessLevel: normalizedAccessLevel.isEmpty
+            ? 'free'
+            : normalizedAccessLevel,
+        userAccessLevel: access.accessLevel,
+        deviceStatusKey: 'unknown',
+        deviceAuthorizationEnforced: false,
+      );
+    }
 
     if (!mounted) return;
 
+    viewerAccessFallbackTimer?.cancel();
+    viewerAccessFallbackTimer = null;
     await logReaderAccessAttempt(decision: accessDecision, userAccess: access);
 
     if (!mounted) return;
@@ -11789,6 +11820,47 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       },
     );
     loadLatestReadingPosition();
+  }
+
+  void startViewerAccessFallbackTimer() {
+    viewerAccessFallbackTimer?.cancel();
+    viewerAccessFallbackTimer = Timer(const Duration(seconds: 10), () {
+      if (!mounted || !isCheckingViewerAccess) return;
+
+      final normalizedAccessLevel = widget.accessLevel.trim().toLowerCase();
+      final freeDocument = normalizedAccessLevel != 'premium';
+      final canFallbackOpen =
+          freeDocument || readerUserAccess.canAccessMainVault;
+
+      setState(() {
+        isCheckingViewerAccess = false;
+        canViewDocument = canFallbackOpen;
+      });
+
+      if (!canFallbackOpen) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Access could not be verified for this protected PDF.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      registerPdfViewer();
+      readerSessionStarted = true;
+      readerSessionStartedAt = DateTime.now();
+      logReaderSessionLifecycle(
+        'started',
+        details: {
+          'initialPage': widget.initialPage,
+          'currentPdfPage': currentPdfPage,
+          'fallback': true,
+        },
+      );
+      loadLatestReadingPosition();
+    });
   }
 
   Future<void> logReaderAccessAttempt({
@@ -17139,6 +17211,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerZoomScale = loadSavedReaderZoomScale();
     showReaderStatusOverlay = loadSavedReaderStatusVisibility();
     startReaderProtectionObservers();
+    startViewerAccessFallbackTimer();
     checkViewerAccess();
   }
 
@@ -17146,6 +17219,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   void dispose() {
     saveNarrationSessionSummary(finished: true);
     readerVisibilitySubscription?.cancel();
+    viewerAccessFallbackTimer?.cancel();
     standardPdfLoadTimer?.cancel();
     protectedPdfPreloadTimer?.cancel();
     protectedPageJumpTimer?.cancel();

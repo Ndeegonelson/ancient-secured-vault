@@ -61,7 +61,16 @@
         ]
       },
       {
-        "source": "**/*.@(js|css|png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|otf)",
+        "source": "**/*.@(js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|otf)",
         "headers": [
           {
             "key": "Cache-Control",

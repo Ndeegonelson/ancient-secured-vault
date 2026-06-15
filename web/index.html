@@ -41,6 +41,26 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    (async function resetOldVaultCache() {
+      try {
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((registration) => registration.unregister()));
+        }
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+        }
+      } catch (_) {
+        // Cache cleanup must never block app startup.
+      } finally {
+        const script = document.createElement('script');
+        script.src = 'flutter_bootstrap.js?v=20260615-reader-cache-reset';
+        script.async = true;
+        document.body.appendChild(script);
+      }
+    })();
+  </script>
 </body>
 </html>
