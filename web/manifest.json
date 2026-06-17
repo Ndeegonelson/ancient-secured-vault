@@ -1,11 +1,11 @@
 {
-    "name": "ancient_secure_docs",
-    "short_name": "ancient_secure_docs",
+    "name": "ANCIENT SECURED VAULT",
+    "short_name": "Secure Vault",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#10131A",
+    "theme_color": "#050806",
+    "description": "ANCIENT SECURED VAULT protected document reader.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

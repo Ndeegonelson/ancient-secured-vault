@@ -31,11 +31,10 @@ class ReaderTtsService extends ChangeNotifier {
     _registerHandlers();
   }
 
-  static const double minimumRate = 0.25;
-  static const double maximumRate = 1.0;
-  static const double defaultRate = 0.5;
+  static const double minimumRate = 0.4;
+  static const double maximumRate = 3.0;
+  static const double defaultRate = 1.0;
   static const int maximumPassageLength = 220;
-  static const Duration _rateRestartDebounce = Duration(milliseconds: 250);
   static const Duration _stopRestartDelay = Duration(milliseconds: 120);
 
   final FlutterTts _flutterTts;
@@ -273,7 +272,9 @@ class ReaderTtsService extends ChangeNotifier {
       }
 
       _notifyListeners();
-      await _restartActiveNarration(debounce: _rateRestartDebounce);
+      // Keep Android WebView TTS stable: changing speed mid-stream can
+      // silence the native voice while progress continues. The new speed
+      // applies cleanly on the next play or resume.
     } catch (error) {
       _setError(_friendlyErrorMessage(error));
     }
@@ -497,9 +498,8 @@ class ReaderTtsService extends ChangeNotifier {
     if (voiceToApply != null) {
       await _flutterTts.setVoice(voiceToApply.browserVoice);
       _activeVoice = voiceToApply;
-      if (voiceToApply.id == _preferredVoiceId) {
-        _selectedVoice = voiceToApply;
-      }
+      _selectedVoice = voiceToApply;
+      _preferredVoiceId = voiceToApply.id;
       _activeLocale = voiceToApply.locale;
     } else {
       _activeVoice = null;

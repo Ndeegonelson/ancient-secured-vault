@@ -59,6 +59,15 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 const UserDeviceAuthorizationMode readerDeviceAuthorizationMode =
     UserDeviceAuthorizationMode.monitoring;
 
+class AncientVaultScrollBehavior extends MaterialScrollBehavior {
+  const AncientVaultScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return const ClampingScrollPhysics();
+  }
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -180,7 +189,8 @@ class _AncientSecureDocsBootstrapState
     if (startupFuture == null) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Ancient Secure Docs',
+        scrollBehavior: const AncientVaultScrollBehavior(),
+        title: 'ANCIENT SECURED VAULT',
         theme: ThemeData(
           primarySwatch: Colors.green,
           scaffoldBackgroundColor: const Color(0xFF0F1117),
@@ -199,7 +209,8 @@ class _AncientSecureDocsBootstrapState
 
         return MaterialApp(
           debugShowCheckedModeBanner: false,
-          title: 'Ancient Secure Docs',
+          scrollBehavior: const AncientVaultScrollBehavior(),
+          title: 'ANCIENT SECURED VAULT',
           theme: ThemeData(
             primarySwatch: Colors.green,
             scaffoldBackgroundColor: const Color(0xFF0F1117),
@@ -240,7 +251,7 @@ class _StartupScreen extends StatelessWidget {
                 Text(
                   hasError
                       ? 'Secure services need attention'
-                      : 'Preparing Ancient Secure Docs',
+                      : 'Preparing ANCIENT SECURED VAULT',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Colors.greenAccent,
@@ -292,7 +303,8 @@ class AncientSecureDocsApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Ancient Secure Docs',
+      scrollBehavior: const AncientVaultScrollBehavior(),
+      title: 'ANCIENT SECURED VAULT',
       theme: ThemeData(
         primarySwatch: Colors.green,
         scaffoldBackgroundColor: const Color(0xFF0F1117),
@@ -404,7 +416,7 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(color: Colors.greenAccent),
             ),
             content: const Text(
-              'Congratulations. Your Ancient Secure Vault premium subscription is active. Please login again to refresh your secure session and access the full vault content.',
+              'Congratulations. Your ANCIENT SECURED VAULT premium subscription is active. Please login again to refresh your secure session and access the full vault content.',
               style: TextStyle(color: Colors.white70, height: 1.4),
             ),
             actions: [
@@ -440,7 +452,7 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.black,
         centerTitle: true,
         title: const Text(
-          'Ancient Secure Docs',
+          'ANCIENT SECURED VAULT',
           style: TextStyle(
             color: Colors.greenAccent,
             fontWeight: FontWeight.bold,
@@ -458,7 +470,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 20),
 
                 const Text(
-                  'Welcome to Ancient Secure Docs',
+                  'Welcome to ANCIENT SECURED VAULT',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 30,
@@ -616,6 +628,235 @@ class _HomeScreenState extends State<HomeScreen> {
 
 enum AuthScreenMode { signIn, signUp, resetPassword }
 
+String registrationCountryFlag(String code) {
+  final normalized = code.trim().toUpperCase();
+  if (normalized.length != 2 ||
+      normalized.codeUnits.any((unit) => unit < 65 || unit > 90)) {
+    return 'ðŸŒ';
+  }
+
+  const regionalIndicatorBase = 0x1F1E6;
+  return String.fromCharCodes(
+    normalized.codeUnits.map((unit) => regionalIndicatorBase + unit - 65),
+  );
+}
+
+class RegistrationCountryOption {
+  const RegistrationCountryOption({required this.name, required this.code});
+
+  final String name;
+  final String code;
+
+  String get label => '${registrationCountryFlag(code)} $name';
+}
+
+const List<RegistrationCountryOption> registrationCountryOptions = [
+  RegistrationCountryOption(name: "Ghana", code: "GH"),
+  RegistrationCountryOption(name: "Afghanistan", code: "AF"),
+  RegistrationCountryOption(name: "Albania", code: "AL"),
+  RegistrationCountryOption(name: "Algeria", code: "DZ"),
+  RegistrationCountryOption(name: "Andorra", code: "AD"),
+  RegistrationCountryOption(name: "Angola", code: "AO"),
+  RegistrationCountryOption(name: "Antigua and Barbuda", code: "AG"),
+  RegistrationCountryOption(name: "Argentina", code: "AR"),
+  RegistrationCountryOption(name: "Armenia", code: "AM"),
+  RegistrationCountryOption(name: "Australia", code: "AU"),
+  RegistrationCountryOption(name: "Austria", code: "AT"),
+  RegistrationCountryOption(name: "Azerbaijan", code: "AZ"),
+  RegistrationCountryOption(name: "Bahamas", code: "BS"),
+  RegistrationCountryOption(name: "Bahrain", code: "BH"),
+  RegistrationCountryOption(name: "Bangladesh", code: "BD"),
+  RegistrationCountryOption(name: "Barbados", code: "BB"),
+  RegistrationCountryOption(name: "Belarus", code: "BY"),
+  RegistrationCountryOption(name: "Belgium", code: "BE"),
+  RegistrationCountryOption(name: "Belize", code: "BZ"),
+  RegistrationCountryOption(name: "Benin", code: "BJ"),
+  RegistrationCountryOption(name: "Bhutan", code: "BT"),
+  RegistrationCountryOption(name: "Bolivia", code: "BO"),
+  RegistrationCountryOption(name: "Bosnia and Herzegovina", code: "BA"),
+  RegistrationCountryOption(name: "Botswana", code: "BW"),
+  RegistrationCountryOption(name: "Brazil", code: "BR"),
+  RegistrationCountryOption(name: "Brunei", code: "BN"),
+  RegistrationCountryOption(name: "Bulgaria", code: "BG"),
+  RegistrationCountryOption(name: "Burkina Faso", code: "BF"),
+  RegistrationCountryOption(name: "Burundi", code: "BI"),
+  RegistrationCountryOption(name: "Cabo Verde", code: "CV"),
+  RegistrationCountryOption(name: "Cambodia", code: "KH"),
+  RegistrationCountryOption(name: "Cameroon", code: "CM"),
+  RegistrationCountryOption(name: "Canada", code: "CA"),
+  RegistrationCountryOption(name: "Central African Republic", code: "CF"),
+  RegistrationCountryOption(name: "Chad", code: "TD"),
+  RegistrationCountryOption(name: "Chile", code: "CL"),
+  RegistrationCountryOption(name: "China", code: "CN"),
+  RegistrationCountryOption(name: "Colombia", code: "CO"),
+  RegistrationCountryOption(name: "Comoros", code: "KM"),
+  RegistrationCountryOption(name: "Congo", code: "CG"),
+  RegistrationCountryOption(name: "Costa Rica", code: "CR"),
+  RegistrationCountryOption(name: "Cote d'Ivoire", code: "CI"),
+  RegistrationCountryOption(name: "Croatia", code: "HR"),
+  RegistrationCountryOption(name: "Cuba", code: "CU"),
+  RegistrationCountryOption(name: "Cyprus", code: "CY"),
+  RegistrationCountryOption(name: "Czechia", code: "CZ"),
+  RegistrationCountryOption(
+    name: "Democratic Republic of the Congo",
+    code: "CD",
+  ),
+  RegistrationCountryOption(name: "Denmark", code: "DK"),
+  RegistrationCountryOption(name: "Djibouti", code: "DJ"),
+  RegistrationCountryOption(name: "Dominica", code: "DM"),
+  RegistrationCountryOption(name: "Dominican Republic", code: "DO"),
+  RegistrationCountryOption(name: "Ecuador", code: "EC"),
+  RegistrationCountryOption(name: "Egypt", code: "EG"),
+  RegistrationCountryOption(name: "El Salvador", code: "SV"),
+  RegistrationCountryOption(name: "Equatorial Guinea", code: "GQ"),
+  RegistrationCountryOption(name: "Eritrea", code: "ER"),
+  RegistrationCountryOption(name: "Estonia", code: "EE"),
+  RegistrationCountryOption(name: "Eswatini", code: "SZ"),
+  RegistrationCountryOption(name: "Ethiopia", code: "ET"),
+  RegistrationCountryOption(name: "Fiji", code: "FJ"),
+  RegistrationCountryOption(name: "Finland", code: "FI"),
+  RegistrationCountryOption(name: "France", code: "FR"),
+  RegistrationCountryOption(name: "Gabon", code: "GA"),
+  RegistrationCountryOption(name: "Gambia", code: "GM"),
+  RegistrationCountryOption(name: "Georgia", code: "GE"),
+  RegistrationCountryOption(name: "Germany", code: "DE"),
+  RegistrationCountryOption(name: "Greece", code: "GR"),
+  RegistrationCountryOption(name: "Grenada", code: "GD"),
+  RegistrationCountryOption(name: "Guatemala", code: "GT"),
+  RegistrationCountryOption(name: "Guinea", code: "GN"),
+  RegistrationCountryOption(name: "Guinea-Bissau", code: "GW"),
+  RegistrationCountryOption(name: "Guyana", code: "GY"),
+  RegistrationCountryOption(name: "Haiti", code: "HT"),
+  RegistrationCountryOption(name: "Honduras", code: "HN"),
+  RegistrationCountryOption(name: "Hungary", code: "HU"),
+  RegistrationCountryOption(name: "Iceland", code: "IS"),
+  RegistrationCountryOption(name: "India", code: "IN"),
+  RegistrationCountryOption(name: "Indonesia", code: "ID"),
+  RegistrationCountryOption(name: "Iran", code: "IR"),
+  RegistrationCountryOption(name: "Iraq", code: "IQ"),
+  RegistrationCountryOption(name: "Ireland", code: "IE"),
+  RegistrationCountryOption(name: "Israel", code: "IL"),
+  RegistrationCountryOption(name: "Italy", code: "IT"),
+  RegistrationCountryOption(name: "Jamaica", code: "JM"),
+  RegistrationCountryOption(name: "Japan", code: "JP"),
+  RegistrationCountryOption(name: "Jordan", code: "JO"),
+  RegistrationCountryOption(name: "Kazakhstan", code: "KZ"),
+  RegistrationCountryOption(name: "Kenya", code: "KE"),
+  RegistrationCountryOption(name: "Kiribati", code: "KI"),
+  RegistrationCountryOption(name: "Kosovo", code: "XK"),
+  RegistrationCountryOption(name: "Kuwait", code: "KW"),
+  RegistrationCountryOption(name: "Kyrgyzstan", code: "KG"),
+  RegistrationCountryOption(name: "Laos", code: "LA"),
+  RegistrationCountryOption(name: "Latvia", code: "LV"),
+  RegistrationCountryOption(name: "Lebanon", code: "LB"),
+  RegistrationCountryOption(name: "Lesotho", code: "LS"),
+  RegistrationCountryOption(name: "Liberia", code: "LR"),
+  RegistrationCountryOption(name: "Libya", code: "LY"),
+  RegistrationCountryOption(name: "Liechtenstein", code: "LI"),
+  RegistrationCountryOption(name: "Lithuania", code: "LT"),
+  RegistrationCountryOption(name: "Luxembourg", code: "LU"),
+  RegistrationCountryOption(name: "Madagascar", code: "MG"),
+  RegistrationCountryOption(name: "Malawi", code: "MW"),
+  RegistrationCountryOption(name: "Malaysia", code: "MY"),
+  RegistrationCountryOption(name: "Maldives", code: "MV"),
+  RegistrationCountryOption(name: "Mali", code: "ML"),
+  RegistrationCountryOption(name: "Malta", code: "MT"),
+  RegistrationCountryOption(name: "Marshall Islands", code: "MH"),
+  RegistrationCountryOption(name: "Mauritania", code: "MR"),
+  RegistrationCountryOption(name: "Mauritius", code: "MU"),
+  RegistrationCountryOption(name: "Mexico", code: "MX"),
+  RegistrationCountryOption(name: "Micronesia", code: "FM"),
+  RegistrationCountryOption(name: "Moldova", code: "MD"),
+  RegistrationCountryOption(name: "Monaco", code: "MC"),
+  RegistrationCountryOption(name: "Mongolia", code: "MN"),
+  RegistrationCountryOption(name: "Montenegro", code: "ME"),
+  RegistrationCountryOption(name: "Morocco", code: "MA"),
+  RegistrationCountryOption(name: "Mozambique", code: "MZ"),
+  RegistrationCountryOption(name: "Myanmar", code: "MM"),
+  RegistrationCountryOption(name: "Namibia", code: "NA"),
+  RegistrationCountryOption(name: "Nauru", code: "NR"),
+  RegistrationCountryOption(name: "Nepal", code: "NP"),
+  RegistrationCountryOption(name: "Netherlands", code: "NL"),
+  RegistrationCountryOption(name: "New Zealand", code: "NZ"),
+  RegistrationCountryOption(name: "Nicaragua", code: "NI"),
+  RegistrationCountryOption(name: "Niger", code: "NE"),
+  RegistrationCountryOption(name: "Nigeria", code: "NG"),
+  RegistrationCountryOption(name: "North Korea", code: "KP"),
+  RegistrationCountryOption(name: "North Macedonia", code: "MK"),
+  RegistrationCountryOption(name: "Norway", code: "NO"),
+  RegistrationCountryOption(name: "Oman", code: "OM"),
+  RegistrationCountryOption(name: "Pakistan", code: "PK"),
+  RegistrationCountryOption(name: "Palau", code: "PW"),
+  RegistrationCountryOption(name: "Palestine", code: "PS"),
+  RegistrationCountryOption(name: "Panama", code: "PA"),
+  RegistrationCountryOption(name: "Papua New Guinea", code: "PG"),
+  RegistrationCountryOption(name: "Paraguay", code: "PY"),
+  RegistrationCountryOption(name: "Peru", code: "PE"),
+  RegistrationCountryOption(name: "Philippines", code: "PH"),
+  RegistrationCountryOption(name: "Poland", code: "PL"),
+  RegistrationCountryOption(name: "Portugal", code: "PT"),
+  RegistrationCountryOption(name: "Qatar", code: "QA"),
+  RegistrationCountryOption(name: "Romania", code: "RO"),
+  RegistrationCountryOption(name: "Russia", code: "RU"),
+  RegistrationCountryOption(name: "Rwanda", code: "RW"),
+  RegistrationCountryOption(name: "Saint Kitts and Nevis", code: "KN"),
+  RegistrationCountryOption(name: "Saint Lucia", code: "LC"),
+  RegistrationCountryOption(
+    name: "Saint Vincent and the Grenadines",
+    code: "VC",
+  ),
+  RegistrationCountryOption(name: "Samoa", code: "WS"),
+  RegistrationCountryOption(name: "San Marino", code: "SM"),
+  RegistrationCountryOption(name: "Sao Tome and Principe", code: "ST"),
+  RegistrationCountryOption(name: "Saudi Arabia", code: "SA"),
+  RegistrationCountryOption(name: "Senegal", code: "SN"),
+  RegistrationCountryOption(name: "Serbia", code: "RS"),
+  RegistrationCountryOption(name: "Seychelles", code: "SC"),
+  RegistrationCountryOption(name: "Sierra Leone", code: "SL"),
+  RegistrationCountryOption(name: "Singapore", code: "SG"),
+  RegistrationCountryOption(name: "Slovakia", code: "SK"),
+  RegistrationCountryOption(name: "Slovenia", code: "SI"),
+  RegistrationCountryOption(name: "Solomon Islands", code: "SB"),
+  RegistrationCountryOption(name: "Somalia", code: "SO"),
+  RegistrationCountryOption(name: "South Africa", code: "ZA"),
+  RegistrationCountryOption(name: "South Korea", code: "KR"),
+  RegistrationCountryOption(name: "South Sudan", code: "SS"),
+  RegistrationCountryOption(name: "Spain", code: "ES"),
+  RegistrationCountryOption(name: "Sri Lanka", code: "LK"),
+  RegistrationCountryOption(name: "Sudan", code: "SD"),
+  RegistrationCountryOption(name: "Suriname", code: "SR"),
+  RegistrationCountryOption(name: "Sweden", code: "SE"),
+  RegistrationCountryOption(name: "Switzerland", code: "CH"),
+  RegistrationCountryOption(name: "Syria", code: "SY"),
+  RegistrationCountryOption(name: "Taiwan", code: "TW"),
+  RegistrationCountryOption(name: "Tajikistan", code: "TJ"),
+  RegistrationCountryOption(name: "Tanzania", code: "TZ"),
+  RegistrationCountryOption(name: "Thailand", code: "TH"),
+  RegistrationCountryOption(name: "Timor-Leste", code: "TL"),
+  RegistrationCountryOption(name: "Togo", code: "TG"),
+  RegistrationCountryOption(name: "Tonga", code: "TO"),
+  RegistrationCountryOption(name: "Trinidad and Tobago", code: "TT"),
+  RegistrationCountryOption(name: "Tunisia", code: "TN"),
+  RegistrationCountryOption(name: "Turkey", code: "TR"),
+  RegistrationCountryOption(name: "Turkmenistan", code: "TM"),
+  RegistrationCountryOption(name: "Tuvalu", code: "TV"),
+  RegistrationCountryOption(name: "Uganda", code: "UG"),
+  RegistrationCountryOption(name: "Ukraine", code: "UA"),
+  RegistrationCountryOption(name: "United Arab Emirates", code: "AE"),
+  RegistrationCountryOption(name: "United Kingdom", code: "GB"),
+  RegistrationCountryOption(name: "United States", code: "US"),
+  RegistrationCountryOption(name: "Uruguay", code: "UY"),
+  RegistrationCountryOption(name: "Uzbekistan", code: "UZ"),
+  RegistrationCountryOption(name: "Vanuatu", code: "VU"),
+  RegistrationCountryOption(name: "Vatican City", code: "VA"),
+  RegistrationCountryOption(name: "Venezuela", code: "VE"),
+  RegistrationCountryOption(name: "Vietnam", code: "VN"),
+  RegistrationCountryOption(name: "Yemen", code: "YE"),
+  RegistrationCountryOption(name: "Zambia", code: "ZM"),
+  RegistrationCountryOption(name: "Zimbabwe", code: "ZW"),
+  RegistrationCountryOption(name: "Other", code: "UN"),
+];
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, this.initialMode = AuthScreenMode.signIn});
 
@@ -626,6 +867,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final nameController = TextEditingController();
+  String selectedCountry = registrationCountryOptions.first.name;
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
@@ -640,6 +883,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    nameController.dispose();
     emailController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
@@ -666,12 +910,196 @@ class _LoginScreenState extends State<LoginScreen> {
     AuthScreenMode.resetPassword => 'SEND RESET LINK',
   };
 
+  RegistrationCountryOption get selectedCountryOption {
+    return registrationCountryOptions.firstWhere(
+      (country) => country.name == selectedCountry,
+      orElse: () => registrationCountryOptions.first,
+    );
+  }
+
+  Future<void> showCountryPicker() async {
+    if (isSubmitting) {
+      return;
+    }
+
+    final searchController = TextEditingController();
+    var query = '';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF10131B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final normalizedQuery = query.trim().toLowerCase();
+            final countries = registrationCountryOptions
+                .where((country) {
+                  if (normalizedQuery.isEmpty) {
+                    return true;
+                  }
+                  return country.name.toLowerCase().contains(normalizedQuery) ||
+                      country.code.toLowerCase().contains(normalizedQuery);
+                })
+                .toList(growable: false);
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 20,
+                  right: 20,
+                  top: 18,
+                  bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+                ),
+                child: SizedBox(
+                  height: MediaQuery.of(sheetContext).size.height * 0.78,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Select country',
+                              style: TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            icon: const Icon(
+                              Icons.close,
+                              color: Colors.white70,
+                            ),
+                            onPressed: () => Navigator.pop(sheetContext),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: searchController,
+                        autofocus: true,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Search country',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            color: Colors.greenAccent,
+                          ),
+                          filled: true,
+                          fillColor: Colors.white10,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(color: Colors.white30),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                        ),
+                        onChanged: (value) {
+                          setSheetState(() {
+                            query = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: countries.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No countries match this search.',
+                                  style: TextStyle(color: Colors.white60),
+                                ),
+                              )
+                            : ListView.separated(
+                                keyboardDismissBehavior:
+                                    ScrollViewKeyboardDismissBehavior.onDrag,
+                                itemCount: countries.length,
+                                separatorBuilder: (_, __) => const Divider(
+                                  height: 1,
+                                  color: Colors.white10,
+                                ),
+                                itemBuilder: (context, index) {
+                                  final country = countries[index];
+                                  final isSelected =
+                                      country.name == selectedCountry;
+
+                                  return ListTile(
+                                    dense: true,
+                                    selected: isSelected,
+                                    selectedTileColor: Colors.greenAccent
+                                        .withOpacity(0.10),
+                                    title: Text(
+                                      country.label,
+                                      style: TextStyle(
+                                        color: isSelected
+                                            ? Colors.greenAccent
+                                            : Colors.white,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                    trailing: isSelected
+                                        ? const Icon(
+                                            Icons.check,
+                                            color: Colors.greenAccent,
+                                          )
+                                        : null,
+                                    onTap: () {
+                                      setState(() {
+                                        selectedCountry = country.name;
+                                      });
+                                      Navigator.pop(sheetContext);
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    searchController.dispose();
+  }
+
   Future<void> submitAuthAction() async {
     if (isSubmitting) return;
 
+    final displayName = nameController.text.trim();
+    final country = selectedCountry.trim();
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
     final confirmPassword = confirmPasswordController.text.trim();
+
+    if (mode == AuthScreenMode.signUp && displayName.isEmpty) {
+      showAuthMessage('Enter your full name.');
+      return;
+    }
+
+    if (mode == AuthScreenMode.signUp && country.isEmpty) {
+      showAuthMessage('Enter your country.');
+      return;
+    }
 
     if (email.isEmpty) {
       showAuthMessage('Enter an email address.');
@@ -703,11 +1131,14 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (mode == AuthScreenMode.signUp) {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
+        final credential = await FirebaseAuth.instance
+            .createUserWithEmailAndPassword(email: email, password: password);
+        await credential.user?.updateDisplayName(displayName);
+        await ensureNewUserStartsFree(
+          email,
+          displayName: displayName,
+          country: country,
         );
-        await ensureNewUserStartsFree(email);
         openDashboard();
         return;
       }
@@ -734,12 +1165,18 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> ensureNewUserStartsFree(String email) async {
+  Future<void> ensureNewUserStartsFree(
+    String email, {
+    required String displayName,
+    required String country,
+  }) async {
     try {
       await UserAccessRepository().saveAccessPlan(
         email: email,
         plan: UserAccessPlan.free,
         changedByEmail: email,
+        displayName: displayName,
+        country: country,
       );
     } catch (_) {
       // If rules block this write, the app still treats missing access as free.
@@ -824,6 +1261,50 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: const TextStyle(color: Colors.white70, fontSize: 16),
                 ),
                 const SizedBox(height: 40),
+                if (isSignUp) ...[
+                  TextField(
+                    controller: nameController,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      hintText: 'Full Name',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(18)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: isSubmitting ? null : showCountryPicker,
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Country',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white10,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(18)),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              selectedCountryOption.label,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const Icon(Icons.search, color: Colors.greenAccent),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
                 TextField(
                   controller: emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -1318,7 +1799,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: TextStyle(color: Colors.greenAccent),
               ),
               content: const Text(
-                'Congratulations. Your Ancient Secure Vault premium subscription is active. Please login again to refresh your secure session and access the full vault content.',
+                'Congratulations. Your ANCIENT SECURED VAULT premium subscription is active. Please login again to refresh your secure session and access the full vault content.',
                 style: TextStyle(color: Colors.white70, height: 1.4),
               ),
               actions: [
@@ -2725,9 +3206,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           : Colors.orangeAccent,
                                     ),
                                     title: Text(
-                                      user.email.isEmpty
-                                          ? 'Unknown user'
-                                          : user.email,
+                                      user.displayName.trim().isNotEmpty
+                                          ? user.displayName.trim()
+                                          : (user.email.isEmpty
+                                                ? 'Unknown user'
+                                                : user.email),
                                       style: const TextStyle(
                                         color: Colors.white70,
                                       ),
@@ -10763,7 +11246,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         title: const Text(
-          'Ancient Secure Vault',
+          'ANCIENT SECURED VAULT',
           style: TextStyle(color: Colors.greenAccent),
         ),
 
@@ -11294,9 +11777,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   static Future<void>? _pdfJsReady;
   static const int _maximumProtectedPdfImageBytes = 120 * 1024 * 1024;
   static const int _protectedPdfRetainedPageRadius = 4;
-  static const double _minimumReaderZoomScale = 0.75;
-  static const double _maximumReaderZoomScale = 1.8;
-  static const double _readerZoomStep = 0.15;
+  static const double _minimumReaderZoomScale = 0.4;
+  static const double _maximumReaderZoomScale = 3.0;
+  static const double _readerZoomStep = 0.1;
 
   final TextEditingController searchController = TextEditingController();
 
@@ -11324,7 +11807,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool readerSessionStarted = false;
   bool showReaderStatusOverlay = true;
   bool readerWindowIsActive = true;
+  bool isReaderFullscreenMode = false;
   double readerZoomScale = 1;
+  double? protectedPdfPinchStartDistance;
+  double protectedPdfPinchStartZoomScale = 1;
+  double? protectedPdfPendingPinchZoomScale;
+  DateTime? protectedPdfLastTapAt;
   DateTime? readerSessionStartedAt;
   StreamSubscription<html.Event>? readerVisibilitySubscription;
   StreamSubscription<html.Event>? readerWindowBlurSubscription;
@@ -11333,6 +11821,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   StreamSubscription<html.MouseEvent>? readerPdfContextMenuSubscription;
   StreamSubscription<html.MouseEvent>? readerPdfMouseDownSubscription;
   StreamSubscription<html.Event>? protectedPdfScrollSubscription;
+  StreamSubscription<html.Event>? protectedPdfTouchStartSubscription;
+  StreamSubscription<html.Event>? protectedPdfTouchMoveSubscription;
+  StreamSubscription<html.Event>? protectedPdfTouchEndSubscription;
+  StreamSubscription<html.Event>? protectedPdfTouchCancelSubscription;
   StreamSubscription<html.MouseEvent>? protectedPdfContextMenuSubscription;
   StreamSubscription<html.MouseEvent>? protectedPdfMouseDownSubscription;
   StreamSubscription<html.KeyboardEvent>? readerKeyDownSubscription;
@@ -11418,6 +11910,17 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     hasActiveSubscription: readerUserAccess.hasActiveSubscription,
     isAdmin: readerUserAccess.isAdmin,
   );
+
+  bool get isAndroidWebViewReader {
+    final userAgent = (html.window.navigator.userAgent).toLowerCase();
+    return userAgent.contains('ancientsecurevaultandroidapp') ||
+        userAgent.contains('; wv)');
+  }
+
+  bool get usesImagePdfReader {
+    return readerProtectionPolicy.usesProtectedImageReader ||
+        isAndroidWebViewReader;
+  }
 
   bool get shouldShowReaderPrivacyShield {
     return canViewDocument &&
@@ -11574,7 +12077,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   String get readerWatermarkText {
-    return 'Protected by Ancient Secure Docs\n'
+    return 'Protected by ANCIENT SECURED VAULT\n'
         '${FirebaseAuth.instance.currentUser?.email ?? ''}\n'
         'Session: $shortReaderSessionId\n'
         'Access: $readerAccessLabel | Source: $readerSourceLabel\n'
@@ -11588,11 +12091,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ignoring: shouldShowReaderPrivacyShield,
           child: HtmlElementView(viewType: viewId),
         ),
-        if (!readerProtectionPolicy.usesProtectedImageReader &&
+        if (!usesImagePdfReader &&
             (isStandardPdfLoading || standardPdfLoadTimedOut))
           Positioned.fill(child: buildStandardPdfLoadingOverlay()),
-        if (readerProtectionPolicy.usesProtectedImageReader &&
-            isProtectedPageJumping)
+        if (usesImagePdfReader && isProtectedPageJumping)
           Positioned.fill(child: buildProtectedPageJumpOverlay()),
       ],
     );
@@ -12003,14 +12505,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final searchFragment = safeSearchQuery.isEmpty
         ? ''
         : '&search=${Uri.encodeComponent(safeSearchQuery)}';
-    final zoomPercent = (readerZoomScale * 100).round().clamp(75, 180);
+    final zoomPercent = (readerZoomScale * 100).round().clamp(40, 300);
 
     return '${widget.pdfUrl}#page=$safePageNumber&zoom=$zoomPercent&toolbar=0&navpanes=0&scrollbar=1$searchFragment';
   }
 
   void registerPdfViewer() {
     ui.platformViewRegistry.registerViewFactory(viewId, (int viewId) {
-      if (readerProtectionPolicy.usesProtectedImageReader) {
+      if (usesImagePdfReader) {
         final container = html.DivElement()
           ..style.width = '100%'
           ..style.height = '100%'
@@ -12019,7 +12521,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ..style.background = '#202124'
           ..style.padding = '18px 0 96px'
           ..style.boxSizing = 'border-box'
-          ..style.userSelect = 'none';
+          ..style.userSelect = 'none'
+          ..style.setProperty('touch-action', 'pan-x pan-y');
 
         container.children.add(
           html.DivElement()
@@ -12051,6 +12554,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         });
         protectedPdfScrollSubscription = container.onScroll.listen(
           handleProtectedPdfImageScroll,
+        );
+        protectedPdfTouchStartSubscription = container.onTouchStart.listen(
+          handleProtectedPdfTouchStart,
+        );
+        protectedPdfTouchMoveSubscription = container.onTouchMove.listen(
+          handleProtectedPdfTouchMove,
+        );
+        protectedPdfTouchEndSubscription = container.onTouchEnd.listen(
+          handleProtectedPdfTouchEnd,
+        );
+        protectedPdfTouchCancelSubscription = container.onTouchCancel.listen(
+          handleProtectedPdfTouchEnd,
         );
 
         pdfIframe = null;
@@ -12153,7 +12668,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   void showProtectedPageJumpOverlay(int pageNumber) {
-    if (!readerProtectionPolicy.usesProtectedImageReader) return;
+    if (!usesImagePdfReader) return;
 
     protectedPageJumpTimer?.cancel();
     if (mounted) {
@@ -12369,7 +12884,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ? 900
           : container.clientWidth;
       final availableWidth = math.max(320, containerWidth - 48);
-      final displayScale = (availableWidth / baseWidth).clamp(0.6, 1.8);
+      final displayScale = (availableWidth / baseWidth).clamp(0.35, 1.8);
       final targetPixelRatio = pageCount <= 12
           ? 2.35
           : pageCount <= 60
@@ -12377,7 +12892,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           : 1.55;
       final pixelRatio = math.min(
         math.max(html.window.devicePixelRatio, targetPixelRatio),
-        2.7,
+        2.2,
       );
       final renderScale = displayScale * pixelRatio;
       final zoomedDisplayScale = displayScale * readerZoomScale;
@@ -12450,7 +12965,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       await renderProtectedPdfPagesAroundPage(
         currentPdfPage,
         renderGeneration: renderGeneration,
-        radius: 0,
+        radius: 2,
       );
       scheduleProtectedPdfPreloadAroundPage(currentPdfPage);
     } catch (error) {
@@ -12705,6 +13220,102 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
   }
 
+  double? protectedPdfTouchCoordinate(Object? touch, String property) {
+    if (touch == null) return null;
+    final value = js_util.getProperty<Object?>(touch, property);
+    if (value is num) return value.toDouble();
+    return double.tryParse('$value');
+  }
+
+  double? protectedPdfPinchDistanceForEvent(html.Event event) {
+    final touches = js_util.getProperty<Object?>(event, 'touches');
+    if (touches == null) return null;
+
+    final lengthValue = js_util.getProperty<Object?>(touches, 'length');
+    final length = lengthValue is num
+        ? lengthValue.toInt()
+        : int.tryParse('$lengthValue') ?? 0;
+    if (length < 2) return null;
+
+    final first =
+        js_util.callMethod<Object?>(touches, 'item', [0]) ??
+        js_util.getProperty<Object?>(touches, '0');
+    final second =
+        js_util.callMethod<Object?>(touches, 'item', [1]) ??
+        js_util.getProperty<Object?>(touches, '1');
+
+    final firstX = protectedPdfTouchCoordinate(first, 'clientX');
+    final firstY = protectedPdfTouchCoordinate(first, 'clientY');
+    final secondX = protectedPdfTouchCoordinate(second, 'clientX');
+    final secondY = protectedPdfTouchCoordinate(second, 'clientY');
+
+    if (firstX == null ||
+        firstY == null ||
+        secondX == null ||
+        secondY == null) {
+      return null;
+    }
+
+    return math.sqrt(
+      math.pow(firstX - secondX, 2) + math.pow(firstY - secondY, 2),
+    );
+  }
+
+  void handleProtectedPdfTouchStart(html.Event event) {
+    final distance = protectedPdfPinchDistanceForEvent(event);
+    if (distance == null) return;
+
+    event.preventDefault();
+    protectedPdfPinchStartDistance = distance;
+    protectedPdfPinchStartZoomScale = readerZoomScale;
+  }
+
+  void handleProtectedPdfTouchMove(html.Event event) {
+    final startDistance = protectedPdfPinchStartDistance;
+    final distance = protectedPdfPinchDistanceForEvent(event);
+    if (startDistance == null || distance == null || startDistance <= 0) return;
+
+    event.preventDefault();
+    protectedPdfPendingPinchZoomScale = normalizeReaderZoomScale(
+      protectedPdfPinchStartZoomScale * (distance / startDistance),
+    );
+  }
+
+  void handleProtectedPdfTouchEnd(html.Event event) {
+    final pendingZoom = protectedPdfPendingPinchZoomScale;
+    final wasPinching = protectedPdfPinchStartDistance != null;
+
+    protectedPdfPinchStartDistance = null;
+    protectedPdfPendingPinchZoomScale = null;
+    protectedPdfPinchStartZoomScale = readerZoomScale;
+
+    if (pendingZoom != null && (pendingZoom - readerZoomScale).abs() >= 0.02) {
+      event.preventDefault();
+      applyReaderZoomScale(pendingZoom);
+      return;
+    }
+
+    if (wasPinching) return;
+
+    final now = DateTime.now();
+    final lastTap = protectedPdfLastTapAt;
+    protectedPdfLastTapAt = now;
+
+    if (lastTap != null &&
+        now.difference(lastTap) <= const Duration(milliseconds: 320)) {
+      event.preventDefault();
+      toggleReaderFullscreenMode();
+      protectedPdfLastTapAt = null;
+    }
+  }
+
+  void toggleReaderFullscreenMode() {
+    if (!mounted) return;
+    setState(() {
+      isReaderFullscreenMode = !isReaderFullscreenMode;
+    });
+  }
+
   void handleProtectedPdfImageScroll(html.Event event) {
     final container = protectedPdfImageContainer;
     if (container == null || pdfPageCount == null) return;
@@ -12741,7 +13352,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       renderProtectedPdfPagesAroundPage(
         visiblePage,
         renderGeneration: protectedPdfRenderGeneration,
-        radius: 0,
+        radius: 2,
       ),
     );
     scheduleProtectedPdfPreloadAroundPage(visiblePage);
@@ -12761,7 +13372,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       renderProtectedPdfPagesAroundPage(
         pageNumber,
         renderGeneration: protectedPdfRenderGeneration,
-        radius: 0,
+        radius: 2,
       ),
     );
     scheduleProtectedPdfPreloadAroundPage(pageNumber);
@@ -12846,7 +13457,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     container.children.clear();
     container.children.add(
       html.DivElement()
-        ..text = 'Adjusting protected page size...'
+        ..text = 'Adjusting page size...'
         ..style.color = '#C8C8C8'
         ..style.fontFamily = 'Arial, sans-serif'
         ..style.fontSize = '15px'
@@ -12871,7 +13482,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       readerZoomScale = nextZoom;
     }
 
-    if (readerProtectionPolicy.usesProtectedImageReader) {
+    if (usesImagePdfReader) {
       restartProtectedPdfImageReaderForZoom();
     } else {
       updatePdfIframeSource(
@@ -12886,6 +13497,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       details: {
         'zoomPercent': (readerZoomScale * 100).round(),
         'pageNumber': currentPdfPage,
+        'usesImagePdfReader': usesImagePdfReader,
         'usesProtectedImageReader':
             readerProtectionPolicy.usesProtectedImageReader,
       },
@@ -12957,7 +13569,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               value: draftZoom,
                               min: _minimumReaderZoomScale,
                               max: _maximumReaderZoomScale,
-                              divisions: 21,
+                              divisions: 26,
                               activeColor: Colors.greenAccent,
                               inactiveColor: Colors.white24,
                               label: formatReaderZoomLabel(draftZoom),
@@ -13133,7 +13745,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       },
     );
 
-    if (readerProtectionPolicy.usesProtectedImageReader) {
+    if (usesImagePdfReader) {
       showProtectedPageJumpOverlay(safePageNumber);
       scrollProtectedPdfImageReaderToPage(currentPdfPage);
     } else {
@@ -16821,7 +17433,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     narrationCloudSession.updateAccessPolicy(narrationAccessPolicy);
     unawaited(narrationCloudSession.refreshCatalog().catchError((_) => false));
 
-    final narrationPage = currentPdfPage;
+    var narrationPage = currentPdfPage;
     final isSelectedPassage = selectedText != null;
     final allowContinuousNarration = !isSelectedPassage;
     var selectedPassageTracked = false;
@@ -17229,6 +17841,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerPdfContextMenuSubscription?.cancel();
     readerPdfMouseDownSubscription?.cancel();
     protectedPdfScrollSubscription?.cancel();
+    protectedPdfTouchStartSubscription?.cancel();
+    protectedPdfTouchMoveSubscription?.cancel();
+    protectedPdfTouchEndSubscription?.cancel();
+    protectedPdfTouchCancelSubscription?.cancel();
     protectedPdfContextMenuSubscription?.cancel();
     protectedPdfMouseDownSubscription?.cancel();
     readerKeyDownSubscription?.cancel();
@@ -17475,260 +18091,335 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              widget.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.greenAccent),
-            ),
-            Text(
-              '$readerAccessLabel - $readerSourceLabel',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
-            ),
-          ],
-        ),
-        iconTheme: const IconThemeData(color: Colors.greenAccent),
-        actions: [
-          IconButton(
-            tooltip: 'Narrate document from tracked page',
-            icon: const Icon(
-              Icons.record_voice_over,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: showReaderNarrationDialog,
-          ),
-          IconButton(
-            tooltip: shouldShowReaderPrivacyShield
-                ? 'Return to read mode'
-                : showReaderStatusOverlay
-                ? 'Hide reader status'
-                : 'Show reader status',
-            icon: Icon(
-              shouldShowReaderPrivacyShield || !showReaderStatusOverlay
-                  ? Icons.visibility
-                  : Icons.visibility_off,
-              size: 20,
-              color: Colors.greenAccent,
-            ),
-            onPressed: () {
-              if (shouldShowReaderPrivacyShield) {
-                restoreReaderPrivacyShield('reader_top_eye_restore');
-                return;
-              }
-
-              final nextVisible = !showReaderStatusOverlay;
-
-              setState(() {
-                showReaderStatusOverlay = nextVisible;
-              });
-              saveReaderStatusVisibility(nextVisible);
-
-              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    nextVisible
-                        ? 'Reader status shown.'
-                        : 'Reader status hidden.',
+      appBar: isReaderFullscreenMode
+          ? null
+          : AppBar(
+              backgroundColor: Colors.black,
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.greenAccent),
                   ),
+                  Text(
+                    '$readerAccessLabel - $readerSourceLabel',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+              ),
+              iconTheme: const IconThemeData(color: Colors.greenAccent),
+              actions: [
+                IconButton(
+                  tooltip: 'Narrate document from tracked page',
+                  icon: const Icon(
+                    Icons.record_voice_over,
+                    size: 20,
+                    color: Colors.greenAccent,
+                  ),
+                  onPressed: showReaderNarrationDialog,
                 ),
-              );
+                IconButton(
+                  tooltip: shouldShowReaderPrivacyShield
+                      ? 'Return to read mode'
+                      : showReaderStatusOverlay
+                      ? 'Hide reader status'
+                      : 'Show reader status',
+                  icon: Icon(
+                    shouldShowReaderPrivacyShield || !showReaderStatusOverlay
+                        ? Icons.visibility
+                        : Icons.visibility_off,
+                    size: 20,
+                    color: Colors.greenAccent,
+                  ),
+                  onPressed: () {
+                    if (shouldShowReaderPrivacyShield) {
+                      restoreReaderPrivacyShield('reader_top_eye_restore');
+                      return;
+                    }
 
-              logReaderAction(
-                action: 'toggle_reader_status_overlay',
-                details: {
-                  'visible': nextVisible,
-                  'currentPdfPage': currentPdfPage,
-                  'hasActiveSearch': currentSearchQuery.trim().isNotEmpty,
-                },
-              );
-            },
-          ),
-          IconButton(
-            tooltip: 'Search in PDF',
-            icon: const Icon(Icons.search, size: 20, color: Colors.greenAccent),
+                    final nextVisible = !showReaderStatusOverlay;
 
-            onPressed: () async {
-              if (!canUseViewerTools('internal_pdf_search')) return;
+                    setState(() {
+                      showReaderStatusOverlay = nextVisible;
+                    });
+                    saveReaderStatusVisibility(nextVisible);
 
-              showDialog(
-                context: this.context,
-                builder: (dialogContext) {
-                  void submitSearch() {
-                    final keyword = searchController.text.trim();
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          nextVisible
+                              ? 'Reader status shown.'
+                              : 'Reader status hidden.',
+                        ),
+                      ),
+                    );
 
-                    Navigator.pop(dialogContext);
+                    logReaderAction(
+                      action: 'toggle_reader_status_overlay',
+                      details: {
+                        'visible': nextVisible,
+                        'currentPdfPage': currentPdfPage,
+                        'hasActiveSearch': currentSearchQuery.trim().isNotEmpty,
+                      },
+                    );
+                  },
+                ),
+                IconButton(
+                  tooltip: 'Search in PDF',
+                  icon: const Icon(
+                    Icons.search,
+                    size: 20,
+                    color: Colors.greenAccent,
+                  ),
 
-                    if (keyword.isEmpty) return;
+                  onPressed: () async {
+                    if (!canUseViewerTools('internal_pdf_search')) return;
 
                     showDialog(
                       context: this.context,
-                      builder: (resultContext) {
+                      builder: (dialogContext) {
+                        void submitSearch() {
+                          final keyword = searchController.text.trim();
+
+                          Navigator.pop(dialogContext);
+
+                          if (keyword.isEmpty) return;
+
+                          showDialog(
+                            context: this.context,
+                            builder: (resultContext) {
+                              return PointerInterceptor(
+                                child: AlertDialog(
+                                  backgroundColor: const Color(0xFF0F1117),
+                                  title: Text(
+                                    'Results for "$keyword"',
+                                    style: const TextStyle(
+                                      color: Colors.greenAccent,
+                                    ),
+                                  ),
+                                  content: SizedBox(
+                                    width: 500,
+                                    height: 450,
+
+                                    child: Column(
+                                      children: [
+                                        const SizedBox(height: 20),
+
+                                        Expanded(
+                                          child: FutureBuilder<List<Map<String, dynamic>>>(
+                                            future: searchPdfText(keyword),
+
+                                            builder: (context, snapshot) {
+                                              if (snapshot.hasError) {
+                                                return Center(
+                                                  child: Text(
+                                                    'Search failed: ${snapshot.error}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+
+                                              if (!snapshot.hasData) {
+                                                return const Center(
+                                                  child:
+                                                      CircularProgressIndicator(),
+                                                );
+                                              }
+
+                                              final results = snapshot.data!;
+
+                                              if (results.isEmpty) {
+                                                return const Center(
+                                                  child: Text(
+                                                    'No matches in this PDF.',
+                                                    style: TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+
+                                              return ListView.builder(
+                                                itemCount: results.length + 1,
+                                                itemBuilder: (context, index) {
+                                                  if (index == 0) {
+                                                    return Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                            bottom: 8,
+                                                          ),
+                                                      child: Text(
+                                                        formatSearchResultSummary(
+                                                          results,
+                                                        ),
+                                                        style: const TextStyle(
+                                                          color: Colors.white70,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }
+
+                                                  final data =
+                                                      results[index - 1];
+
+                                                  return Card(
+                                                    color: const Color(
+                                                      0xFF1A1D26,
+                                                    ),
+                                                    child: ListTile(
+                                                      onTap: () {
+                                                        final page =
+                                                            data['pageNumber']
+                                                                is int
+                                                            ? data['pageNumber']
+                                                                  as int
+                                                            : int.tryParse(
+                                                                    data['pageNumber']
+                                                                        .toString(),
+                                                                  ) ??
+                                                                  1;
+
+                                                        Navigator.of(
+                                                          resultContext,
+                                                        ).pop();
+                                                        WidgetsBinding.instance
+                                                            .addPostFrameCallback((
+                                                              _,
+                                                            ) {
+                                                              if (!mounted)
+                                                                return;
+                                                              openPdfPage(
+                                                                page,
+                                                                searchQuery:
+                                                                    keyword,
+                                                                source:
+                                                                    'internal_search_result',
+                                                                forceReload:
+                                                                    !usesImagePdfReader,
+                                                              );
+                                                            });
+                                                      },
+
+                                                      title: Text(
+                                                        'Open Page ${data['pageNumber']} - Match ${data['matchNumber'] ?? 1}',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                        ),
+                                                      ),
+                                                      subtitle: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Text(
+                                                            'Matching excerpt',
+                                                            style:
+                                                                const TextStyle(
+                                                                  color: Colors
+                                                                      .white70,
+                                                                ),
+                                                          ),
+
+                                                          const SizedBox(
+                                                            height: 6,
+                                                          ),
+
+                                                          RichText(
+                                                            maxLines: 3,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            text: TextSpan(
+                                                              children:
+                                                                  highlightSearchText(
+                                                                    data['text']
+                                                                        .toString(),
+                                                                    keyword,
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(resultContext),
+                                      child: const Text(
+                                        'Close',
+                                        style: TextStyle(
+                                          color: Colors.greenAccent,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        }
+
                         return PointerInterceptor(
                           child: AlertDialog(
                             backgroundColor: const Color(0xFF0F1117),
-                            title: Text(
-                              'Results for "$keyword"',
-                              style: const TextStyle(color: Colors.greenAccent),
+                            title: const Text(
+                              'Search This PDF',
+                              style: TextStyle(color: Colors.greenAccent),
                             ),
-                            content: SizedBox(
-                              width: 500,
-                              height: 450,
-
-                              child: Column(
-                                children: [
-                                  const SizedBox(height: 20),
-
-                                  Expanded(
-                                    child: FutureBuilder<List<Map<String, dynamic>>>(
-                                      future: searchPdfText(keyword),
-
-                                      builder: (context, snapshot) {
-                                        if (snapshot.hasError) {
-                                          return Center(
-                                            child: Text(
-                                              'Search failed: ${snapshot.error}',
-                                              style: const TextStyle(
-                                                color: Colors.white70,
-                                              ),
-                                            ),
-                                          );
-                                        }
-
-                                        if (!snapshot.hasData) {
-                                          return const Center(
-                                            child: CircularProgressIndicator(),
-                                          );
-                                        }
-
-                                        final results = snapshot.data!;
-
-                                        if (results.isEmpty) {
-                                          return const Center(
-                                            child: Text(
-                                              'No matches in this PDF.',
-                                              style: TextStyle(
-                                                color: Colors.white70,
-                                              ),
-                                            ),
-                                          );
-                                        }
-
-                                        return ListView.builder(
-                                          itemCount: results.length + 1,
-                                          itemBuilder: (context, index) {
-                                            if (index == 0) {
-                                              return Padding(
-                                                padding: const EdgeInsets.only(
-                                                  bottom: 8,
-                                                ),
-                                                child: Text(
-                                                  formatSearchResultSummary(
-                                                    results,
-                                                  ),
-                                                  style: const TextStyle(
-                                                    color: Colors.white70,
-                                                  ),
-                                                ),
-                                              );
-                                            }
-
-                                            final data = results[index - 1];
-
-                                            return Card(
-                                              color: const Color(0xFF1A1D26),
-                                              child: ListTile(
-                                                onTap: () {
-                                                  final page =
-                                                      data['pageNumber'] is int
-                                                      ? data['pageNumber']
-                                                            as int
-                                                      : int.tryParse(
-                                                              data['pageNumber']
-                                                                  .toString(),
-                                                            ) ??
-                                                            1;
-
-                                                  Navigator.of(
-                                                    resultContext,
-                                                  ).pop();
-                                                  WidgetsBinding.instance
-                                                      .addPostFrameCallback((
-                                                        _,
-                                                      ) {
-                                                        if (!mounted) return;
-                                                        openPdfPage(
-                                                          page,
-                                                          searchQuery: keyword,
-                                                          source:
-                                                              'internal_search_result',
-                                                          forceReload:
-                                                              !readerProtectionPolicy
-                                                                  .usesProtectedImageReader,
-                                                        );
-                                                      });
-                                                },
-
-                                                title: Text(
-                                                  'Open Page ${data['pageNumber']} - Match ${data['matchNumber'] ?? 1}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                                subtitle: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      'Matching excerpt',
-                                                      style: const TextStyle(
-                                                        color: Colors.white70,
-                                                      ),
-                                                    ),
-
-                                                    const SizedBox(height: 6),
-
-                                                    RichText(
-                                                      maxLines: 3,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      text: TextSpan(
-                                                        children:
-                                                            highlightSearchText(
-                                                              data['text']
-                                                                  .toString(),
-                                                              keyword,
-                                                            ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ],
+                            content: TextField(
+                              enabled: true,
+                              readOnly: false,
+                              autofocus: true,
+                              controller: searchController,
+                              textInputAction: TextInputAction.search,
+                              onSubmitted: (_) => submitSearch(),
+                              style: const TextStyle(color: Colors.white),
+                              decoration: const InputDecoration(
+                                labelText: 'Search term',
+                                labelStyle: TextStyle(color: Colors.white70),
+                                hintText: 'Keyword or phrase',
+                                hintStyle: TextStyle(color: Colors.grey),
+                                border: OutlineInputBorder(),
                               ),
                             ),
-
                             actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(resultContext),
-                                child: const Text(
-                                  'Close',
-                                  style: TextStyle(color: Colors.greenAccent),
+                              PointerInterceptor(
+                                child: TextButton(
+                                  onPressed: () {
+                                    searchController.clear();
+                                  },
+                                  child: const Text(
+                                    'Clear',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                ),
+                              ),
+                              PointerInterceptor(
+                                child: TextButton(
+                                  onPressed: submitSearch,
+                                  child: const Text(
+                                    'Search',
+                                    style: TextStyle(color: Colors.greenAccent),
+                                  ),
                                 ),
                               ),
                             ],
@@ -17736,82 +18427,31 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                         );
                       },
                     );
-                  }
-
-                  return PointerInterceptor(
-                    child: AlertDialog(
-                      backgroundColor: const Color(0xFF0F1117),
-                      title: const Text(
-                        'Search This PDF',
-                        style: TextStyle(color: Colors.greenAccent),
-                      ),
-                      content: TextField(
-                        enabled: true,
-                        readOnly: false,
-                        autofocus: true,
-                        controller: searchController,
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: (_) => submitSearch(),
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          labelText: 'Search term',
-                          labelStyle: TextStyle(color: Colors.white70),
-                          hintText: 'Keyword or phrase',
-                          hintStyle: TextStyle(color: Colors.grey),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      actions: [
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: () {
-                              searchController.clear();
-                            },
-                            child: const Text(
-                              'Clear',
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          ),
-                        ),
-                        PointerInterceptor(
-                          child: TextButton(
-                            onPressed: submitSearch,
-                            child: const Text(
-                              'Search',
-                              style: TextStyle(color: Colors.greenAccent),
-                            ),
-                          ),
-                        ),
-                      ],
+                  },
+                ),
+                if (currentSearchQuery.trim().isNotEmpty)
+                  IconButton(
+                    tooltip: 'Clear active PDF search',
+                    icon: const Icon(
+                      Icons.search_off,
+                      size: 20,
+                      color: Colors.greenAccent,
                     ),
-                  );
-                },
-              );
-            },
-          ),
-          if (currentSearchQuery.trim().isNotEmpty)
-            IconButton(
-              tooltip: 'Clear active PDF search',
-              icon: const Icon(
-                Icons.search_off,
-                size: 20,
-                color: Colors.greenAccent,
-              ),
-              onPressed: clearActivePdfSearch,
+                    onPressed: clearActivePdfSearch,
+                  ),
+                PointerInterceptor(
+                  child: IconButton(
+                    tooltip: 'More reader tools',
+                    onPressed: showCompactReaderToolsMenu,
+                    icon: const Icon(
+                      Icons.more_vert,
+                      size: 22,
+                      color: Colors.greenAccent,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          PointerInterceptor(
-            child: IconButton(
-              tooltip: 'More reader tools',
-              onPressed: showCompactReaderToolsMenu,
-              icon: const Icon(
-                Icons.more_vert,
-                size: 22,
-                color: Colors.greenAccent,
-              ),
-            ),
-          ),
-        ],
-      ),
       body: isCheckingViewerAccess
           ? const Center(
               child: CircularProgressIndicator(color: Colors.greenAccent),

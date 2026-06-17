@@ -18,6 +18,8 @@ abstract interface class UserAccessStore {
     required UserAccessPlan plan,
     String? changedByEmail,
     UserAccessPlan? previousPlan,
+    String? displayName,
+    String? country,
   });
 
   Future<void> saveSubscriptionStatus({
@@ -804,6 +806,8 @@ class UserAccessRepository implements UserAccessStore {
     required UserAccessPlan plan,
     String? changedByEmail,
     UserAccessPlan? previousPlan,
+    String? displayName,
+    String? country,
   }) async {
     final documentId = emailDocumentId(email);
     if (documentId.isEmpty) {

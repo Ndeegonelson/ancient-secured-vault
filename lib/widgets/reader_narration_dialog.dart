@@ -492,7 +492,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                           value: service.rate,
                           min: ReaderTtsService.minimumRate,
                           max: ReaderTtsService.maximumRate,
-                          divisions: 15,
+                          divisions: 26,
                           label: '${service.rate.toStringAsFixed(2)}x',
                           onChanged: service.setRate,
                           onChangeEnd: onRateChangeEnd,

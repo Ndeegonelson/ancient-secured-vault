@@ -18,19 +18,185 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="Ancient Secure Vault protected document reader.">
+  <meta name="description" content="ANCIENT SECURED VAULT protected document reader.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="Ancient Secure Vault">
+  <meta name="apple-mobile-web-app-title" content="ANCIENT SECURED VAULT">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>Ancient Secure Vault</title>
+  <title>ANCIENT SECURED VAULT</title>
   <link rel="manifest" href="manifest.json">
+  <script>
+    (function installAndroidVaultNarrationBridge() {
+      const userAgent = (navigator.userAgent || '').toLowerCase();
+      if (!userAgent.includes('ancientsecurevaultandroidapp')) return;
+      if (window.__ancientVaultTtsBridgeInstalled) return;
+
+      window.__ancientVaultTtsBridgeInstalled = true;
+      let utteranceId = 0;
+      const voice = {
+        name: 'ANCIENT SECURED VAULT Native',
+        lang: 'en-US',
+        voiceURI: 'ancient-secure-vault-native-en',
+        localService: true,
+        default: true,
+      };
+      const frenchVoice = {
+        name: 'ANCIENT SECURED VAULT Native French',
+        lang: 'fr-FR',
+        voiceURI: 'ancient-secure-vault-native-fr',
+        localService: true,
+        default: false,
+      };
+      const voices = [voice, frenchVoice];
+      const state = {
+        current: null,
+        speaking: false,
+        paused: false,
+      };
+
+      function VaultSpeechSynthesisUtterance(text) {
+        this.text = text || '';
+        this.lang = 'en-US';
+        this.pitch = 1;
+        this.rate = 1;
+        this.volume = 1;
+        this.voice = null;
+        this.onstart = null;
+        this.onend = null;
+        this.onpause = null;
+        this.onresume = null;
+        this.onerror = null;
+        this.onboundary = null;
+      }
+
+      function send(message) {
+        if (!window.AncientVaultTts || !window.AncientVaultTts.postMessage) {
+          setTimeout(() => {
+            const current = state.current;
+            if (current && typeof current.onerror === 'function') {
+              current.onerror({ error: 'native-tts-bridge-unavailable' });
+            }
+          }, 0);
+          return;
+        }
+
+        window.AncientVaultTts.postMessage(JSON.stringify(message));
+      }
+
+      window.__ancientVaultTtsEvent = function receiveNativeTtsEvent(event) {
+        const current = state.current;
+        if (!current || !event || event.id !== current.__ancientVaultId) return;
+
+        switch (event.type) {
+          case 'start':
+            state.speaking = true;
+            state.paused = false;
+            if (typeof current.onstart === 'function') current.onstart({});
+            break;
+          case 'end':
+            state.speaking = false;
+            state.paused = false;
+            if (typeof current.onend === 'function') current.onend({});
+            break;
+          case 'pause':
+            state.paused = true;
+            if (typeof current.onpause === 'function') current.onpause({});
+            break;
+          case 'resume':
+            state.paused = false;
+            if (typeof current.onresume === 'function') current.onresume({});
+            break;
+          case 'cancel':
+            state.speaking = false;
+            state.paused = false;
+            break;
+          case 'boundary':
+            if (typeof current.onboundary === 'function') {
+              current.onboundary({
+                charIndex: event.start || 0,
+                charLength: Math.max(0, (event.end || 0) - (event.start || 0)),
+                name: 'word',
+              });
+            }
+            break;
+          case 'error':
+            state.speaking = false;
+            state.paused = false;
+            if (typeof current.onerror === 'function') {
+              current.onerror({ error: event.error || 'native-tts-error' });
+            }
+            break;
+        }
+      };
+
+      const nativeSpeechSynthesis = {
+        get speaking() {
+          return state.speaking;
+        },
+        get paused() {
+          return state.paused;
+        },
+        get pending() {
+          return false;
+        },
+        getVoices() {
+          return voices;
+        },
+        speak(utterance) {
+          if (!utterance) return;
+          const id = `vault-tts-${++utteranceId}`;
+          utterance.__ancientVaultId = id;
+          state.current = utterance;
+          state.speaking = true;
+          state.paused = false;
+          send({
+            action: 'speak',
+            id,
+            text: utterance.text || '',
+            lang: utterance.lang || (utterance.voice && utterance.voice.lang) || 'en-US',
+            rate: utterance.rate || 1,
+            pitch: utterance.pitch || 1,
+            volume: utterance.volume || 1,
+          });
+        },
+        cancel() {
+          state.speaking = false;
+          state.paused = false;
+          send({ action: 'cancel', id: state.current && state.current.__ancientVaultId });
+        },
+        pause() {
+          state.paused = true;
+          send({ action: 'pause', id: state.current && state.current.__ancientVaultId });
+        },
+        resume() {
+          state.paused = false;
+          send({ action: 'resume', id: state.current && state.current.__ancientVaultId });
+        },
+        addEventListener() {},
+        removeEventListener() {},
+      };
+
+      try {
+        Object.defineProperty(window, 'speechSynthesis', {
+          value: nativeSpeechSynthesis,
+          configurable: true,
+        });
+        Object.defineProperty(window, 'SpeechSynthesisUtterance', {
+          value: VaultSpeechSynthesisUtterance,
+          configurable: true,
+        });
+      } catch (_) {
+        window.speechSynthesis = nativeSpeechSynthesis;
+        window.SpeechSynthesisUtterance = VaultSpeechSynthesisUtterance;
+      }
+    })();
+  </script>
 </head>
 <body>
   <!--
