@@ -31,6 +31,9 @@ const {
 const {
   createExpireSubscriptionsHandler,
 } = require("./subscription_expiry_maintenance");
+const {
+  createVaultSearchHandler,
+} = require("./vault_search");
 
 initializeApp();
 const firestore = getFirestore();
@@ -175,6 +178,15 @@ exports.paystackWebhook = onRequest(
       secrets: ["PAYSTACK_SECRET_KEY"],
     },
     createPaystackWebhookHandler({firestore}),
+);
+
+exports.searchVaultDocuments = onRequest(
+    {
+      cors: true,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+    },
+    createVaultSearchHandler({firestore}),
 );
 
 exports.expireAdminManagedSubscriptions = onSchedule(
