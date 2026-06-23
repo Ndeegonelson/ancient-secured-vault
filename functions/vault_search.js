@@ -43,11 +43,27 @@ function vaultSearchQueryTerms(query, limit = 4) {
   return fallbackTerm ? [fallbackTerm] : [];
 }
 
+function canOpenPdfWithAccessLevel(userAccess, documentAccessLevel) {
+  const level = cleanText(documentAccessLevel).toLowerCase();
+  if (level !== "premium") return true;
+  if (!userAccess || typeof userAccess !== "object") return false;
+
+  const role = cleanText(userAccess.role).toLowerCase();
+  const accessLevel = cleanText(userAccess.accessLevel).toLowerCase();
+  const status = cleanText(userAccess.subscriptionStatus).toLowerCase();
+
+  return role === "admin" ||
+    accessLevel === "premium" ||
+    status === "active" ||
+    status === "trial";
+}
+
 function cleanText(value) {
   return value == null ? "" : String(value).trim();
 }
 
 module.exports = {
+  canOpenPdfWithAccessLevel,
   vaultPrimarySearchTerm,
   vaultSearchQueryTerms,
   vaultSearchTerms,
