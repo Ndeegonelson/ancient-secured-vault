@@ -39,6 +39,7 @@ import 'services/user_subscription_request_repository.dart';
 import 'services/payment_webhook_event_repository.dart';
 import 'services/vault_document_metadata.dart';
 import 'services/vault_search_snippet.dart';
+import 'services/secure_vault_search_client.dart';
 import 'services/reader_cloud_narration_audio_player_factory.dart';
 import 'services/reader_cloud_narration_playback_controller.dart';
 import 'services/reader_cloud_narration_preparation_queue.dart';
@@ -1676,6 +1677,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     ),
   );
+  final SecureVaultSearchClient secureVaultSearchClient =
+      SecureVaultSearchClient.firebase(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
   final ReaderBookmarkRepository readerBookmarkRepository =
       ReaderBookmarkRepository();
