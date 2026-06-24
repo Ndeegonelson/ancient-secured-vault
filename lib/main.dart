@@ -50,7 +50,7 @@ import 'services/reader_cloud_narration_http_callable_client.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
 import 'dart:html' as html;
-import 'dart:js_util' as js_util;
+import 'web_js_util.dart' as js_util;
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:ui_web' as ui;
@@ -5506,32 +5506,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                           List<Map<String, dynamic>> filteredDocs = docs.where(
                             (data) {
-                              final titleKeywords = data['titleKeywords'];
-                              final hasIndexedTitleMatch =
-                                  titleKeywords is Iterable &&
-                                  vaultIndexedTermsMatchQuery(
-                                    titleKeywords,
-                                    keyword,
-                                  );
-                              final hasLegacyTitleMatch =
-                                  titleKeywords == null &&
-                                  vaultTextMatchesAnySearchTerm(
-                                    data['pdfTitle']?.toString() ?? '',
-                                    keyword,
-                                  );
-                              final hasPageMatch =
-                                  data['keywords'] is Iterable &&
-                                  vaultIndexedTermsMatchQuery(
-                                    data['keywords'] as Iterable,
-                                    keyword,
-                                  );
-
-                              if (!hasPageMatch &&
-                                  !hasIndexedTitleMatch &&
-                                  !hasLegacyTitleMatch) {
-                                return false;
-                              }
-
                               final documentAccessLevel =
                                   data['accessLevel']?.toString() ?? 'free';
 

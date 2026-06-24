@@ -84,27 +84,40 @@ class FakeVaultSearchFirestore {
         },
       }),
 
-      where: (field, operator, value) => {
-        assert.equal(operator, "array-contains");
-        return {
-          limit: (count) => ({
-            get: async () => {
-              const matches = [...docs.entries()]
-                  .filter(([, data]) => {
-                    const fieldValue = data && data[field];
-                    return Array.isArray(fieldValue) && fieldValue.includes(value);
-                  })
-                  .slice(0, count)
-                  .map(([id, data]) => ({
-                    id,
-                    data: () => data,
-                  }));
+      where: (field, operator, value) =>
+        this.query([...docs.entries()], [{field, operator, value}]),
+    };
+  }
 
-              return {docs: matches};
-            },
-          }),
-        };
-      },
+  query(entries, filters) {
+    return {
+      where: (field, operator, value) =>
+        this.query(entries, [...filters, {field, operator, value}]),
+      limit: (count) => ({
+        get: async () => {
+          const matches = entries
+              .filter(([, data]) => {
+                return filters.every(({field, operator, value}) => {
+                  const fieldValue = data && data[field];
+                  if (operator === "array-contains") {
+                    return Array.isArray(fieldValue) &&
+                      fieldValue.includes(value);
+                  }
+                  if (operator === "==") {
+                    return fieldValue === value;
+                  }
+                  throw new Error(`Unsupported operator: ${operator}`);
+                });
+              })
+              .slice(0, count)
+              .map(([id, data]) => ({
+                id,
+                data: () => data,
+              }));
+
+          return {docs: matches};
+        },
+      }),
     };
   }
 
@@ -219,4 +232,118 @@ test("secure vault search returns only free results to free users", async () => 
   );
   assert.equal(response.body.results[0].accessLevel, "free");
   assert.equal(response.body.results[0].pdfUrl, "https://example.test/free.pdf");
+});
+
+test("free vault search filters access before applying result limits", async () => {
+  const firestore = new FakeVaultSearchFirestore();
+
+  firestore.set("users", "reader@example.com", {
+    email: "reader@example.com",
+    role: "reader",
+    accessLevel: "free",
+    subscriptionStatus: "free",
+  });
+
+  for (let i = 0; i < 40; i++) {
+    firestore.set("pdf_search_index", `premium-money-${i}`, {
+      pdfTitle: "Premium Money Manual",
+      accessLevel: "premium",
+      pageNumber: i + 1,
+      category: "Premium",
+      text: "Premium money strategy reserved for subscribers.",
+      keywords: ["money", "strategy"],
+      titleKeywords: ["premium", "money"],
+      storagePath: `premium/money-${i}.pdf`,
+    });
+  }
+
+  firestore.set("pdf_search_index", "free-money-page", {
+    pdfTitle: "Free Partnership Proposal",
+    accessLevel: "free",
+    pageNumber: 7,
+    category: "General",
+    text: "This free page explains how money supports the partnership.",
+    keywords: ["money", "partnership"],
+    titleKeywords: ["free", "partnership", "proposal"],
+    storagePath: "free/partnership.pdf",
+    pdfUrl: "https://example.test/partnership.pdf",
+  });
+
+  const handler = createVaultSearchHandler({
+    firestore,
+    verifyAuthToken: async () => ({
+      uid: "reader-1",
+      email: "reader@example.com",
+    }),
+  });
+
+  const response = fakeVaultSearchResponse();
+
+  await handler(
+      fakeVaultSearchRequest({
+        body: {
+          data: {
+            query: "money",
+          },
+        },
+      }),
+      response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(
+      response.body.results.map((result) => result.pdfTitle),
+      ["Free Partnership Proposal"],
+  );
+});
+
+test("free vault search falls back to indexed page text content", async () => {
+  const firestore = new FakeVaultSearchFirestore();
+
+  firestore.set("users", "reader@example.com", {
+    email: "reader@example.com",
+    role: "reader",
+    accessLevel: "free",
+    subscriptionStatus: "free",
+  });
+
+  firestore.set("pdf_search_index", "free-text-money-page", {
+    pdfTitle: "Free Investor Memo",
+    accessLevel: "free",
+    pageNumber: 3,
+    category: "General",
+    text: "This excerpt starts before the searched word.",
+    textLower: "this page discusses how money moves through the ecosystem.",
+    keywords: ["investor", "ecosystem"],
+    titleKeywords: ["free", "investor", "memo"],
+    storagePath: "free/investor-memo.pdf",
+    pdfUrl: "https://example.test/investor-memo.pdf",
+  });
+
+  const handler = createVaultSearchHandler({
+    firestore,
+    verifyAuthToken: async () => ({
+      uid: "reader-1",
+      email: "reader@example.com",
+    }),
+  });
+
+  const response = fakeVaultSearchResponse();
+
+  await handler(
+      fakeVaultSearchRequest({
+        body: {
+          data: {
+            query: "money",
+          },
+        },
+      }),
+      response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(
+      response.body.results.map((result) => result.pdfTitle),
+      ["Free Investor Memo"],
+  );
 });

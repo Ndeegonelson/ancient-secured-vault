@@ -1,6 +1,7 @@
 const MAX_QUERY_TERMS = 4;
 const MAX_RESULTS_PER_TERM = 30;
 const MAX_RETURNED_RESULTS = 80;
+const MAX_FREE_TEXT_SCAN_RESULTS = 500;
 
 function createVaultSearchHandler({
   firestore,
@@ -50,9 +51,15 @@ function createVaultSearchHandler({
 async function searchVaultIndex({firestore, query, searchTerms, userAccess}) {
   const docsById = new Map();
   const collection = firestore.collection("pdf_search_index");
+  const freeOnly = !canOpenPdfWithAccessLevel(userAccess, "premium");
 
   for (const term of searchTerms) {
-    const keywordSnapshot = await collection
+    let keywordQuery = collection;
+    if (freeOnly) {
+      keywordQuery = keywordQuery.where("accessLevel", "==", "free");
+    }
+
+    const keywordSnapshot = await keywordQuery
         .where("keywords", "array-contains", term)
         .limit(MAX_RESULTS_PER_TERM)
         .get();
@@ -61,13 +68,32 @@ async function searchVaultIndex({firestore, query, searchTerms, userAccess}) {
       docsById.set(doc.id, doc);
     }
 
-    const titleSnapshot = await collection
+    let titleQuery = collection;
+    if (freeOnly) {
+      titleQuery = titleQuery.where("accessLevel", "==", "free");
+    }
+
+    const titleSnapshot = await titleQuery
         .where("titleKeywords", "array-contains", term)
         .limit(MAX_RESULTS_PER_TERM)
         .get();
 
     for (const doc of titleSnapshot.docs) {
       docsById.set(doc.id, doc);
+    }
+  }
+
+  if (freeOnly) {
+    const freeSnapshot = await collection
+        .where("accessLevel", "==", "free")
+        .limit(MAX_FREE_TEXT_SCAN_RESULTS)
+        .get();
+
+    for (const doc of freeSnapshot.docs) {
+      const data = doc.data() || {};
+      if (matchesTextSearch(data, query)) {
+        docsById.set(doc.id, doc);
+      }
     }
   }
 
@@ -118,9 +144,13 @@ async function searchVaultIndex({firestore, query, searchTerms, userAccess}) {
   return filtered.slice(0, MAX_RETURNED_RESULTS).map(({id, data}) => {
     const accessLevel = cleanText(data.accessLevel) || "free";
     const text = cleanText(data.text);
-    const snippetKeyword = vaultBestSnippetKeyword(text, query);
+    const fallbackText = cleanText(data.textLower);
+    const snippetSource = vaultBestSnippetKeyword(text, query)
+      ? text
+      : fallbackText || text;
+    const snippetKeyword = vaultBestSnippetKeyword(snippetSource, query);
     const snippet = buildVaultSearchSnippet(
-        text,
+        snippetSource,
         snippetKeyword || vaultPrimarySearchTerm(query),
     );
 
@@ -177,7 +207,27 @@ function matchesQuery(data, query) {
   const hasPageMatch = Array.isArray(data.keywords) &&
     vaultIndexedTermsMatchQuery(data.keywords, query);
 
-  return hasIndexedTitleMatch || hasLegacyTitleMatch || hasPageMatch;
+  return hasIndexedTitleMatch ||
+    hasLegacyTitleMatch ||
+    hasPageMatch ||
+    matchesTextSearch(data, query);
+}
+
+function matchesTextSearch(data, query) {
+  const searchableText = [
+    cleanText(data.pdfTitle),
+    cleanText(data.textLower),
+    cleanText(data.text),
+  ].join(" ").toLowerCase();
+
+  if (!searchableText.trim()) return false;
+
+  for (const term of vaultSearchTerms(query)) {
+    if (searchableText.includes(term)) return true;
+  }
+
+  const fallbackTerm = vaultPrimarySearchTerm(query);
+  return fallbackTerm !== "" && searchableText.includes(fallbackTerm);
 }
 
 function canOpenPdfWithAccessLevel(userAccess, documentAccessLevel) {
