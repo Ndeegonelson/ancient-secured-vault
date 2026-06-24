@@ -5417,7 +5417,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> showGlobalSearchResults(String keyword) async {
     final searchTerm = vaultPrimarySearchTerm(keyword);
-    final searchTerms = vaultSearchQueryTerms(keyword);
     String accessFilter = 'all';
     String categoryFilter = '';
 
@@ -5483,21 +5482,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 15),
 
                     Expanded(
-                      child: FutureBuilder<List<QuerySnapshot>>(
-                        future: Future.wait([
-                          for (final term in searchTerms) ...[
-                            FirebaseFirestore.instance
-                                .collection('pdf_search_index')
-                                .where('keywords', arrayContains: term)
-                                .limit(30)
-                                .get(),
-                            FirebaseFirestore.instance
-                                .collection('pdf_search_index')
-                                .where('titleKeywords', arrayContains: term)
-                                .limit(30)
-                                .get(),
-                          ],
-                        ]),
+                      child: FutureBuilder<List<Map<String, dynamic>>>(
+                        future: loadSecureGlobalSearchResults(keyword),
 
                         builder: (context, snapshot) {
                           if (snapshot.hasError) {
@@ -5516,19 +5502,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             );
                           }
 
-                          final docsById =
-                              <String, QueryDocumentSnapshot<Object?>>{};
-                          for (final result in snapshot.data!) {
-                            for (final doc in result.docs) {
-                              docsById[doc.id] = doc;
-                            }
-                          }
+                          final docs = snapshot.data!;
 
-                          final docs = docsById.values.toList();
-
-                          List<QueryDocumentSnapshot> filteredDocs = docs.where(
-                            (doc) {
-                              final data = doc.data() as Map<String, dynamic>;
+                          List<Map<String, dynamic>> filteredDocs = docs.where(
+                            (data) {
                               final titleKeywords = data['titleKeywords'];
                               final hasIndexedTitleMatch =
                                   titleKeywords is Iterable &&
@@ -5565,17 +5542,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ).toList();
 
                           if (accessFilter == 'free') {
-                            filteredDocs = filteredDocs.where((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-
+                            filteredDocs = filteredDocs.where((data) {
                               return (data['accessLevel'] ?? 'free') == 'free';
                             }).toList();
                           }
 
                           if (accessFilter == 'premium') {
-                            filteredDocs = filteredDocs.where((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-
+                            filteredDocs = filteredDocs.where((data) {
                               return (data['accessLevel'] ?? 'free') ==
                                   'premium';
                             }).toList();
@@ -5584,10 +5557,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           final accessibleMatchCount = filteredDocs.length;
 
                           filteredDocs.sort((left, right) {
-                            final leftData =
-                                left.data() as Map<String, dynamic>;
-                            final rightData =
-                                right.data() as Map<String, dynamic>;
+                            final leftData = left;
+                            final rightData = right;
                             final leftScore = vaultSearchMatchScore(
                               query: keyword,
                               title: leftData['pdfTitle']?.toString() ?? '',
@@ -5641,9 +5612,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           });
 
                           final categoryOptions = vaultDocumentCategoryOptions(
-                            filteredDocs.map(
-                              (doc) => doc.data() as Map<String, dynamic>,
-                            ),
+                            filteredDocs,
                           );
                           final safeCategoryFilter =
                               categoryOptions.contains(categoryFilter)
@@ -5651,9 +5620,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               : '';
 
                           if (safeCategoryFilter.isNotEmpty) {
-                            filteredDocs = filteredDocs.where((doc) {
-                              final data = doc.data() as Map<String, dynamic>;
-
+                            filteredDocs = filteredDocs.where((data) {
                               return normalizeVaultDocumentCategory(
                                     data['category']?.toString(),
                                   ) ==
@@ -5735,9 +5702,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         itemCount: filteredDocs.length,
 
                                         itemBuilder: (context, index) {
-                                          final data =
-                                              filteredDocs[index].data()
-                                                  as Map<String, dynamic>;
+                                          final data = filteredDocs[index];
                                           final snippetKeyword =
                                               vaultBestSnippetKeyword(
                                                 data['text']?.toString() ?? '',
