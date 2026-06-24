@@ -5405,6 +5405,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return spans;
   }
 
+  Future<List<Map<String, dynamic>>> loadSecureGlobalSearchResults(
+    String keyword,
+  ) async {
+    final response = await secureVaultSearchClient.search(keyword);
+
+    return response.results
+        .map((result) => result.toLegacySearchData())
+        .toList(growable: false);
+  }
+
   Future<void> showGlobalSearchResults(String keyword) async {
     final searchTerm = vaultPrimarySearchTerm(keyword);
     final searchTerms = vaultSearchQueryTerms(keyword);
