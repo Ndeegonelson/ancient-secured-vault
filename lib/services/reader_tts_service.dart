@@ -498,8 +498,13 @@ class ReaderTtsService extends ChangeNotifier {
     if (voiceToApply != null) {
       await _flutterTts.setVoice(voiceToApply.browserVoice);
       _activeVoice = voiceToApply;
-      _selectedVoice = voiceToApply;
-      _preferredVoiceId = voiceToApply.id;
+      if (selectedVoice != null || preferredVoices.isNotEmpty) {
+        _selectedVoice = voiceToApply;
+        _preferredVoiceId = voiceToApply.id;
+      } else {
+        _selectedVoice = null;
+        _preferredVoiceId = null;
+      }
       _activeLocale = voiceToApply.locale;
     } else {
       _activeVoice = null;

@@ -99,7 +99,7 @@ void main() {
     expect(viewModel.shouldShowVoiceSelector, isTrue);
     expect(
       viewModel.helperMessage,
-      'Cloud narrators have not been checked yet.',
+      'Browser narration is active. Cloud voices are unavailable right now.',
     );
   });
 

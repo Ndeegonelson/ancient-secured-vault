@@ -92,8 +92,7 @@ class ReaderNarrationVoiceCatalogPresenter {
         : 'natural cloud voices locked';
 
     if (catalog.accessPolicy.canUseCloudNarration && !catalog.hasCloudVoices) {
-      return '$browserSummary | $cloudSummary | '
-          'cloud voices unavailable';
+      return '$browserSummary | $cloudSummary | ${catalog.cloudAvailabilityMessage}';
     }
 
     return '$browserSummary | $cloudSummary';

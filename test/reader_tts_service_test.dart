@@ -532,7 +532,7 @@ void main() {
     service.dispose();
   });
 
-  test('restarts active narration after a speed change', () async {
+  test('applies speed changes without restarting active narration', () async {
     final fakeTts = FakeFlutterTts();
     final service = ReaderTtsService(flutterTts: fakeTts);
 
@@ -540,7 +540,7 @@ void main() {
     await service.setRate(0.75);
 
     expect(fakeTts.selectedRate, 0.75);
-    expect(fakeTts.speakCount, 2);
+    expect(fakeTts.speakCount, 1);
     expect(fakeTts.spokenText, 'Protected learning text.');
 
     service.dispose();
