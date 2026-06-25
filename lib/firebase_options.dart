@@ -23,10 +23,7 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for macos - '
@@ -63,6 +60,15 @@ class DefaultFirebaseOptions {
     storageBucket: 'ancient--docs.firebasestorage.app',
   );
 
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyCPTfjzu-JxoXlsJEE2Fvpiyh8me-2Vai4',
+    appId: '1:237028663963:ios:2ac9c4ba304cf108eadc3e',
+    messagingSenderId: '237028663963',
+    projectId: 'ancient--docs',
+    storageBucket: 'ancient--docs.firebasestorage.app',
+    iosBundleId: 'tech.ancientsociety.vault',
+  );
+
   static const FirebaseOptions windows = FirebaseOptions(
     apiKey: 'AIzaSyAPvywA6wYEHsW9r23KfAgfInUl5MYfOjY',
     appId: '1:237028663963:web:c4139a4ee7598288eadc3e',
@@ -71,5 +77,4 @@ class DefaultFirebaseOptions {
     authDomain: 'ancient--docs.firebaseapp.com',
     storageBucket: 'ancient--docs.firebasestorage.app',
   );
-
 }
