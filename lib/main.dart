@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -64,8 +65,17 @@ class AncientVaultScrollBehavior extends MaterialScrollBehavior {
   const AncientVaultScrollBehavior();
 
   @override
+  Set<PointerDeviceKind> get dragDevices => {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.unknown,
+  };
+
+  @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
-    return const ClampingScrollPhysics();
+    return const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
   }
 }
 
@@ -875,6 +885,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final confirmPasswordController = TextEditingController();
   late AuthScreenMode mode;
   bool isSubmitting = false;
+  bool obscurePassword = true;
+  bool obscureConfirmPassword = true;
 
   @override
   void initState() {
@@ -1330,7 +1342,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 20),
                   TextField(
                     controller: passwordController,
-                    obscureText: true,
+                    obscureText: obscurePassword,
                     textInputAction: isSignUp
                         ? TextInputAction.next
                         : TextInputAction.done,
@@ -1343,6 +1355,22 @@ class _LoginScreenState extends State<LoginScreen> {
                       hintStyle: const TextStyle(color: Colors.white54),
                       filled: true,
                       fillColor: Colors.white10,
+                      suffixIcon: IconButton(
+                        tooltip: obscurePassword
+                            ? 'Show password'
+                            : 'Hide password',
+                        icon: Icon(
+                          obscurePassword
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                          color: Colors.greenAccent,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            obscurePassword = !obscurePassword;
+                          });
+                        },
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(15),
                       ),
@@ -1353,7 +1381,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 20),
                   TextField(
                     controller: confirmPasswordController,
-                    obscureText: true,
+                    obscureText: obscureConfirmPassword,
                     textInputAction: TextInputAction.done,
                     onSubmitted: (_) => submitAuthAction(),
                     style: const TextStyle(color: Colors.white),
@@ -1362,6 +1390,22 @@ class _LoginScreenState extends State<LoginScreen> {
                       hintStyle: const TextStyle(color: Colors.white54),
                       filled: true,
                       fillColor: Colors.white10,
+                      suffixIcon: IconButton(
+                        tooltip: obscureConfirmPassword
+                            ? 'Show confirm password'
+                            : 'Hide confirm password',
+                        icon: Icon(
+                          obscureConfirmPassword
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                          color: Colors.greenAccent,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            obscureConfirmPassword = !obscureConfirmPassword;
+                          });
+                        },
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(15),
                       ),
