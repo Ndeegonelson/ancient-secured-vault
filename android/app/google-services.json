@@ -29,6 +29,49 @@
             {
               "client_id": "237028663963-aolov6q5oao8kt2fr1r1b2mgeagut642.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "237028663963-1mggtisor0mg6akj3l3bqfoipkjlqjhl.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "tech.ancientsociety.vault"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:237028663963:android:bcbb9cefee714c23eadc3e",
+        "android_client_info": {
+          "package_name": "tech.ancientsociety.vault"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "237028663963-aolov6q5oao8kt2fr1r1b2mgeagut642.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD6_dg41vrsddndJcp_uJm7DcY3CTlB96M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "237028663963-aolov6q5oao8kt2fr1r1b2mgeagut642.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "237028663963-1mggtisor0mg6akj3l3bqfoipkjlqjhl.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "tech.ancientsociety.vault"
+              }
             }
           ]
         }

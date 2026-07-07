@@ -52,3 +52,7 @@ app.*.map.json
 
 # Local app cache
 LocalLow/
+
+# Android release signing - never commit
+android/key.properties
+android/app/upload-keystore.jks
