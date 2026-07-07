@@ -41,4 +41,50 @@ void main() {
       'pending',
     ]);
   });
+  test('applies saved positions for direct document opens', () {
+    final shouldApply =
+        ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
+          initialPage: 0,
+          initialSearchQuery: '',
+          openSource: 'free_dashboard',
+        );
+
+    expect(shouldApply, isTrue);
+  });
+
+  test('does not apply saved positions over search-result page jumps', () {
+    final shouldApply =
+        ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
+          initialPage: 12,
+          initialSearchQuery: 'finance',
+          openSource: 'global_search_result',
+        );
+
+    expect(shouldApply, isFalse);
+  });
+
+  test(
+    'does not apply saved positions for search results with invalid pages',
+    () {
+      final shouldApply =
+          ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
+            initialPage: 0,
+            initialSearchQuery: 'finance',
+            openSource: 'global_search_result',
+          );
+
+      expect(shouldApply, isFalse);
+    },
+  );
+
+  test('does not apply saved positions over explicit page opens', () {
+    final shouldApply =
+        ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
+          initialPage: 7,
+          initialSearchQuery: '',
+          openSource: 'direct_open',
+        );
+
+    expect(shouldApply, isFalse);
+  });
 }

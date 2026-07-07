@@ -12492,7 +12492,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     if (position != null) {
       latestReadingPosition = position;
 
-      if (widget.initialPage == 0) {
+      if (ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
+        initialPage: widget.initialPage,
+        initialSearchQuery: widget.initialSearchQuery,
+        openSource: widget.openSource,
+      )) {
         openPdfPage(position.pageNumber, source: 'latest_saved_position');
       }
     }

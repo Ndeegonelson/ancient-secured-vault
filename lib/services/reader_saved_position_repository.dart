@@ -69,6 +69,24 @@ class ReaderSavedPosition {
   }
 }
 
+class ReaderSavedPositionResumePolicy {
+  const ReaderSavedPositionResumePolicy._();
+
+  static bool shouldApplySavedPosition({
+    required int initialPage,
+    required String initialSearchQuery,
+    required String openSource,
+  }) {
+    if (initialPage > 0) return false;
+    if (initialSearchQuery.trim().isNotEmpty) return false;
+
+    final normalizedOpenSource = openSource.trim().toLowerCase();
+    if (normalizedOpenSource.contains('search')) return false;
+
+    return true;
+  }
+}
+
 class ReaderSavedPositionDraft {
   const ReaderSavedPositionDraft({
     required this.userEmail,
