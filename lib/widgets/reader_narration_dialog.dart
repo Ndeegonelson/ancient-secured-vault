@@ -423,7 +423,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                             ),
                           ],
                         ),
-                        if (voiceCatalogView.shouldShowVoiceSelector) ...[
+                        if (voiceCatalogView.selectableVoices.isNotEmpty) ...[
                           const SizedBox(height: 12),
                           DropdownButtonFormField<ReaderNarrationVoice>(
                             key: ValueKey(

@@ -51,11 +51,19 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   String activeUtteranceText = '';
   int activeUtteranceOffset = 0;
   Timer? estimatedProgressTimer;
+  Timer? launchSplashTimer;
+  bool showLaunchSplash = true;
 
   @override
   void initState() {
     super.initState();
     configureNativeTtsBridge();
+    launchSplashTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      setState(() {
+        showLaunchSplash = false;
+      });
+    });
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent('AncientSecureVaultAndroidApp/1.0')
@@ -297,7 +305,8 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
         body: Stack(
           children: [
             WebViewWidget(controller: controller),
-            if (loadProgress < 100)
+            if (showLaunchSplash) const _VaultLaunchSplash(),
+            if (loadProgress < 100 && !showLaunchSplash)
               LinearProgressIndicator(
                 value: loadProgress == 0 ? null : loadProgress / 100,
               ),
@@ -317,9 +326,38 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
 
   @override
   void dispose() {
+    launchSplashTimer?.cancel();
     estimatedProgressTimer?.cancel();
     nativeTts.stop();
     super.dispose();
+  }
+}
+
+class _VaultLaunchSplash extends StatelessWidget {
+  const _VaultLaunchSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.sizeOf(context);
+    final logoSize = (screenSize.shortestSide * 0.88)
+        .clamp(300.0, 640.0)
+        .toDouble();
+
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: SizedBox.square(
+          dimension: logoSize,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(48),
+            child: Image.asset(
+              'assets/branding/vault_launch_logo.png',
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

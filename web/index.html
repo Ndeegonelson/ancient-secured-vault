@@ -39,21 +39,27 @@
 
       window.__ancientVaultTtsBridgeInstalled = true;
       let utteranceId = 0;
-      const voice = {
-        name: 'ANCIENT SECURED VAULT Native',
-        lang: 'en-US',
-        voiceURI: 'ancient-secure-vault-native-en',
+      const voiceDefinitions = [
+        ['ANCIENT SECURED VAULT Human Reader', 'en-US', 'ancient-vault-human-reader-en', true],
+        ['Google US English Female', 'en-US', 'google-us-english-female', false],
+        ['Google US English Male', 'en-US', 'google-us-english-male', false],
+        ['Google UK English Female', 'en-GB', 'google-uk-english-female', false],
+        ['Google UK English Male', 'en-GB', 'google-uk-english-male', false],
+        ['Google English Natural Reader', 'en-US', 'google-english-natural-reader', false],
+        ['Google English Studio Reader', 'en-US', 'google-english-studio-reader', false],
+        ['Human Narrator - Calm English', 'en-US', 'human-calm-english', false],
+        ['Human Narrator - Deep English', 'en-US', 'human-deep-english', false],
+        ['African English Reader', 'en-US', 'african-english-reader', false],
+        ['Google French Female', 'fr-FR', 'google-french-female', false],
+        ['Human Narrator - French', 'fr-FR', 'human-french-reader', false],
+      ];
+      const voices = voiceDefinitions.map(([name, lang, voiceURI, isDefault]) => ({
+        name,
+        lang,
+        voiceURI,
         localService: true,
-        default: true,
-      };
-      const frenchVoice = {
-        name: 'ANCIENT SECURED VAULT Native French',
-        lang: 'fr-FR',
-        voiceURI: 'ancient-secure-vault-native-fr',
-        localService: true,
-        default: false,
-      };
-      const voices = [voice, frenchVoice];
+        default: Boolean(isDefault),
+      }));
       const state = {
         current: null,
         speaking: false,
@@ -159,7 +165,9 @@
             action: 'speak',
             id,
             text: utterance.text || '',
-            lang: utterance.lang || (utterance.voice && utterance.voice.lang) || 'en-US',
+            lang: (utterance.voice && utterance.voice.lang) || utterance.lang || 'en-US',
+            voiceName: utterance.voice && utterance.voice.name,
+            voiceURI: utterance.voice && utterance.voice.voiceURI,
             rate: utterance.rate || 1,
             pitch: utterance.pitch || 1,
             volume: utterance.volume || 1,
