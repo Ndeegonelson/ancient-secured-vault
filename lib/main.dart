@@ -359,14 +359,106 @@ Uri clearSubscriptionReturnParameters(Uri uri) {
   return uri.replace(queryParameters: queryParameters);
 }
 
+class _LandingSlide {
+  const _LandingSlide({
+    required this.assetPath,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String assetPath;
+  final String title;
+  final String subtitle;
+}
+
+const List<_LandingSlide> _desktopLandingSlides = [
+  _LandingSlide(
+    assetPath: 'assets/landing/hero_secure_knowledge_vault.png',
+    title: 'Secure Knowledge Vault',
+    subtitle:
+        'Protected books, private documents, and reader tools in one vault.',
+  ),
+  _LandingSlide(
+    assetPath: 'assets/landing/hero_protected_document_access.png',
+    title: 'Protected Document Access',
+    subtitle: 'Controlled PDF access for free and premium readers.',
+  ),
+  _LandingSlide(
+    assetPath: 'assets/landing/hero_encrypted_ecosystem.png',
+    title: 'Encrypted Learning Ecosystem',
+    subtitle:
+        'Security, subscriptions, progress, notes, and highlights working together.',
+  ),
+  _LandingSlide(
+    assetPath: 'assets/landing/hero_audio_reader_intelligence.png',
+    title: 'Audio Reader Intelligence',
+    subtitle:
+        'Built for reading, listening, reviewing, and returning to key pages.',
+  ),
+];
+
+const List<_LandingSlide> _mobileLandingSlides = [
+  _LandingSlide(
+    assetPath: 'assets/landing/mobile_secure_pdf_streaming.png',
+    title: 'Secure PDF Streaming',
+    subtitle: 'Protected knowledge for authorized readers.',
+  ),
+  _LandingSlide(
+    assetPath: 'assets/landing/mobile_encrypted_access.png',
+    title: 'Encrypted Access',
+    subtitle: 'Vault content guarded for the right audience.',
+  ),
+  _LandingSlide(
+    assetPath: 'assets/landing/mobile_audio_reading.png',
+    title: 'Audio Reading',
+    subtitle: 'Listen, learn, and keep your place.',
+  ),
+  _LandingSlide(
+    assetPath: 'assets/landing/mobile_smart_notes.png',
+    title: 'Smart Notes',
+    subtitle: 'Capture highlights and notes while reading.',
+  ),
+];
+
 class _HomeScreenState extends State<HomeScreen> {
+  final PageController landingCarouselController = PageController();
+  Timer? landingCarouselTimer;
   bool handledSubscriptionReturn = false;
+  int activeLandingSlide = 0;
 
   @override
   void initState() {
     super.initState();
+    startLandingCarousel();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       handlePublicSubscriptionReturn();
+    });
+  }
+
+  @override
+  void dispose() {
+    landingCarouselTimer?.cancel();
+    landingCarouselController.dispose();
+    super.dispose();
+  }
+
+  void startLandingCarousel() {
+    landingCarouselTimer?.cancel();
+    landingCarouselTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (!mounted) return;
+
+      final nextSlide = (activeLandingSlide + 1) % _desktopLandingSlides.length;
+      if (landingCarouselController.hasClients) {
+        landingCarouselController.animateToPage(
+          nextSlide,
+          duration: const Duration(milliseconds: 650),
+          curve: Curves.easeOutCubic,
+        );
+      } else {
+        setState(() {
+          activeLandingSlide = nextSlide;
+        });
+      }
     });
   }
 
@@ -456,9 +548,332 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void openLogin({AuthScreenMode initialMode = AuthScreenMode.signIn}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LoginScreen(initialMode: initialMode),
+      ),
+    );
+  }
+
+  Widget buildLandingActions({required bool isPhone}) {
+    final enterButton = SizedBox(
+      width: isPhone ? double.infinity : 220,
+      height: isPhone ? 58 : 54,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.greenAccent,
+          foregroundColor: Colors.black,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: openLogin,
+        child: const Text(
+          'ENTER PLATFORM',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+
+    final createButton = SizedBox(
+      width: isPhone ? double.infinity : 220,
+      height: isPhone ? 54 : 54,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.greenAccent,
+          side: const BorderSide(color: Colors.greenAccent),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: () => openLogin(initialMode: AuthScreenMode.signUp),
+        child: const Text(
+          'CREATE TEST ACCOUNT',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+
+    final forgotButton = TextButton(
+      onPressed: () => openLogin(initialMode: AuthScreenMode.resetPassword),
+      child: const Text(
+        'Forgot password?',
+        style: TextStyle(color: Colors.white70),
+      ),
+    );
+
+    if (isPhone) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          enterButton,
+          const SizedBox(height: 12),
+          createButton,
+          const SizedBox(height: 4),
+          Center(child: forgotButton),
+        ],
+      );
+    }
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [enterButton, createButton, forgotButton],
+    );
+  }
+
+  Widget buildLandingIndicators(List<_LandingSlide> slides) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(slides.length, (index) {
+        final active = index == activeLandingSlide;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          width: active ? 26 : 8,
+          height: 8,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: active ? Colors.greenAccent : Colors.white30,
+            borderRadius: BorderRadius.circular(8),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget buildHeroImage({
+    required List<_LandingSlide> slides,
+    required bool isPhone,
+    required double height,
+  }) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        height: height,
+        width: double.infinity,
+        child: PageView.builder(
+          controller: landingCarouselController,
+          itemCount: slides.length,
+          onPageChanged: (index) {
+            setState(() {
+              activeLandingSlide = index;
+            });
+          },
+          itemBuilder: (context, index) {
+            final slide = slides[index];
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.asset(
+                  slide.assetPath,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.center,
+                ),
+                if (!isPhone)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.82),
+                          Colors.black.withValues(alpha: 0.36),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget buildDesktopHero(List<_LandingSlide> slides, double width) {
+    final heroHeight = (width * 0.38).clamp(380.0, 520.0).toDouble();
+
+    return Stack(
+      children: [
+        buildHeroImage(slides: slides, isPhone: false, height: heroHeight),
+        Positioned.fill(
+          child: Padding(
+            padding: const EdgeInsets.all(34),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 540),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.asset(
+                            'assets/landing/golden_logo.png',
+                            width: 74,
+                            height: 74,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        const Flexible(
+                          child: Text(
+                            'ANCIENT SECURED VAULT',
+                            style: TextStyle(
+                              color: Colors.greenAccent,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Welcome to ANCIENT SECURED VAULT',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 42,
+                        fontWeight: FontWeight.w800,
+                        height: 1.08,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'A secure knowledge ecosystem for protected books, confidential documents, audio learning, highlighting, notes, and encrypted educational access.',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 17,
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: 26),
+                    buildLandingActions(isPhone: false),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 18,
+          child: buildLandingIndicators(slides),
+        ),
+      ],
+    );
+  }
+
+  Widget buildPhoneHero(List<_LandingSlide> slides, double viewportHeight) {
+    final imageHeight = (viewportHeight * 0.66).clamp(520.0, 680.0).toDouble();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/landing/golden_logo.png',
+                width: 58,
+                height: 58,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'ANCIENT SECURED VAULT',
+                style: TextStyle(
+                  color: Colors.greenAccent,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        const Text(
+          'Welcome to ANCIENT SECURED VAULT',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 30,
+            fontWeight: FontWeight.w800,
+            height: 1.12,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Protected reading, listening, notes, highlights, and secure vault access on web and phone.',
+          style: TextStyle(color: Colors.white70, fontSize: 15, height: 1.45),
+        ),
+        const SizedBox(height: 18),
+        buildLandingActions(isPhone: true),
+        const SizedBox(height: 18),
+        buildHeroImage(slides: slides, isPhone: true, height: imageHeight),
+        const SizedBox(height: 14),
+        buildLandingIndicators(slides),
+      ],
+    );
+  }
+
+  Widget buildFeatureStrip({required bool isPhone}) {
+    final features = const [
+      ('Secure PDF Streaming', Icons.picture_as_pdf),
+      ('Audio Reading', Icons.headphones),
+      ('Highlights & Smart Notes', Icons.border_color),
+      ('Reading Progress', Icons.trending_up),
+    ];
+
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: features.map((feature) {
+        return SizedBox(
+          width: isPhone ? double.infinity : 260,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.06),
+              border: Border.all(color: Colors.white12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(feature.$2, color: Colors.greenAccent, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      feature.$1,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF070A0D),
       appBar: AppBar(
         backgroundColor: Colors.black,
         centerTitle: true,
@@ -472,165 +887,41 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
 
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 20),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isPhone = constraints.maxWidth < 720;
+            final slides = isPhone
+                ? _mobileLandingSlides
+                : _desktopLandingSlides;
+            final horizontalPadding = isPhone ? 16.0 : 28.0;
 
-                const Text(
-                  'Welcome to ANCIENT SECURED VAULT',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-
-                const SizedBox(height: 15),
-
-                const Text(
-                  'A secure knowledge ecosystem for protected books, confidential documents, audio learning, highlighting, notes, and encrypted educational access.',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
-                    height: 1.5,
-                  ),
-                ),
-
-                const SizedBox(height: 35),
-
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.greenAccent),
-                  ),
-
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text(
-                        'Core Features',
-                        style: TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      SizedBox(height: 15),
-
-                      Text(
-                        '- Secure PDF Streaming\n'
-                        '- Text-to-Speech Audio Reading\n'
-                        '- Highlights & Smart Notes\n'
-                        '- Subscription Access\n'
-                        '- Reading Progress Tracking\n'
-                        '- Watermark Security\n'
-                        '- Encrypted Content Access',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          height: 1.8,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 40),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 60,
-
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.greenAccent,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+            return SingleChildScrollView(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPadding,
+                      isPhone ? 18 : 28,
+                      horizontalPadding,
+                      28,
                     ),
-
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const LoginScreen(),
-                        ),
-                      );
-                    },
-
-                    child: const Text(
-                      'ENTER PLATFORM',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (isPhone)
+                          buildPhoneHero(slides, constraints.maxHeight)
+                        else
+                          buildDesktopHero(slides, constraints.maxWidth),
+                        const SizedBox(height: 18),
+                        buildFeatureStrip(isPhone: isPhone),
+                      ],
                     ),
                   ),
                 ),
-
-                const SizedBox(height: 12),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.greenAccent,
-                      side: const BorderSide(color: Colors.greenAccent),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const LoginScreen(
-                            initialMode: AuthScreenMode.signUp,
-                          ),
-                        ),
-                      );
-                    },
-                    child: const Text(
-                      'CREATE TEST ACCOUNT',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                Center(
-                  child: TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const LoginScreen(
-                            initialMode: AuthScreenMode.resetPassword,
-                          ),
-                        ),
-                      );
-                    },
-                    child: const Text(
-                      'Forgot password?',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         ),
       ),
     );
