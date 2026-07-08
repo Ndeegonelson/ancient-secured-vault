@@ -690,8 +690,54 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget buildLandingLogo({required bool isPhone}) {
+    final containerSize = isPhone ? 92.0 : 146.0;
+    final logoSize = isPhone ? 84.0 : 136.0;
+
+    return Container(
+      width: containerSize,
+      height: containerSize,
+      decoration: BoxDecoration(
+        gradient: const RadialGradient(
+          colors: [Color(0xFF6A470B), Color(0xFF1B1203), Color(0xFF030302)],
+          stops: [0, 0.52, 1],
+          radius: 0.9,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: const Color(0xFFF0C66A).withValues(alpha: 0.95),
+          width: 1.8,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFE1B85B).withValues(alpha: 0.42),
+            blurRadius: isPhone ? 18 : 26,
+            spreadRadius: isPhone ? 1 : 3,
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.56),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Center(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(5),
+          child: Image.asset(
+            'assets/landing/golden_logo.png',
+            width: logoSize,
+            height: logoSize,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.medium,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget buildDesktopHero(List<_LandingSlide> slides, double width) {
-    final heroHeight = (width * 0.38).clamp(380.0, 520.0).toDouble();
+    final heroHeight = (width * 0.46).clamp(572.0, 672.0).toDouble();
 
     return Stack(
       children: [
@@ -710,16 +756,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.asset(
-                            'assets/landing/golden_logo.png',
-                            width: 74,
-                            height: 74,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
+                        buildLandingLogo(isPhone: false),
+                        const SizedBox(width: 18),
                         const Flexible(
                           child: Text(
                             'ANCIENT SECURED VAULT',
@@ -733,7 +771,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                     const Text(
                       'Welcome to ANCIENT SECURED VAULT',
                       style: TextStyle(
@@ -743,7 +781,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         height: 1.08,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     const Text(
                       'A secure knowledge ecosystem for protected books, confidential documents, audio learning, highlighting, notes, and encrypted educational access.',
                       style: TextStyle(
@@ -752,41 +790,29 @@ class _HomeScreenState extends State<HomeScreen> {
                         height: 1.45,
                       ),
                     ),
-                    const SizedBox(height: 26),
+                    const SizedBox(height: 22),
                     buildLandingActions(isPhone: false),
+                    const SizedBox(height: 24),
+                    buildLandingIndicators(slides),
                   ],
                 ),
               ),
             ),
           ),
         ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 18,
-          child: buildLandingIndicators(slides),
-        ),
       ],
     );
   }
 
   Widget buildPhoneHero(List<_LandingSlide> slides, double viewportHeight) {
-    final imageHeight = (viewportHeight * 0.66).clamp(520.0, 680.0).toDouble();
+    final imageHeight = (viewportHeight * 0.48).clamp(320.0, 520.0).toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.asset(
-                'assets/landing/golden_logo.png',
-                width: 58,
-                height: 58,
-                fit: BoxFit.cover,
-              ),
-            ),
+            buildLandingLogo(isPhone: true),
             const SizedBox(width: 12),
             const Expanded(
               child: Text(
