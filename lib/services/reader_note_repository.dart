@@ -129,10 +129,61 @@ class ReaderNoteDraft {
   final int pageNumber;
 }
 
+Map<String, dynamic> readerNoteSaveData(
+  ReaderNoteDraft note, {
+  Object? createdAt,
+}) {
+  final cleanNote = note.note.trim();
+  if (cleanNote.isEmpty) {
+    throw ArgumentError.value(note.note, 'note', 'Note text cannot be empty.');
+  }
+
+  return {
+    'userEmail': note.userEmail.trim(),
+    'pdfTitle': note.pdfTitle.trim(),
+    'selectedText': note.selectedText.trim(),
+    'note': cleanNote,
+    'color': note.color.trim().isEmpty ? 'yellow' : note.color.trim(),
+    'documentKey': note.documentKey.trim(),
+    'storagePath': note.storagePath.trim(),
+    'category': ReaderNote._readCategory(note.category),
+    'pageNumber': ReaderNote._readPageNumber(note.pageNumber),
+    'createdAt': createdAt ?? FieldValue.serverTimestamp(),
+  };
+}
+
+class ReaderNoteDocumentLookup {
+  const ReaderNoteDocumentLookup._({required this.field, required this.value});
+
+  factory ReaderNoteDocumentLookup.from({
+    String documentKey = '',
+    required String pdfTitle,
+  }) {
+    final cleanDocumentKey = documentKey.trim();
+    if (cleanDocumentKey.isNotEmpty) {
+      return ReaderNoteDocumentLookup._(
+        field: 'documentKey',
+        value: cleanDocumentKey,
+      );
+    }
+
+    return ReaderNoteDocumentLookup._(
+      field: 'pdfTitle',
+      value: pdfTitle.trim(),
+    );
+  }
+
+  final String field;
+  final String value;
+
+  bool get usesDocumentKey => field == 'documentKey';
+}
+
 abstract interface class ReaderNoteStore {
   Stream<List<ReaderNote>> watchForDocument({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   });
 
   Future<List<ReaderNote>> listForUser({
@@ -161,10 +212,12 @@ class ReaderNoteRepository implements ReaderNoteStore {
   Stream<List<ReaderNote>> watchForDocument({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   }) {
     return _queryForDocument(
       userEmail: userEmail,
       pdfTitle: pdfTitle,
+      documentKey: documentKey,
     ).snapshots().map(
       (snapshot) =>
           ReaderNote.sortNewest(snapshot.docs.map(ReaderNote.fromSnapshot)),
@@ -186,18 +239,7 @@ class ReaderNoteRepository implements ReaderNoteStore {
 
   @override
   Future<void> save(ReaderNoteDraft note) {
-    return _collection.add({
-      'userEmail': note.userEmail,
-      'pdfTitle': note.pdfTitle,
-      'selectedText': note.selectedText,
-      'note': note.note,
-      'color': note.color,
-      'documentKey': note.documentKey,
-      'storagePath': note.storagePath,
-      'category': note.category,
-      'pageNumber': note.pageNumber,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    return _collection.add(readerNoteSaveData(note));
   }
 
   @override
@@ -224,9 +266,15 @@ class ReaderNoteRepository implements ReaderNoteStore {
   Query<Map<String, dynamic>> _queryForDocument({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   }) {
+    final lookup = ReaderNoteDocumentLookup.from(
+      documentKey: documentKey,
+      pdfTitle: pdfTitle,
+    );
+
     return _collection
-        .where('userEmail', isEqualTo: userEmail)
-        .where('pdfTitle', isEqualTo: pdfTitle);
+        .where('userEmail', isEqualTo: userEmail.trim())
+        .where(lookup.field, isEqualTo: lookup.value);
   }
 }

@@ -39,6 +39,68 @@ void main() {
     expect(highlight.displayColor, 'Yellow');
   });
 
+  test('uses document key when watching document highlights', () {
+    final lookup = ReaderHighlightDocumentLookup.from(
+      documentKey: ' vault_pdfs/protected-guide.pdf ',
+      pdfTitle: 'Protected Guide.pdf',
+    );
+
+    expect(lookup.usesDocumentKey, isTrue);
+    expect(lookup.field, 'documentKey');
+    expect(lookup.value, 'vault_pdfs/protected-guide.pdf');
+  });
+
+  test('falls back to PDF title when watching legacy highlights', () {
+    final lookup = ReaderHighlightDocumentLookup.from(
+      documentKey: ' ',
+      pdfTitle: ' Protected Guide.pdf ',
+    );
+
+    expect(lookup.usesDocumentKey, isFalse);
+    expect(lookup.field, 'pdfTitle');
+    expect(lookup.value, 'Protected Guide.pdf');
+  });
+
+  test('rejects empty highlight selections before saving', () {
+    expect(
+      () => readerHighlightSaveData(
+        const ReaderHighlightDraft(
+          userEmail: 'reader@example.com',
+          pdfTitle: 'Protected Guide.pdf',
+          selectedText: '   ',
+          pageNumber: 2,
+        ),
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('trims valid highlight drafts before saving', () {
+    final data = readerHighlightSaveData(
+      const ReaderHighlightDraft(
+        userEmail: ' reader@example.com ',
+        pdfTitle: ' Protected Guide.pdf ',
+        selectedText: ' Important passage ',
+        color: ' blue ',
+        note: '   ',
+        documentKey: ' vault_pdfs/protected-guide.pdf ',
+        storagePath: ' vault_pdfs/protected-guide.pdf ',
+        pageNumber: 0,
+      ),
+      createdAt: 'now',
+    );
+
+    expect(data['userEmail'], 'reader@example.com');
+    expect(data['pdfTitle'], 'Protected Guide.pdf');
+    expect(data['selectedText'], 'Important passage');
+    expect(data['color'], 'blue');
+    expect(data['note'], '');
+    expect(data['documentKey'], 'vault_pdfs/protected-guide.pdf');
+    expect(data['storagePath'], 'vault_pdfs/protected-guide.pdf');
+    expect(data['pageNumber'], 1);
+    expect(data['createdAt'], 'now');
+  });
+
   test('sorts updated highlights before older saved highlights', () {
     final older = ReaderHighlight.fromMap({
       'selectedText': 'Older highlight',

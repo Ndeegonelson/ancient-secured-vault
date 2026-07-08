@@ -142,10 +142,67 @@ class ReaderHighlightDraft {
   final int pageNumber;
 }
 
+Map<String, dynamic> readerHighlightSaveData(
+  ReaderHighlightDraft highlight, {
+  Object? createdAt,
+}) {
+  final cleanSelectedText = highlight.selectedText.trim();
+  if (cleanSelectedText.isEmpty) {
+    throw ArgumentError.value(
+      highlight.selectedText,
+      'selectedText',
+      'Highlight selected text cannot be empty.',
+    );
+  }
+
+  return {
+    'userEmail': highlight.userEmail.trim(),
+    'pdfTitle': highlight.pdfTitle.trim(),
+    'selectedText': cleanSelectedText,
+    'color': ReaderHighlight._readColor(highlight.color),
+    'note': highlight.note.trim(),
+    'documentKey': highlight.documentKey.trim(),
+    'storagePath': highlight.storagePath.trim(),
+    'pageNumber': ReaderHighlight._readPageNumber(highlight.pageNumber),
+    'createdAt': createdAt ?? FieldValue.serverTimestamp(),
+  };
+}
+
+class ReaderHighlightDocumentLookup {
+  const ReaderHighlightDocumentLookup._({
+    required this.field,
+    required this.value,
+  });
+
+  factory ReaderHighlightDocumentLookup.from({
+    String documentKey = '',
+    required String pdfTitle,
+  }) {
+    final cleanDocumentKey = documentKey.trim();
+    if (cleanDocumentKey.isNotEmpty) {
+      return ReaderHighlightDocumentLookup._(
+        field: 'documentKey',
+        value: cleanDocumentKey,
+      );
+    }
+
+    return ReaderHighlightDocumentLookup._(
+      field: 'pdfTitle',
+      value: pdfTitle.trim(),
+    );
+  }
+
+  final String field;
+  final String value;
+
+  bool get usesDocumentKey => field == 'documentKey';
+}
+
 abstract interface class ReaderHighlightStore {
   Stream<List<ReaderHighlight>> watchForDocument({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   });
 
   Future<List<ReaderHighlight>> listForUser({
@@ -170,10 +227,12 @@ class ReaderHighlightRepository implements ReaderHighlightStore {
   Stream<List<ReaderHighlight>> watchForDocument({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   }) {
     return _queryForDocument(
       userEmail: userEmail,
       pdfTitle: pdfTitle,
+      documentKey: documentKey,
     ).snapshots().map(
       (snapshot) => ReaderHighlight.sortNewest(
         snapshot.docs.map(ReaderHighlight.fromSnapshot),
@@ -198,17 +257,7 @@ class ReaderHighlightRepository implements ReaderHighlightStore {
 
   @override
   Future<void> save(ReaderHighlightDraft highlight) {
-    return _collection.add({
-      'userEmail': highlight.userEmail,
-      'pdfTitle': highlight.pdfTitle,
-      'selectedText': highlight.selectedText,
-      'color': highlight.color,
-      'note': highlight.note,
-      'documentKey': highlight.documentKey,
-      'storagePath': highlight.storagePath,
-      'pageNumber': highlight.pageNumber,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    return _collection.add(readerHighlightSaveData(highlight));
   }
 
   @override
@@ -230,9 +279,15 @@ class ReaderHighlightRepository implements ReaderHighlightStore {
   Query<Map<String, dynamic>> _queryForDocument({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   }) {
+    final lookup = ReaderHighlightDocumentLookup.from(
+      documentKey: documentKey,
+      pdfTitle: pdfTitle,
+    );
+
     return _collection
-        .where('userEmail', isEqualTo: userEmail)
-        .where('pdfTitle', isEqualTo: pdfTitle);
+        .where('userEmail', isEqualTo: userEmail.trim())
+        .where(lookup.field, isEqualTo: lookup.value);
   }
 }

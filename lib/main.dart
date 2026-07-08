@@ -14902,6 +14902,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                           stream: readerHighlightRepository.watchForDocument(
                             userEmail: userEmail,
                             pdfTitle: widget.title,
+                            documentKey: readerDocumentKey,
                           ),
                           builder: (context, snapshot) {
                             if (!snapshot.hasData) {
@@ -15683,6 +15684,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                 stream: readerNoteRepository.watchForDocument(
                                   userEmail: userEmail,
                                   pdfTitle: widget.title,
+                                  documentKey: readerDocumentKey,
                                 ),
                                 icon: Icons.note_alt,
                                 title: 'Notes',
@@ -15872,6 +15874,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 stream: readerHighlightRepository.watchForDocument(
                   userEmail: userEmail,
                   pdfTitle: widget.title,
+                  documentKey: readerDocumentKey,
                 ),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
@@ -16019,6 +16022,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 stream: readerNoteRepository.watchForDocument(
                   userEmail: userEmail,
                   pdfTitle: widget.title,
+                  documentKey: readerDocumentKey,
                 ),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
@@ -16226,6 +16230,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                   .watchForDocument(
                                     userEmail: userEmail,
                                     pdfTitle: widget.title,
+                                    documentKey: readerDocumentKey,
                                   ),
                               icon: Icons.border_color,
                               label: 'Highlights',
@@ -16236,6 +16241,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                               stream: readerNoteRepository.watchForDocument(
                                 userEmail: userEmail,
                                 pdfTitle: widget.title,
+                                documentKey: readerDocumentKey,
                               ),
                               icon: Icons.note_alt,
                               label: 'Notes',
@@ -16854,6 +16860,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                           stream: readerNoteRepository.watchForDocument(
                             userEmail: userEmail,
                             pdfTitle: widget.title,
+                            documentKey: readerDocumentKey,
                           ),
                           builder: (context, snapshot) {
                             if (!snapshot.hasData) {

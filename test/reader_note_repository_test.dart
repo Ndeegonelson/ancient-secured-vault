@@ -61,6 +61,70 @@ void main() {
     expect(note.matchesSearch('general'), isTrue);
   });
 
+  test('uses document key when watching document notes', () {
+    final lookup = ReaderNoteDocumentLookup.from(
+      documentKey: ' vault_pdfs/protected-guide.pdf ',
+      pdfTitle: 'Protected Guide.pdf',
+    );
+
+    expect(lookup.usesDocumentKey, isTrue);
+    expect(lookup.field, 'documentKey');
+    expect(lookup.value, 'vault_pdfs/protected-guide.pdf');
+  });
+
+  test('falls back to PDF title when watching legacy notes', () {
+    final lookup = ReaderNoteDocumentLookup.from(
+      documentKey: ' ',
+      pdfTitle: ' Protected Guide.pdf ',
+    );
+
+    expect(lookup.usesDocumentKey, isFalse);
+    expect(lookup.field, 'pdfTitle');
+    expect(lookup.value, 'Protected Guide.pdf');
+  });
+
+  test('rejects empty note drafts before saving', () {
+    expect(
+      () => readerNoteSaveData(
+        const ReaderNoteDraft(
+          userEmail: 'reader@example.com',
+          pdfTitle: 'Protected Guide.pdf',
+          note: '   ',
+          pageNumber: 2,
+        ),
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('trims valid note drafts before saving', () {
+    final data = readerNoteSaveData(
+      const ReaderNoteDraft(
+        userEmail: ' reader@example.com ',
+        pdfTitle: ' Protected Guide.pdf ',
+        selectedText: ' Important passage ',
+        note: ' Review this later. ',
+        color: ' green ',
+        documentKey: ' vault_pdfs/protected-guide.pdf ',
+        storagePath: ' vault_pdfs/protected-guide.pdf ',
+        category: ' Research ',
+        pageNumber: 0,
+      ),
+      createdAt: 'now',
+    );
+
+    expect(data['userEmail'], 'reader@example.com');
+    expect(data['pdfTitle'], 'Protected Guide.pdf');
+    expect(data['selectedText'], 'Important passage');
+    expect(data['note'], 'Review this later.');
+    expect(data['color'], 'green');
+    expect(data['documentKey'], 'vault_pdfs/protected-guide.pdf');
+    expect(data['storagePath'], 'vault_pdfs/protected-guide.pdf');
+    expect(data['category'], 'Research');
+    expect(data['pageNumber'], 1);
+    expect(data['createdAt'], 'now');
+  });
+
   test(
     'searches notes by text, selected passage, category, color, and page',
     () {
