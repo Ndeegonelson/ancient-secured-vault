@@ -5548,16 +5548,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                           final docs = snapshot.data!;
 
-                          List<Map<String, dynamic>> filteredDocs = docs.where(
-                            (data) {
-                              final documentAccessLevel =
-                                  data['accessLevel']?.toString() ?? 'free';
+                          List<Map<String, dynamic>> filteredDocs = docs.where((
+                            data,
+                          ) {
+                            final documentAccessLevel =
+                                data['accessLevel']?.toString() ?? 'free';
 
-                              return userAccess.canOpenPdfWithAccessLevel(
-                                documentAccessLevel,
-                              );
-                            },
-                          ).toList();
+                            return userAccess.canOpenPdfWithAccessLevel(
+                              documentAccessLevel,
+                            );
+                          }).toList();
 
                           if (accessFilter == 'free') {
                             filteredDocs = filteredDocs.where((data) {
@@ -5646,6 +5646,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             }).toList();
                           }
 
+                          final resultGroups =
+                              groupVaultSearchResultsByDocument(filteredDocs);
+
                           return Column(
                             children: [
                               Align(
@@ -5717,148 +5720,221 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         ),
                                       )
                                     : ListView.builder(
-                                        itemCount: filteredDocs.length,
+                                        itemCount: resultGroups.length,
+                                        itemBuilder: (context, groupIndex) {
+                                          final group =
+                                              resultGroups[groupIndex];
 
-                                        itemBuilder: (context, index) {
-                                          final data = filteredDocs[index];
-                                          final snippetKeyword =
-                                              vaultBestSnippetKeyword(
-                                                data['text']?.toString() ?? '',
-                                                keyword,
-                                              );
-                                          final snippet =
-                                              buildVaultSearchSnippet(
-                                                data['text']?.toString() ?? '',
-                                                snippetKeyword.isEmpty
-                                                    ? searchTerm
-                                                    : snippetKeyword,
-                                              );
-
-                                          return Card(
-                                            color: const Color(0xFF1A1D26),
-
-                                            child: ListTile(
-                                              leading: Icon(
-                                                Icons.picture_as_pdf,
-                                                color:
-                                                    (data['accessLevel'] ??
-                                                            'free') ==
-                                                        'premium'
-                                                    ? Colors.amber
-                                                    : Colors.greenAccent,
-                                              ),
-
-                                              title: Text(
-                                                data['pdfTitle'] ?? '',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
+                                          return Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Container(
+                                                width: double.infinity,
+                                                margin: const EdgeInsets.only(
+                                                  bottom: 6,
                                                 ),
-                                              ),
-
-                                              subtitle: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-
-                                                children: [
-                                                  Text(
-                                                    'Page ${data['pageNumber']} | ${data['category'] ?? 'General'}',
-                                                    style: const TextStyle(
-                                                      color: Colors.white70,
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 10,
                                                     ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0xFF151821,
                                                   ),
-
-                                                  const SizedBox(height: 6),
-
-                                                  RichText(
-                                                    maxLines: 3,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    text: TextSpan(
-                                                      children:
-                                                          highlightSearchText(
-                                                            snippet,
-                                                            searchTerm,
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                  border: Border.all(
+                                                    color: Colors.white12,
+                                                  ),
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    Icon(
+                                                      Icons.picture_as_pdf,
+                                                      color:
+                                                          group.accessLabel ==
+                                                              'Premium'
+                                                          ? Colors.amber
+                                                          : Colors.greenAccent,
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Text(
+                                                            group.title,
+                                                            maxLines: 2,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            style:
+                                                                const TextStyle(
+                                                                  color: Colors
+                                                                      .white,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                ),
                                                           ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-
-                                              onTap: () async {
-                                                final resultAccessLevel =
-                                                    data['accessLevel']
-                                                        ?.toString() ??
-                                                    'free';
-
-                                                if (!userAccess
-                                                    .canOpenPdfWithAccessLevel(
-                                                      resultAccessLevel,
-                                                    )) {
-                                                  ScaffoldMessenger.of(
-                                                    this.context,
-                                                  ).showSnackBar(
-                                                    const SnackBar(
-                                                      content: Text(
-                                                        'Subscription required to open this PDF.',
+                                                          const SizedBox(
+                                                            height: 3,
+                                                          ),
+                                                          Text(
+                                                            group.detailLabel,
+                                                            style:
+                                                                const TextStyle(
+                                                                  color: Colors
+                                                                      .white54,
+                                                                  fontSize: 12,
+                                                                ),
+                                                          ),
+                                                        ],
                                                       ),
                                                     ),
-                                                  );
-                                                  return;
-                                                }
-
-                                                final pdfUrl =
-                                                    await resolveSearchResultPdfUrl(
-                                                      data,
+                                                  ],
+                                                ),
+                                              ),
+                                              ...group.matches.map((data) {
+                                                final snippetKeyword =
+                                                    vaultBestSnippetKeyword(
+                                                      data['text']
+                                                              ?.toString() ??
+                                                          '',
+                                                      keyword,
+                                                    );
+                                                final snippet =
+                                                    buildVaultSearchSnippet(
+                                                      data['text']
+                                                              ?.toString() ??
+                                                          '',
+                                                      snippetKeyword.isEmpty
+                                                          ? searchTerm
+                                                          : snippetKeyword,
                                                     );
 
-                                                if (pdfUrl == null) return;
-                                                if (!mounted ||
-                                                    !resultContext.mounted) {
-                                                  return;
-                                                }
-
-                                                final pageNumber =
-                                                    data['pageNumber'] is int
-                                                    ? data['pageNumber'] as int
-                                                    : int.tryParse(
-                                                            data['pageNumber']
-                                                                .toString(),
-                                                          ) ??
-                                                          0;
-
-                                                Navigator.pop(resultContext);
-
-                                                Navigator.push(
-                                                  this.context,
-                                                  MaterialPageRoute(
-                                                    builder: (context) => PDFViewerScreen(
-                                                      pdfUrl: pdfUrl,
-                                                      title: data['pdfTitle']
-                                                          .toString(),
-                                                      initialPage: pageNumber,
-                                                      initialSearchQuery:
-                                                          keyword,
-                                                      accessLevel:
-                                                          resultAccessLevel,
-                                                      readerMode:
-                                                          data['readerMode']
-                                                              ?.toString() ??
-                                                          '',
-                                                      protectionMode:
-                                                          data['protectionMode']
-                                                              ?.toString() ??
-                                                          '',
-                                                      openSource:
-                                                          'global_search_result',
-                                                      storagePath:
-                                                          data['storagePath']
-                                                              ?.toString() ??
-                                                          '',
+                                                return Card(
+                                                  margin: const EdgeInsets.only(
+                                                    left: 12,
+                                                    bottom: 8,
+                                                  ),
+                                                  color: const Color(
+                                                    0xFF1A1D26,
+                                                  ),
+                                                  child: ListTile(
+                                                    dense: true,
+                                                    title: Text(
+                                                      vaultSearchMatchRowLabel(
+                                                        data,
+                                                      ),
+                                                      style: const TextStyle(
+                                                        color: Colors.white70,
+                                                      ),
                                                     ),
+                                                    subtitle: Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                            top: 6,
+                                                          ),
+                                                      child: RichText(
+                                                        maxLines: 3,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        text: TextSpan(
+                                                          children:
+                                                              highlightSearchText(
+                                                                snippet,
+                                                                searchTerm,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    onTap: () async {
+                                                      final resultAccessLevel =
+                                                          data['accessLevel']
+                                                              ?.toString() ??
+                                                          'free';
+
+                                                      if (!userAccess
+                                                          .canOpenPdfWithAccessLevel(
+                                                            resultAccessLevel,
+                                                          )) {
+                                                        ScaffoldMessenger.of(
+                                                          this.context,
+                                                        ).showSnackBar(
+                                                          const SnackBar(
+                                                            content: Text(
+                                                              'Subscription required to open this PDF.',
+                                                            ),
+                                                          ),
+                                                        );
+                                                        return;
+                                                      }
+
+                                                      final pdfUrl =
+                                                          await resolveSearchResultPdfUrl(
+                                                            data,
+                                                          );
+
+                                                      if (pdfUrl == null) {
+                                                        return;
+                                                      }
+                                                      if (!mounted ||
+                                                          !resultContext
+                                                              .mounted) {
+                                                        return;
+                                                      }
+
+                                                      final pageNumber =
+                                                          vaultSearchPageNumber(
+                                                            data['pageNumber'],
+                                                          );
+
+                                                      Navigator.pop(
+                                                        resultContext,
+                                                      );
+
+                                                      Navigator.push(
+                                                        this.context,
+                                                        MaterialPageRoute(
+                                                          builder: (context) => PDFViewerScreen(
+                                                            pdfUrl: pdfUrl,
+                                                            title:
+                                                                data['pdfTitle']
+                                                                    .toString(),
+                                                            initialPage:
+                                                                pageNumber,
+                                                            initialSearchQuery:
+                                                                keyword,
+                                                            accessLevel:
+                                                                resultAccessLevel,
+                                                            readerMode:
+                                                                data['readerMode']
+                                                                    ?.toString() ??
+                                                                '',
+                                                            protectionMode:
+                                                                data['protectionMode']
+                                                                    ?.toString() ??
+                                                                '',
+                                                            openSource:
+                                                                'global_search_result',
+                                                            storagePath:
+                                                                data['storagePath']
+                                                                    ?.toString() ??
+                                                                '',
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
                                                   ),
                                                 );
-                                              },
-                                            ),
+                                              }),
+                                              const SizedBox(height: 8),
+                                            ],
                                           );
                                         },
                                       ),

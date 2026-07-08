@@ -67,6 +67,86 @@ String vaultSearchResultsLabel({
   return '$safeVisibleCount of $safeTotalCount matches';
 }
 
+class VaultSearchResultGroup {
+  const VaultSearchResultGroup({
+    required this.documentKey,
+    required this.title,
+    required this.accessLabel,
+    required this.categoryLabel,
+    required this.matches,
+  });
+
+  final String documentKey;
+  final String title;
+  final String accessLabel;
+  final String categoryLabel;
+  final List<Map<String, dynamic>> matches;
+
+  int get matchCount => matches.length;
+
+  String get matchCountLabel {
+    final label = matchCount == 1 ? 'match' : 'matches';
+    return '$matchCount $label';
+  }
+
+  String get detailLabel => '$matchCountLabel | $accessLabel | $categoryLabel';
+}
+
+List<VaultSearchResultGroup> groupVaultSearchResultsByDocument(
+  Iterable<Map<String, dynamic>> results,
+) {
+  final groupedResults = <String, List<Map<String, dynamic>>>{};
+  final firstResultByKey = <String, Map<String, dynamic>>{};
+
+  for (final result in results) {
+    final key = _vaultSearchDocumentGroupKey(result, groupedResults.length);
+    groupedResults.putIfAbsent(key, () => <Map<String, dynamic>>[]).add(result);
+    firstResultByKey.putIfAbsent(key, () => result);
+  }
+
+  return groupedResults.entries
+      .map((entry) {
+        final firstResult =
+            firstResultByKey[entry.key] ?? const <String, dynamic>{};
+        return VaultSearchResultGroup(
+          documentKey: entry.key,
+          title: vaultSearchDocumentTitle(firstResult),
+          accessLabel: vaultSearchAccessLabel(firstResult['accessLevel']),
+          categoryLabel: vaultSearchCategoryLabel(firstResult['category']),
+          matches: List.unmodifiable(entry.value),
+        );
+      })
+      .toList(growable: false);
+}
+
+String vaultSearchDocumentTitle(Map<String, dynamic> result) {
+  final title = result['pdfTitle']?.toString().trim() ?? '';
+  return title.isEmpty ? 'Untitled document' : title;
+}
+
+String vaultSearchAccessLabel(Object? accessLevel) {
+  final normalized = accessLevel?.toString().trim().toLowerCase() ?? '';
+  return normalized == 'premium' ? 'Premium' : 'Free';
+}
+
+String vaultSearchCategoryLabel(Object? category) {
+  final label = category?.toString().trim() ?? '';
+  return label.isEmpty ? 'General' : label;
+}
+
+String vaultSearchMatchRowLabel(Map<String, dynamic> result) {
+  final page = vaultSearchPageNumber(result['pageNumber']);
+  return 'Page $page | ${vaultSearchAccessLabel(result['accessLevel'])} | '
+      '${vaultSearchCategoryLabel(result['category'])}';
+}
+
+int vaultSearchPageNumber(Object? pageNumber) {
+  final page = pageNumber is int
+      ? pageNumber
+      : int.tryParse(pageNumber?.toString() ?? '') ?? 1;
+  return page < 1 ? 1 : page;
+}
+
 bool vaultTextMatchesSearchTerm(String text, String searchTerm) {
   final normalizedSearchTerm = vaultPrimarySearchTerm(searchTerm);
   if (normalizedSearchTerm.isEmpty) return false;
@@ -176,4 +256,28 @@ String _trimSnippet(String text, int start, int end) {
   final suffix = safeEnd < text.length ? ' ...' : '';
 
   return '$prefix${text.substring(safeStart, safeEnd).trim()}$suffix';
+}
+
+String _vaultSearchDocumentGroupKey(
+  Map<String, dynamic> result,
+  int fallbackIndex,
+) {
+  final storagePath = result['storagePath']?.toString().trim() ?? '';
+  if (storagePath.isNotEmpty) return 'storage:$storagePath';
+
+  final pdfUrl = result['pdfUrl']?.toString().trim() ?? '';
+  if (pdfUrl.isNotEmpty) return 'url:$pdfUrl';
+
+  final title = _normalizedVaultSearchGroupValue(result['pdfTitle']);
+  if (title.isNotEmpty) return 'title:$title';
+
+  return 'untitled:$fallbackIndex';
+}
+
+String _normalizedVaultSearchGroupValue(Object? value) {
+  return value?.toString().trim().toLowerCase().replaceAll(
+        RegExp(r'\s+'),
+        ' ',
+      ) ??
+      '';
 }
