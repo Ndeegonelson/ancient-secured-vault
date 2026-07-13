@@ -78,9 +78,19 @@ class UserAccessState {
 
   bool get canManageStripeBilling => subscriptionProvider == 'stripe';
 
+  bool get canManageAppStoreBilling => switch (subscriptionProvider) {
+    'app_store' || 'app-store' || 'appstore' || 'apple' || 'ios' => true,
+    _ => false,
+  };
+
   String get subscriptionProviderLabel {
     return switch (subscriptionProvider) {
       'stripe' => 'Stripe',
+      'app_store' ||
+      'app-store' ||
+      'appstore' ||
+      'apple' ||
+      'ios' => 'App Store',
       'paystack' => 'Paystack',
       'manual' || 'manual_payment' || 'manual-payment' => 'Manual proof',
       'ancient_coin' || 'ancient-coin' || 'ancientcoin' => 'Ancient Coin',

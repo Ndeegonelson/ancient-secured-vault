@@ -13,7 +13,13 @@ enum UserSubscriptionRequestStatus {
   archived,
 }
 
-enum UserSubscriptionPaymentMethod { stripe, paystack, manual, ancientCoin }
+enum UserSubscriptionPaymentMethod {
+  appStore,
+  stripe,
+  paystack,
+  manual,
+  ancientCoin,
+}
 
 enum UserSubscriptionPaymentStatus {
   awaitingPayment,
@@ -393,6 +399,11 @@ String userSubscriptionRequestStatusLabel(
 
 UserSubscriptionPaymentMethod readUserSubscriptionPaymentMethod(dynamic value) {
   return switch (value?.toString().trim().toLowerCase()) {
+    'app_store' ||
+    'app-store' ||
+    'appstore' ||
+    'apple' ||
+    'ios' => UserSubscriptionPaymentMethod.appStore,
     'stripe' => UserSubscriptionPaymentMethod.stripe,
     'manual' ||
     'manual_payment' ||
@@ -411,6 +422,7 @@ UserSubscriptionPaymentMethod readUserSubscriptionPaymentMethod(dynamic value) {
 
 String userSubscriptionPaymentMethodKey(UserSubscriptionPaymentMethod method) {
   return switch (method) {
+    UserSubscriptionPaymentMethod.appStore => 'app_store',
     UserSubscriptionPaymentMethod.stripe => 'stripe',
     UserSubscriptionPaymentMethod.paystack => 'paystack',
     UserSubscriptionPaymentMethod.manual => 'manual',
@@ -422,6 +434,7 @@ String userSubscriptionPaymentMethodLabel(
   UserSubscriptionPaymentMethod method,
 ) {
   return switch (method) {
+    UserSubscriptionPaymentMethod.appStore => 'App Store',
     UserSubscriptionPaymentMethod.stripe => 'Stripe',
     UserSubscriptionPaymentMethod.paystack => 'Paystack',
     UserSubscriptionPaymentMethod.manual => 'Manual proof',
@@ -433,6 +446,7 @@ bool isAdminManagedSubscriptionPaymentMethod(
   UserSubscriptionPaymentMethod method,
 ) {
   return switch (method) {
+    UserSubscriptionPaymentMethod.appStore => false,
     UserSubscriptionPaymentMethod.paystack ||
     UserSubscriptionPaymentMethod.manual ||
     UserSubscriptionPaymentMethod.ancientCoin => true,

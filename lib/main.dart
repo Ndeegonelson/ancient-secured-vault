@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show PointerDeviceKind;
@@ -51,6 +52,7 @@ import 'services/reader_cloud_narration_http_callable_client.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
 import 'dart:html' as html;
+import 'web_js_util.dart' as pdf_js_util;
 import 'web_js_util.dart' as js_util;
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -60,6 +62,12 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 const UserDeviceAuthorizationMode readerDeviceAuthorizationMode =
     UserDeviceAuthorizationMode.monitoring;
+
+bool get isIosAppShell {
+  return html.window.navigator.userAgent.toLowerCase().contains(
+    'ancientsecurevaultiosapp',
+  );
+}
 
 class AncientVaultScrollBehavior extends MaterialScrollBehavior {
   const AncientVaultScrollBehavior();
@@ -1229,7 +1237,9 @@ class _LoginScreenState extends State<LoginScreen> {
   String get helperText => switch (mode) {
     AuthScreenMode.signIn => 'Login to continue into the secure ecosystem.',
     AuthScreenMode.signUp =>
-      'Create a free account for testing, then upgrade through Stripe or Paystack when ready.',
+      isIosAppShell
+          ? 'Create a free account for testing, then upgrade with the App Store for \$120 per year.'
+          : 'Create a free account for testing, then upgrade through Stripe or Paystack when ready.',
     AuthScreenMode.resetPassword =>
       'Enter your email address and we will send a secure reset link.',
   };
@@ -1595,8 +1605,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   TextField(
                     controller: nameController,
                     textInputAction: TextInputAction.next,
+                    style: const TextStyle(color: Colors.white),
                     decoration: const InputDecoration(
                       hintText: 'Full Name',
+                      hintStyle: TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: Colors.white10,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.all(Radius.circular(18)),
                       ),
@@ -1993,8 +2007,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
 
-  bool isLoading = false;
-  bool isDashboardBootstrapping = true;
+  bool isLoading = true;
+  bool isDashboardBootstrapping = false;
   UserAccessState userAccess = const UserAccessState();
   String? pdfLoadError;
   String searchMode = 'all';
@@ -2040,8 +2054,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   );
   final SecureVaultSearchClient secureVaultSearchClient =
       SecureVaultSearchClient.firebase(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
 
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
   final ReaderBookmarkRepository readerBookmarkRepository =
@@ -2058,11 +2072,130 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<_DashboardAdminOverview>? adminOverviewFuture;
   Future<_ReaderDashboardOverview>? readerDashboardFuture;
   bool handledSubscriptionReturn = false;
+  Object? iosPurchaseEventHandler;
+  String iosSubscriptionPrice = '';
+  String iosSubscriptionTitle = 'Premium Yearly';
+  bool iosPurchaseInteractionActive = false;
 
   @override
   void initState() {
     super.initState();
+    registerIosPurchaseBridge();
+    readerDashboardFuture = loadReaderDashboardOverview();
     loadDashboardData();
+  }
+
+  void registerIosPurchaseBridge() {
+    if (!isIosAppShell) return;
+
+    final handler = js_util.allowInterop((Object event) {
+      final rawDetail = js_util.getProperty<Object?>(event, 'detail');
+      if (rawDetail == null) return;
+      try {
+        final decoded = jsonDecode(rawDetail.toString());
+        if (decoded is Map<String, dynamic>) {
+          handleIosPurchaseEvent(decoded);
+        }
+      } catch (_) {}
+    });
+    iosPurchaseEventHandler = handler;
+    js_util.callMethod<void>(html.window, 'addEventListener', [
+      'ancientVaultIap',
+      handler,
+    ]);
+    unawaited(requestIosPurchaseAction('status', requireAuthentication: false));
+  }
+
+  void handleIosPurchaseEvent(Map<String, dynamic> event) {
+    if (!mounted) return;
+
+    final type = event['type']?.toString() ?? '';
+    final message = event['message']?.toString() ?? '';
+    if ((type == 'error' || type == 'unavailable') &&
+        (event['silent'] == true || !iosPurchaseInteractionActive)) {
+      return;
+    }
+    if (type == 'ready') {
+      setState(() {
+        iosSubscriptionPrice = event['price']?.toString().trim() ?? '';
+        iosSubscriptionTitle =
+            event['title']?.toString().trim().isNotEmpty == true
+            ? event['title'].toString().trim()
+            : 'Premium Yearly';
+      });
+      return;
+    }
+
+    if (type == 'success') {
+      iosPurchaseInteractionActive = false;
+      showDashboardMessage(message, color: Colors.greenAccent);
+      unawaited(refreshAccessAfterIosPurchase());
+      return;
+    }
+    if (type == 'simulatorSuccess') {
+      iosPurchaseInteractionActive = false;
+      showDashboardMessage(message, color: Colors.greenAccent);
+      return;
+    }
+    if (type == 'cancelled') {
+      iosPurchaseInteractionActive = false;
+    }
+    if (type == 'error' || type == 'unavailable') {
+      showDashboardMessage(message, color: Colors.redAccent);
+      return;
+    }
+    if (message.isNotEmpty) {
+      showDashboardMessage(message, color: Colors.orangeAccent);
+    }
+  }
+
+  Future<void> refreshAccessAfterIosPurchase() async {
+    await waitForStripeSubscriptionAccess();
+    if (!mounted) return;
+
+    refreshReaderDashboard();
+    if (userAccess.canAccessMainVault) {
+      showSubscriptionActivatedDialog();
+    }
+  }
+
+  Future<void> requestIosPurchaseAction(
+    String action, {
+    bool requireAuthentication = true,
+  }) async {
+    if (!isIosAppShell) {
+      throw StateError(
+        'App Store purchases are available only in the iOS app.',
+      );
+    }
+
+    String? idToken;
+    if (requireAuthentication) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw StateError('Sign in before using App Store purchases.');
+      }
+      idToken = await user.getIdToken(true);
+      if (idToken == null || idToken.trim().isEmpty) {
+        throw StateError('Could not authorize the App Store purchase.');
+      }
+    }
+
+    final bridge = js_util.getProperty<Object?>(html.window, 'AncientVaultIap');
+    if (bridge == null) {
+      throw StateError('The native App Store purchase bridge is unavailable.');
+    }
+
+    if (action == 'purchase' || action == 'restore') {
+      iosPurchaseInteractionActive = true;
+    }
+
+    js_util.callMethod<void>(bridge, 'postMessage', [
+      jsonEncode({
+        'action': action,
+        if (idToken != null) 'firebaseIdToken': idToken,
+      }),
+    ]);
   }
 
   Future<void> loadDashboardData() async {
@@ -2070,9 +2203,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await handleSubscriptionReturn();
     if (!mounted) return;
 
-    setState(() {
-      isDashboardBootstrapping = false;
-    });
+    if (userAccess.canAccessMainVault || userAccess.isAdmin) {
+      setState(() {
+        readerDashboardFuture = loadReaderDashboardOverview();
+      });
+    }
     unawaited(loadPDFs());
   }
 
@@ -2237,41 +2372,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
-    final userRecords = await readerActivityRepository.listRecentRecordsForUser(
-      userEmail: userEmail,
-      limit: 80,
-    );
+    var userRecords = <ReaderActivityRecord>[];
+    var savedPositions = <ReaderSavedPosition>[];
+    var bookmarks = <ReaderBookmark>[];
+    var notes = <ReaderNote>[];
+    var highlights = <ReaderHighlight>[];
+    var announcements = <ReaderAnnouncement>[];
+    var suggestions = <ReaderSuggestion>[];
+    var devices = <UserDeviceRecord>[];
+    var subscriptionRequests = <UserSubscriptionRequest>[];
 
-    final savedPositions = await savedPositionRepository.listForUser(
-      userEmail: userEmail,
-      limit: 8,
-    );
-    final bookmarks = await readerBookmarkRepository.listForUser(
-      userEmail: userEmail,
-      limit: 8,
-    );
-    final notes = await readerNoteRepository.listForUser(
-      userEmail: userEmail,
-      limit: 8,
-    );
-    final highlights = await readerHighlightRepository.listForUser(
-      userEmail: userEmail,
-      limit: 8,
-    );
-    final announcements = await readerAnnouncementRepository.listForUser(
-      access: userAccess,
-      limit: 20,
-    );
-    final suggestions = await readerSuggestionRepository.listForUser(
-      userEmail: userEmail,
-      limit: 8,
-    );
-    final devices = await deviceAuthorizationRepository.listForUser(
-      userEmail: userEmail,
-      limit: 8,
-    );
-    final subscriptionRequests = await subscriptionRequestRepository
-        .listForUser(userEmail: userEmail, limit: 6);
+    await Future.wait<void>([
+      readerActivityRepository
+          .listRecentRecordsForUser(userEmail: userEmail, limit: 80)
+          .then((value) => userRecords = value),
+      savedPositionRepository
+          .listForUser(userEmail: userEmail, limit: 8)
+          .then((value) => savedPositions = value),
+      readerBookmarkRepository
+          .listForUser(userEmail: userEmail, limit: 8)
+          .then((value) => bookmarks = value),
+      readerNoteRepository
+          .listForUser(userEmail: userEmail, limit: 8)
+          .then((value) => notes = value),
+      readerHighlightRepository
+          .listForUser(userEmail: userEmail, limit: 8)
+          .then((value) => highlights = value),
+      readerAnnouncementRepository
+          .listForUser(access: userAccess, limit: 20)
+          .then((value) => announcements = value),
+      readerSuggestionRepository
+          .listForUser(userEmail: userEmail, limit: 8)
+          .then((value) => suggestions = value),
+      deviceAuthorizationRepository
+          .listForUser(userEmail: userEmail, limit: 8)
+          .then((value) => devices = value),
+      subscriptionRequestRepository
+          .listForUser(userEmail: userEmail, limit: 6)
+          .then((value) => subscriptionRequests = value),
+    ]);
 
     return _ReaderDashboardOverview(
       activity: const ReaderActivityAnalytics().summarize(userRecords),
@@ -2302,6 +2441,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    final purchaseHandler = iosPurchaseEventHandler;
+    if (purchaseHandler != null) {
+      js_util.callMethod<void>(html.window, 'removeEventListener', [
+        'ancientVaultIap',
+        purchaseHandler,
+      ]);
+    }
     dashboardDocumentSearchController.dispose();
     super.dispose();
   }
@@ -8554,6 +8700,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     return switch (request.paymentMethod) {
+      UserSubscriptionPaymentMethod.appStore => Icons.apple,
       UserSubscriptionPaymentMethod.stripe => Icons.credit_card_outlined,
       UserSubscriptionPaymentMethod.paystack =>
         Icons.account_balance_wallet_outlined,
@@ -8639,6 +8786,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return userAccess.canManageStripeBilling
         ? showManageStripeSubscriptionDialog
         : showSubscriptionRequestDialog;
+  }
+
+  void openAppStoreSubscriptionManagement() {
+    html.window.location.assign('https://apps.apple.com/account/subscriptions');
   }
 
   String readerSubscriptionActionLabel() {
@@ -10620,6 +10771,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
+    if (paymentMethod == UserSubscriptionPaymentMethod.appStore) {
+      await requestIosPurchaseAction('purchase');
+      return;
+    }
+
     if (paymentMethod == UserSubscriptionPaymentMethod.stripe) {
       final currentUrl = Uri.base;
       final checkout = await subscriptionCheckoutClient
@@ -10722,13 +10878,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> showSubscriptionRequestDialog() async {
     final controller = TextEditingController();
     final referenceController = TextEditingController();
-    var paymentMethod = UserSubscriptionPaymentMethod.stripe;
+    var paymentMethod = isIosAppShell
+        ? UserSubscriptionPaymentMethod.appStore
+        : UserSubscriptionPaymentMethod.stripe;
     String? checkoutErrorMessage;
-    const selectablePaymentMethods = [
-      UserSubscriptionPaymentMethod.stripe,
-      UserSubscriptionPaymentMethod.paystack,
-      UserSubscriptionPaymentMethod.manual,
-    ];
+    final selectablePaymentMethods = isIosAppShell
+        ? const [UserSubscriptionPaymentMethod.appStore]
+        : const [
+            UserSubscriptionPaymentMethod.stripe,
+            UserSubscriptionPaymentMethod.paystack,
+            UserSubscriptionPaymentMethod.manual,
+          ];
 
     await showDialog<void>(
       context: context,
@@ -10753,6 +10913,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         userAccess.canAccessMainVault
                             ? 'Ask administration about renewal, account status, or subscription support.'
                             : paymentMethod ==
+                                  UserSubscriptionPaymentMethod.appStore
+                            ? 'Subscribe securely with your Apple Account to unlock the protected vault.'
+                            : paymentMethod ==
                                   UserSubscriptionPaymentMethod.stripe
                             ? 'Continue to secure Stripe checkout to unlock the protected vault.'
                             : paymentMethod ==
@@ -10765,39 +10928,84 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: const TextStyle(color: Colors.white70),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<UserSubscriptionPaymentMethod>(
-                        initialValue: paymentMethod,
-                        dropdownColor: const Color(0xFF1A1D25),
-                        iconEnabledColor: Colors.greenAccent,
-                        style: const TextStyle(color: Colors.white70),
-                        decoration: const InputDecoration(
-                          labelText: 'Preferred payment method',
-                          labelStyle: TextStyle(color: Colors.white70),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white24),
+                      if (isIosAppShell)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.04),
+                            border: Border.all(color: Colors.white24),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.greenAccent),
-                          ),
-                        ),
-                        items: selectablePaymentMethods
-                            .map((method) {
-                              return DropdownMenuItem(
-                                value: method,
-                                child: Text(
-                                  userSubscriptionPaymentMethodLabel(method),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.apple,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      iosSubscriptionTitle,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      iosSubscriptionPrice.isEmpty
+                                          ? '\$120 per year, auto-renewable'
+                                          : '$iosSubscriptionPrice per year, auto-renewable',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              );
-                            })
-                            .toList(growable: false),
-                        onChanged: (value) {
-                          setDialogState(() {
-                            paymentMethod =
-                                value ?? UserSubscriptionPaymentMethod.paystack;
-                            checkoutErrorMessage = null;
-                          });
-                        },
-                      ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<UserSubscriptionPaymentMethod>(
+                          initialValue: paymentMethod,
+                          dropdownColor: const Color(0xFF1A1D25),
+                          iconEnabledColor: Colors.greenAccent,
+                          style: const TextStyle(color: Colors.white70),
+                          decoration: const InputDecoration(
+                            labelText: 'Preferred payment method',
+                            labelStyle: TextStyle(color: Colors.white70),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.white24),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.greenAccent),
+                            ),
+                          ),
+                          items: selectablePaymentMethods
+                              .map((method) {
+                                return DropdownMenuItem(
+                                  value: method,
+                                  child: Text(
+                                    userSubscriptionPaymentMethodLabel(method),
+                                  ),
+                                );
+                              })
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            setDialogState(() {
+                              paymentMethod =
+                                  value ??
+                                  UserSubscriptionPaymentMethod.paystack;
+                              checkoutErrorMessage = null;
+                            });
+                          },
+                        ),
                       if (paymentMethod ==
                           UserSubscriptionPaymentMethod.manual) ...[
                         const SizedBox(height: 12),
@@ -10822,6 +11030,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const Text(
                           'Admin will review the proof before premium access is activated.',
                           style: TextStyle(color: Colors.white54),
+                        ),
+                      ] else if (paymentMethod ==
+                          UserSubscriptionPaymentMethod.appStore) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Payment is charged to your Apple Account. The subscription renews automatically unless cancelled at least 24 hours before the current period ends. You can restore purchases at any time.',
+                          style: TextStyle(color: Colors.white54, height: 1.35),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            TextButton(
+                              onPressed: () =>
+                                  html.window.location.assign('/privacy.html'),
+                              child: const Text('Privacy Policy'),
+                            ),
+                            TextButton(
+                              onPressed: () => html.window.location.assign(
+                                'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/',
+                              ),
+                              child: const Text('Terms of Use'),
+                            ),
+                          ],
                         ),
                       ] else if (paymentMethod ==
                           UserSubscriptionPaymentMethod.stripe) ...[
@@ -10853,27 +11085,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: controller,
-                        maxLines: 4,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          hintText:
-                              'Optional note for administration, payment reference, or access reason...',
-                          hintStyle: TextStyle(color: Colors.white38),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.white24),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.greenAccent),
+                      if (!isIosAppShell) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: controller,
+                          maxLines: 4,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: const InputDecoration(
+                            hintText:
+                                'Optional note for administration, payment reference, or access reason...',
+                            hintStyle: TextStyle(color: Colors.white38),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.white24),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.greenAccent),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
                 actions: [
+                  if (isIosAppShell)
+                    TextButton(
+                      onPressed: isSending
+                          ? null
+                          : () async {
+                              try {
+                                await requestIosPurchaseAction('restore');
+                              } catch (error) {
+                                if (!context.mounted) return;
+                                setDialogState(() {
+                                  checkoutErrorMessage =
+                                      'Purchases could not be restored: $error';
+                                });
+                              }
+                            },
+                      child: const Text('Restore Purchases'),
+                    ),
                   TextButton(
                     onPressed: isSending ? null : () => Navigator.pop(context),
                     child: const Text(
@@ -10896,6 +11147,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 paymentReference: referenceController.text,
                               );
                               if (paymentMethod ==
+                                  UserSubscriptionPaymentMethod.appStore) {
+                                if (context.mounted) {
+                                  setDialogState(() => isSending = false);
+                                }
+                                return;
+                              }
+                              if (paymentMethod ==
                                       UserSubscriptionPaymentMethod.stripe ||
                                   paymentMethod ==
                                       UserSubscriptionPaymentMethod.paystack) {
@@ -10911,7 +11169,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 isSending = false;
                                 checkoutErrorMessage =
                                     paymentMethod ==
-                                        UserSubscriptionPaymentMethod.stripe
+                                        UserSubscriptionPaymentMethod.appStore
+                                    ? 'App Store purchase could not start: $error'
+                                    : paymentMethod ==
+                                          UserSubscriptionPaymentMethod.stripe
                                     ? 'Stripe checkout could not start: $error'
                                     : paymentMethod ==
                                           UserSubscriptionPaymentMethod.paystack
@@ -10922,7 +11183,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 SnackBar(
                                   content: Text(
                                     paymentMethod ==
-                                            UserSubscriptionPaymentMethod.stripe
+                                            UserSubscriptionPaymentMethod
+                                                .appStore
+                                        ? 'App Store purchase could not start: $error'
+                                        : paymentMethod ==
+                                              UserSubscriptionPaymentMethod
+                                                  .stripe
                                         ? 'Stripe checkout could not start: $error'
                                         : paymentMethod ==
                                               UserSubscriptionPaymentMethod
@@ -10948,7 +11214,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             size: 16,
                           ),
                     label: Text(
-                      paymentMethod == UserSubscriptionPaymentMethod.stripe
+                      paymentMethod == UserSubscriptionPaymentMethod.appStore
+                          ? 'Subscribe with Apple'
+                          : paymentMethod ==
+                                UserSubscriptionPaymentMethod.stripe
                           ? 'Continue to Stripe'
                           : paymentMethod ==
                                 UserSubscriptionPaymentMethod.paystack
@@ -11398,6 +11667,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 subtitle:
                                     'Manage payment method, invoices, and renewal in Stripe.',
                                 onTap: showManageStripeSubscriptionDialog,
+                              ),
+                            if (userAccess.canManageAppStoreBilling)
+                              buildReaderDashboardItem(
+                                icon: Icons.apple,
+                                title: 'App Store subscription',
+                                subtitle:
+                                    'Manage renewal or cancellation with your Apple Account.',
+                                onTap: openAppStoreSubscriptionManagement,
                               ),
                             ...overview.subscriptionRequests.take(4).map((
                               request,
@@ -12204,6 +12481,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   double? protectedPdfPinchStartDistance;
   double protectedPdfPinchStartZoomScale = 1;
   double? protectedPdfPendingPinchZoomScale;
+  double? protectedPdfPanLastX;
+  double? protectedPdfPanLastY;
+  bool protectedPdfDidPan = false;
   DateTime? protectedPdfLastTapAt;
   DateTime? readerSessionStartedAt;
   StreamSubscription<html.Event>? readerVisibilitySubscription;
@@ -12309,9 +12589,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         userAgent.contains('; wv)');
   }
 
+  bool get isIosWebViewReader {
+    final userAgent = (html.window.navigator.userAgent).toLowerCase();
+    return userAgent.contains('ancientsecurevaultiosapp');
+  }
+
   bool get usesImagePdfReader {
     return readerProtectionPolicy.usesProtectedImageReader ||
-        isAndroidWebViewReader;
+        isAndroidWebViewReader ||
+        isIosWebViewReader;
   }
 
   bool get shouldShowReaderPrivacyShield {
@@ -12914,8 +13200,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ..style.height = '100%'
           ..style.overflowY = 'auto'
           ..style.overflowX = 'auto'
+          ..style.setProperty('-webkit-overflow-scrolling', 'touch')
+          ..style.setProperty('overscroll-behavior', 'contain')
           ..style.background = '#202124'
-          ..style.padding = '18px 0 96px'
+          ..style.padding = '12px 0 112px'
           ..style.boxSizing = 'border-box'
           ..style.userSelect = 'none'
           ..style.setProperty('touch-action', 'pan-x pan-y');
@@ -12951,18 +13239,20 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         protectedPdfScrollSubscription = container.onScroll.listen(
           handleProtectedPdfImageScroll,
         );
-        protectedPdfTouchStartSubscription = container.onTouchStart.listen(
-          handleProtectedPdfTouchStart,
-        );
-        protectedPdfTouchMoveSubscription = container.onTouchMove.listen(
-          handleProtectedPdfTouchMove,
-        );
-        protectedPdfTouchEndSubscription = container.onTouchEnd.listen(
-          handleProtectedPdfTouchEnd,
-        );
-        protectedPdfTouchCancelSubscription = container.onTouchCancel.listen(
-          handleProtectedPdfTouchEnd,
-        );
+        if (!isIosWebViewReader) {
+          protectedPdfTouchStartSubscription = container.onTouchStart.listen(
+            handleProtectedPdfTouchStart,
+          );
+          protectedPdfTouchMoveSubscription = container.onTouchMove.listen(
+            handleProtectedPdfTouchMove,
+          );
+          protectedPdfTouchEndSubscription = container.onTouchEnd.listen(
+            handleProtectedPdfTouchEnd,
+          );
+          protectedPdfTouchCancelSubscription = container.onTouchCancel.listen(
+            handleProtectedPdfTouchEnd,
+          );
+        }
 
         pdfIframe = null;
         protectedPdfImageContainer = container;
@@ -13126,22 +13416,33 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final completer = Completer<void>();
     _pdfJsReady = completer.future;
 
-    if (js_util.getProperty<Object?>(html.window, 'pdfjsLib') != null) {
+    if (pdf_js_util.getRawProperty(html.window, 'pdfjsLib') != null) {
       configurePdfJsWorker();
       completer.complete();
       return completer.future;
     }
 
     final script = html.ScriptElement()
-      ..src =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js'
+      ..src = '/pdfjs/pdf.min.js'
       ..async = true;
 
+    final timeout = Timer(const Duration(seconds: 15), () {
+      if (completer.isCompleted) return;
+      _pdfJsReady = null;
+      completer.completeError(
+        TimeoutException('Protected PDF image renderer timed out.'),
+      );
+    });
+
     script.onLoad.first.then((_) {
+      timeout.cancel();
+      if (completer.isCompleted) return;
       configurePdfJsWorker();
       completer.complete();
     });
     script.onError.first.then((_) {
+      timeout.cancel();
+      if (completer.isCompleted) return;
       _pdfJsReady = null;
       completer.completeError(
         StateError('Protected PDF image renderer could not load.'),
@@ -13153,17 +13454,17 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   void configurePdfJsWorker() {
-    final pdfJs = js_util.getProperty<Object?>(html.window, 'pdfjsLib');
+    final pdfJs = pdf_js_util.getRawProperty(html.window, 'pdfjsLib');
     if (pdfJs == null) return;
 
-    final workerOptions = js_util.getProperty<Object>(
+    final workerOptions = pdf_js_util.getProperty<Object>(
       pdfJs,
       'GlobalWorkerOptions',
     );
-    js_util.setProperty(
+    pdf_js_util.setProperty(
       workerOptions,
       'workerSrc',
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js',
+      '/pdfjs/pdf.worker.min.js',
     );
   }
 
@@ -13187,6 +13488,20 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   Future<Uint8List> fetchProtectedPdfImageBytes() async {
     final storagePath = normalizedReaderStoragePath;
     Object? storageError;
+
+    if (isIosWebViewReader) {
+      final nativeBridge = js_util.getProperty<Object?>(
+        html.window,
+        'AncientVaultPdf',
+      );
+      final nativePdfUri = Uri.tryParse(widget.pdfUrl.trim());
+      if (nativeBridge != null &&
+          nativePdfUri != null &&
+          (nativePdfUri.scheme == 'https' || nativePdfUri.scheme == 'http')) {
+        setProtectedPdfLoadingMessage('Downloading protected PDF on iOS...');
+        return loadProtectedPdfImageBytesFromIosBridge(nativeBridge);
+      }
+    }
 
     if (storagePath.isNotEmpty) {
       try {
@@ -13216,6 +13531,109 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
   }
 
+  Future<Uint8List> loadProtectedPdfImageBytesFromIosBridge(
+    Object nativeBridge,
+  ) async {
+    final requestId =
+        'ios-pdf-${DateTime.now().microsecondsSinceEpoch}-${widget.pdfUrl.hashCode}';
+    final completer = Completer<Uint8List>();
+    final bytes = <int>[];
+
+    late final Object handler;
+    handler = js_util.allowInterop((Object event) {
+      if (completer.isCompleted) return;
+
+      final rawDetail = js_util.getProperty<Object?>(event, 'detail');
+      if (rawDetail == null) return;
+      try {
+        final decoded = jsonDecode(rawDetail.toString());
+        if (decoded is! Map<String, dynamic> ||
+            decoded['requestId']?.toString() != requestId) {
+          return;
+        }
+
+        switch (decoded['type']?.toString()) {
+          case 'started':
+            setProtectedPdfLoadingMessage('Connecting to protected PDF...');
+            return;
+          case 'response':
+            final contentLength = decoded['contentLength'];
+            setProtectedPdfLoadingMessage(
+              contentLength is num && contentLength > 0
+                  ? 'Downloading protected PDF '
+                        '(${(contentLength / (1024 * 1024)).toStringAsFixed(1)} MB)...'
+                  : 'Downloading protected PDF...',
+            );
+            return;
+          case 'chunk':
+            final encodedChunk = decoded['data']?.toString() ?? '';
+            if (encodedChunk.isNotEmpty) {
+              bytes.addAll(base64Decode(encodedChunk));
+            }
+            if (bytes.length > _maximumProtectedPdfImageBytes) {
+              completer.completeError(
+                StateError('The PDF is too large for protected rendering.'),
+              );
+            }
+            return;
+          case 'complete':
+            if (bytes.isEmpty) {
+              completer.completeError(
+                StateError('The native PDF download returned no data.'),
+              );
+            } else {
+              setProtectedPdfLoadingMessage('Preparing PDF pages...');
+              completer.complete(Uint8List.fromList(bytes));
+            }
+            return;
+          case 'error':
+            completer.completeError(
+              StateError(
+                decoded['message']?.toString() ??
+                    'The native PDF download failed.',
+              ),
+            );
+            return;
+        }
+      } catch (error) {
+        if (!completer.isCompleted) completer.completeError(error);
+      }
+    });
+
+    js_util.callMethod<void>(html.window, 'addEventListener', [
+      'ancientVaultPdfFetch',
+      handler,
+    ]);
+
+    try {
+      js_util.callMethod<void>(nativeBridge, 'postMessage', [
+        jsonEncode({
+          'action': 'fetch',
+          'requestId': requestId,
+          'url': widget.pdfUrl,
+        }),
+      ]);
+      return await completer.future.timeout(
+        const Duration(seconds: 45),
+        onTimeout: () => throw TimeoutException(
+          'The iOS PDF download bridge did not respond.',
+        ),
+      );
+    } finally {
+      js_util.callMethod<void>(html.window, 'removeEventListener', [
+        'ancientVaultPdfFetch',
+        handler,
+      ]);
+    }
+  }
+
+  void setProtectedPdfLoadingMessage(String message) {
+    final container = protectedPdfImageContainer;
+    if (container == null || container.children.isEmpty) return;
+    final firstChild = container.children.first;
+    if (firstChild is html.DivElement) firstChild.text = message;
+  }
+
   Future<Uint8List> loadProtectedPdfImageBytesFromUrl() async {
     final response = await http
         .get(Uri.parse(widget.pdfUrl))
@@ -13236,24 +13654,27 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final renderGeneration = ++protectedPdfRenderGeneration;
 
     try {
+      setProtectedPdfLoadingMessage('Loading protected PDF renderer...');
       await ensurePdfJsReady();
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      final pdfJs = js_util.getProperty<Object>(html.window, 'pdfjsLib');
+      final pdfJs = pdf_js_util.getProperty<Object>(html.window, 'pdfjsLib');
       final pdfBytes = await loadProtectedPdfImageBytes();
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      final documentOptions = js_util.newObject();
-      js_util.setProperty(documentOptions, 'data', pdfBytes);
-      final loadingTask = js_util.callMethod<Object>(pdfJs, 'getDocument', [
+      setProtectedPdfLoadingMessage('Opening protected PDF pages...');
+
+      final documentOptions = pdf_js_util.newObject();
+      pdf_js_util.setProperty(documentOptions, 'data', pdfBytes);
+      final loadingTask = pdf_js_util.callMethod<Object>(pdfJs, 'getDocument', [
         documentOptions,
       ]);
-      final document = await js_util.promiseToFuture<Object>(
-        js_util.getProperty<Object>(loadingTask, 'promise'),
+      final document = await pdf_js_util.promiseToFuture<Object>(
+        pdf_js_util.getProperty<Object>(loadingTask, 'promise'),
       );
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      final pageCount = (js_util.getProperty<num>(
+      final pageCount = (pdf_js_util.getProperty<num>(
         document,
         'numPages',
       )).toInt();
@@ -13265,22 +13686,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       protectedPdfRenderJobs.clear();
       pendingProtectedPdfRenderPage = null;
 
-      final firstPage = await js_util.promiseToFuture<Object>(
-        js_util.callMethod<Object>(document, 'getPage', [1]),
+      final firstPage = await pdf_js_util.promiseToFuture<Object>(
+        pdf_js_util.callMethod<Object>(document, 'getPage', [1]),
       );
-      final baseViewport = js_util.callMethod<Object>(
+      final baseViewportOptions = pdf_js_util.newObject();
+      pdf_js_util.setProperty(baseViewportOptions, 'scale', 1);
+      final baseViewport = pdf_js_util.callMethod<Object>(
         firstPage,
         'getViewport',
-        [
-          js_util.jsify({'scale': 1}),
-        ],
+        [baseViewportOptions],
       );
-      final baseWidth = js_util.getProperty<num>(baseViewport, 'width');
-      final containerWidth = container.clientWidth == 0
-          ? 900
-          : container.clientWidth;
-      final availableWidth = math.max(320, containerWidth - 48);
-      final displayScale = (availableWidth / baseWidth).clamp(0.35, 1.8);
+      final baseWidth = pdf_js_util.getProperty<num>(baseViewport, 'width');
+      final containerWidth = await waitForProtectedPdfContainerWidth(
+        container,
+        renderGeneration: renderGeneration,
+      );
+      if (renderGeneration != protectedPdfRenderGeneration) return;
+      final availableWidth = math.max(240, containerWidth - 24);
+      final displayScale = (availableWidth / baseWidth).clamp(0.2, 1.5);
       final targetPixelRatio = pageCount <= 12
           ? 2.35
           : pageCount <= 60
@@ -13293,18 +13716,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final renderScale = displayScale * pixelRatio;
       final zoomedDisplayScale = displayScale * readerZoomScale;
       final zoomedRenderScale = renderScale * readerZoomScale;
-      final zoomedDisplayViewport = js_util.callMethod<Object>(
+      final displayViewportOptions = pdf_js_util.newObject();
+      pdf_js_util.setProperty(
+        displayViewportOptions,
+        'scale',
+        zoomedDisplayScale,
+      );
+      final zoomedDisplayViewport = pdf_js_util.callMethod<Object>(
         firstPage,
         'getViewport',
-        [
-          js_util.jsify({'scale': zoomedDisplayScale}),
-        ],
+        [displayViewportOptions],
       );
-      final zoomedDisplayWidth = js_util.getProperty<num>(
+      final zoomedDisplayWidth = pdf_js_util.getProperty<num>(
         zoomedDisplayViewport,
         'width',
       );
-      final zoomedDisplayHeight = js_util.getProperty<num>(
+      final zoomedDisplayHeight = pdf_js_util.getProperty<num>(
         zoomedDisplayViewport,
         'height',
       );
@@ -13446,6 +13873,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     return rawMessage;
   }
 
+  Future<double> waitForProtectedPdfContainerWidth(
+    html.DivElement container, {
+    required int renderGeneration,
+  }) async {
+    for (var attempt = 0; attempt < 30; attempt++) {
+      if (renderGeneration != protectedPdfRenderGeneration) return 0;
+
+      final width = container.clientWidth;
+      if (width >= 240) return width.toDouble();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+
+    final viewportWidth = html.document.documentElement?.clientWidth ?? 390;
+    return math.max(240, viewportWidth).toDouble();
+  }
+
   Future<void> renderProtectedPdfPagesAroundPage(
     int pageNumber, {
     required int renderGeneration,
@@ -13516,21 +13959,32 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }) async {
     job.isRendering = true;
     try {
-      final page = await js_util.promiseToFuture<Object>(
-        js_util.callMethod<Object>(job.document, 'getPage', [job.pageNumber]),
+      final page = await pdf_js_util.promiseToFuture<Object>(
+        pdf_js_util.callMethod<Object>(job.document, 'getPage', [
+          job.pageNumber,
+        ]),
       );
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      final renderViewport = js_util.callMethod<Object>(page, 'getViewport', [
-        js_util.jsify({'scale': job.renderScale}),
-      ]);
-      final renderWidth = js_util.getProperty<num>(renderViewport, 'width');
-      final renderHeight = js_util.getProperty<num>(renderViewport, 'height');
+      final renderViewportOptions = pdf_js_util.newObject();
+      pdf_js_util.setProperty(renderViewportOptions, 'scale', job.renderScale);
+      final renderViewport = pdf_js_util.callMethod<Object>(
+        page,
+        'getViewport',
+        [renderViewportOptions],
+      );
+      final renderWidth = pdf_js_util.getProperty<num>(renderViewport, 'width');
+      final renderHeight = pdf_js_util.getProperty<num>(
+        renderViewport,
+        'height',
+      );
       final canvas =
           html.CanvasElement(
               width: renderWidth.ceil(),
               height: renderHeight.ceil(),
             )
+            ..id =
+                'ancient-vault-pdf-$renderGeneration-${job.pageNumber}-${DateTime.now().microsecondsSinceEpoch}'
             ..style.width = '${job.displayWidth}px'
             ..style.height = '${job.displayHeight}px'
             ..style.display = 'block'
@@ -13547,18 +14001,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       job.wrapper.children.add(canvas);
       job.canvas = canvas;
 
-      final context = canvas.context2D;
-      js_util.setProperty(context, 'imageSmoothingEnabled', true);
-      js_util.setProperty(context, 'imageSmoothingQuality', 'high');
-      final renderContext = js_util.newObject();
-      js_util.setProperty(renderContext, 'canvasContext', context);
-      js_util.setProperty(renderContext, 'viewport', renderViewport);
-      final renderTask = js_util.callMethod<Object>(page, 'render', [
-        renderContext,
-      ]);
-      await js_util.promiseToFuture<Object>(
-        js_util.getProperty<Object>(renderTask, 'promise'),
+      final renderTask = pdf_js_util.callMethod<Object>(
+        html.window,
+        '__ancientVaultRenderPdfPage',
+        [page, canvas.id, job.renderScale],
       );
+      // PDF.js resolves a successful page render with JavaScript `undefined`.
+      // Keep the completion nullable so the interop layer does not mistake a
+      // successful empty result for a rendering failure and remove the canvas.
+      await pdf_js_util.promiseToFuture<Object?>(renderTask);
 
       if (renderGeneration != protectedPdfRenderGeneration) {
         canvas.remove();
@@ -13570,13 +14021,15 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
       job.placeholder.remove();
       job.isRendered = true;
-    } catch (_) {
+    } catch (error) {
       if (renderGeneration == protectedPdfRenderGeneration) {
         job.canvas?.remove();
         job.canvas = null;
         job.isRendered = false;
         job.placeholder
-          ..text = 'Protected page ${job.pageNumber} could not render.'
+          ..text =
+              'Protected page ${job.pageNumber} could not render. '
+              '${describeProtectedPdfRenderError(error)}'
           ..style.color = '#FF8A80';
         if (!job.wrapper.children.contains(job.placeholder)) {
           job.wrapper.children.add(job.placeholder);
@@ -13657,11 +14110,33 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
   }
 
+  Object? protectedPdfTouchAt(html.Event event, int index) {
+    final touches = js_util.getProperty<Object?>(event, 'touches');
+    if (touches == null) return null;
+
+    final lengthValue = js_util.getProperty<Object?>(touches, 'length');
+    final length = lengthValue is num
+        ? lengthValue.toInt()
+        : int.tryParse('$lengthValue') ?? 0;
+    if (index < 0 || index >= length) return null;
+
+    return js_util.callMethod<Object?>(touches, 'item', [index]) ??
+        js_util.getProperty<Object?>(touches, '$index');
+  }
+
   void handleProtectedPdfTouchStart(html.Event event) {
     final distance = protectedPdfPinchDistanceForEvent(event);
-    if (distance == null) return;
+    if (distance == null) {
+      final touch = protectedPdfTouchAt(event, 0);
+      protectedPdfPanLastX = protectedPdfTouchCoordinate(touch, 'clientX');
+      protectedPdfPanLastY = protectedPdfTouchCoordinate(touch, 'clientY');
+      protectedPdfDidPan = false;
+      return;
+    }
 
     event.preventDefault();
+    protectedPdfPanLastX = null;
+    protectedPdfPanLastY = null;
     protectedPdfPinchStartDistance = distance;
     protectedPdfPinchStartZoomScale = readerZoomScale;
   }
@@ -13669,7 +14144,33 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   void handleProtectedPdfTouchMove(html.Event event) {
     final startDistance = protectedPdfPinchStartDistance;
     final distance = protectedPdfPinchDistanceForEvent(event);
-    if (startDistance == null || distance == null || startDistance <= 0) return;
+    if (startDistance == null || distance == null || startDistance <= 0) {
+      final container = protectedPdfImageContainer;
+      final touch = protectedPdfTouchAt(event, 0);
+      final x = protectedPdfTouchCoordinate(touch, 'clientX');
+      final y = protectedPdfTouchCoordinate(touch, 'clientY');
+      final lastX = protectedPdfPanLastX;
+      final lastY = protectedPdfPanLastY;
+      if (container == null ||
+          x == null ||
+          y == null ||
+          lastX == null ||
+          lastY == null) {
+        return;
+      }
+
+      final deltaX = lastX - x;
+      final deltaY = lastY - y;
+      if (deltaX.abs() >= 1 || deltaY.abs() >= 1) {
+        event.preventDefault();
+        container.scrollLeft += deltaX.round();
+        container.scrollTop += deltaY.round();
+        protectedPdfDidPan = true;
+      }
+      protectedPdfPanLastX = x;
+      protectedPdfPanLastY = y;
+      return;
+    }
 
     event.preventDefault();
     protectedPdfPendingPinchZoomScale = normalizeReaderZoomScale(
@@ -13684,6 +14185,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     protectedPdfPinchStartDistance = null;
     protectedPdfPendingPinchZoomScale = null;
     protectedPdfPinchStartZoomScale = readerZoomScale;
+    protectedPdfPanLastX = null;
+    protectedPdfPanLastY = null;
 
     if (pendingZoom != null && (pendingZoom - readerZoomScale).abs() >= 0.02) {
       event.preventDefault();
@@ -13692,6 +14195,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
 
     if (wasPinching) return;
+    if (protectedPdfDidPan) {
+      protectedPdfDidPan = false;
+      return;
+    }
 
     final now = DateTime.now();
     final lastTap = protectedPdfLastTapAt;
@@ -18877,7 +19384,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Opacity(
-                      opacity: 0.08,
+                      opacity: 0.035,
                       child: Center(
                         child: RotatedBox(
                           quarterTurns: 3,
@@ -18886,8 +19393,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Colors.greenAccent,
-                              fontSize: 34,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),

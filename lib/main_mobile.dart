@@ -1,12 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-const _vaultUrl = 'https://vault.ancientsociety.tech/';
+import 'services/ios_in_app_purchase_controller.dart';
+
+const _vaultUrl = String.fromEnvironment(
+  'VAULT_URL',
+  defaultValue: 'https://vault.ancientsociety.tech/',
+);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,6 +53,7 @@ class VaultWebViewScreen extends StatefulWidget {
 class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   late final WebViewController controller;
   final FlutterTts nativeTts = FlutterTts();
+  IosInAppPurchaseController? iosPurchases;
   var loadProgress = 0;
   String? loadError;
   String? activeUtteranceId;
@@ -58,15 +67,20 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   void initState() {
     super.initState();
     configureNativeTtsBridge();
-    launchSplashTimer = Timer(const Duration(seconds: 5), () {
+    launchSplashTimer = Timer(const Duration(seconds: 2), () {
       if (!mounted) return;
       setState(() {
         showLaunchSplash = false;
       });
     });
-    controller = WebViewController()
+    final isIos = Platform.isIOS;
+    final webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent('AncientSecureVaultAndroidApp/1.0')
+      ..setUserAgent(
+        isIos
+            ? 'AncientSecureVaultIOSApp/1.0'
+            : 'AncientSecureVaultAndroidApp/1.0',
+      )
       ..enableZoom(false)
       ..addJavaScriptChannel(
         'AncientVaultTts',
@@ -82,7 +96,19 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
               if (progress > 10) loadError = null;
             });
           },
-          onPageFinished: (_) => lockMobileWebViewZoom(),
+          onPageFinished: (_) async {
+            launchSplashTimer?.cancel();
+            if (mounted) {
+              setState(() {
+                loadProgress = 100;
+                showLaunchSplash = false;
+              });
+            }
+            await lockMobileWebViewZoom();
+            if (isIos) {
+              await iosPurchases?.initialize(silent: true);
+            }
+          },
           onWebResourceError: (error) {
             if (!mounted || error.isForMainFrame == false) return;
             setState(() {
@@ -92,6 +118,116 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
         ),
       )
       ..loadRequest(Uri.parse(_vaultUrl));
+
+    if (isIos) {
+      iosPurchases = IosInAppPurchaseController(onEvent: emitIosPurchaseEvent);
+      webViewController.addJavaScriptChannel(
+        'AncientVaultPdf',
+        onMessageReceived: handleNativePdfMessage,
+      );
+      webViewController.addJavaScriptChannel(
+        'AncientVaultIap',
+        onMessageReceived: (message) {
+          unawaited(iosPurchases?.handleMessage(message.message));
+        },
+      );
+    }
+    controller = webViewController;
+  }
+
+  Future<void> handleNativePdfMessage(JavaScriptMessage message) async {
+    String requestId = '';
+    HttpClient? client;
+    try {
+      final payload = jsonDecode(message.message);
+      if (payload is! Map<String, dynamic> ||
+          payload['action']?.toString() != 'fetch') {
+        return;
+      }
+
+      requestId = payload['requestId']?.toString() ?? '';
+      final url = payload['url']?.toString().trim() ?? '';
+      final uri = Uri.tryParse(url);
+      if (requestId.isEmpty ||
+          uri == null ||
+          (uri.scheme != 'https' && uri.scheme != 'http')) {
+        throw const FormatException('The PDF download request is invalid.');
+      }
+
+      await emitNativePdfEvent({'type': 'started', 'requestId': requestId});
+
+      client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
+      final request = await client.getUrl(uri);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/pdf,*/*');
+      final response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'PDF download returned HTTP ${response.statusCode}.',
+          uri: uri,
+        );
+      }
+
+      await emitNativePdfEvent({
+        'type': 'response',
+        'requestId': requestId,
+        'contentLength': response.contentLength,
+      });
+
+      var byteCount = 0;
+      var chunkIndex = 0;
+      await for (final chunk in response.timeout(const Duration(seconds: 30))) {
+        byteCount += chunk.length;
+        if (byteCount > 120 * 1024 * 1024) {
+          throw const FileSystemException(
+            'The PDF is too large for protected mobile rendering.',
+          );
+        }
+
+        // Keep each JavaScript evaluation small. WKWebView can silently reject
+        // very large source strings even though the network download succeeded.
+        const bridgeChunkSize = 24 * 1024;
+        for (var offset = 0; offset < chunk.length; offset += bridgeChunkSize) {
+          final end = (offset + bridgeChunkSize).clamp(0, chunk.length);
+          await emitNativePdfEvent({
+            'type': 'chunk',
+            'requestId': requestId,
+            'index': chunkIndex++,
+            'data': base64Encode(chunk.sublist(offset, end)),
+          });
+        }
+      }
+
+      if (byteCount == 0) {
+        throw const FileSystemException('The downloaded PDF is empty.');
+      }
+
+      await emitNativePdfEvent({
+        'type': 'complete',
+        'requestId': requestId,
+        'byteCount': byteCount,
+        'chunkCount': chunkIndex,
+      });
+    } catch (error) {
+      if (requestId.isNotEmpty) {
+        await emitNativePdfEvent({
+          'type': 'error',
+          'requestId': requestId,
+          'message': error.toString(),
+        });
+      }
+    } finally {
+      client?.close(force: true);
+    }
+  }
+
+  Future<void> emitNativePdfEvent(Map<String, dynamic> event) async {
+    final detail = jsonEncode(jsonEncode(event));
+    await controller.runJavaScript(
+      "window.dispatchEvent(new CustomEvent('ancientVaultPdfFetch', "
+      "{detail: $detail}));",
+    );
   }
 
   Future<void> lockMobileWebViewZoom() async {
@@ -253,6 +389,19 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     }
   }
 
+  Future<void> emitIosPurchaseEvent(Map<String, dynamic> event) async {
+    final payload = jsonEncode(jsonEncode(event));
+    try {
+      await controller.runJavaScript(
+        "window.dispatchEvent(new CustomEvent('ancientVaultIap', "
+        "{detail: $payload}));",
+      );
+    } catch (_) {
+      // The web page may still be loading. It requests current StoreKit state
+      // again after the dashboard becomes available.
+    }
+  }
+
   void startEstimatedProgress() {
     estimatedProgressTimer?.cancel();
     if (activeUtteranceText.isEmpty) return;
@@ -304,7 +453,14 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
       child: Scaffold(
         body: Stack(
           children: [
-            WebViewWidget(controller: controller),
+            WebViewWidget(
+              controller: controller,
+              gestureRecognizers: {
+                Factory<OneSequenceGestureRecognizer>(
+                  EagerGestureRecognizer.new,
+                ),
+              },
+            ),
             if (showLaunchSplash) const _VaultLaunchSplash(),
             if (loadProgress < 100 && !showLaunchSplash)
               LinearProgressIndicator(
@@ -329,6 +485,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     launchSplashTimer?.cancel();
     estimatedProgressTimer?.cancel();
     nativeTts.stop();
+    unawaited(iosPurchases?.dispose());
     super.dispose();
   }
 }

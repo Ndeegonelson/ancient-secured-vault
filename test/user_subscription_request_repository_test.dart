@@ -125,6 +125,26 @@ void main() {
       isFalse,
     );
     expect(
+      readUserSubscriptionPaymentMethod('apple'),
+      UserSubscriptionPaymentMethod.appStore,
+    );
+    expect(
+      userSubscriptionPaymentMethodKey(UserSubscriptionPaymentMethod.appStore),
+      'app_store',
+    );
+    expect(
+      userSubscriptionPaymentMethodLabel(
+        UserSubscriptionPaymentMethod.appStore,
+      ),
+      'App Store',
+    );
+    expect(
+      isAdminManagedSubscriptionPaymentMethod(
+        UserSubscriptionPaymentMethod.appStore,
+      ),
+      isFalse,
+    );
+    expect(
       readUserSubscriptionPaymentMethod('bank transfer'),
       UserSubscriptionPaymentMethod.manual,
     );

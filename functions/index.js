@@ -34,6 +34,10 @@ const {
 const {
   createVaultSearchHandler,
 } = require("./vault_search");
+const {
+  createAppleServerNotificationHandler,
+  createVerifyApplePurchaseHandler,
+} = require("./apple_subscription");
 
 initializeApp();
 const firestore = getFirestore();
@@ -178,6 +182,24 @@ exports.paystackWebhook = onRequest(
       secrets: ["PAYSTACK_SECRET_KEY"],
     },
     createPaystackWebhookHandler({firestore}),
+);
+
+exports.verifyApplePurchase = onRequest(
+    {
+      cors: false,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+    },
+    createVerifyApplePurchaseHandler({firestore}),
+);
+
+exports.appleAppStoreNotifications = onRequest(
+    {
+      cors: false,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+    },
+    createAppleServerNotificationHandler({firestore}),
 );
 
 exports.searchVaultDocuments = onRequest(

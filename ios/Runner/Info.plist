@@ -28,6 +28,11 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Ancient Secured Vault may access your photo library when you choose images or media to upload, attach, or manage as vault content.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
