@@ -11187,13 +11187,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           UserSubscriptionPaymentMethod.stripe) ...[
                         const SizedBox(height: 12),
                         const Text(
-                          'Stripe securely charges \$100 USD for one year. Your access updates after payment is confirmed.',
+                          'Stripe securely charges \$120 USD for one year. Your access updates after payment is confirmed.',
                           style: TextStyle(color: Colors.white54),
                         ),
                       ] else ...[
                         const SizedBox(height: 12),
                         const Text(
-                          'Paystack securely charges \$100 USD for one year. Your access updates after payment is confirmed.',
+                          'Paystack securely charges \$120 USD for one year. Your access updates after payment is confirmed.',
                           style: TextStyle(color: Colors.white54),
                         ),
                       ],

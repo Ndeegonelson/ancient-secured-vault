@@ -132,15 +132,15 @@ Required secrets/config values include:
 - `PAYSTACK_SECRET_KEY`
 - `APP_BASE_URL`
 
-The web and Android premium plan is **USD 100 per year**. Paystack's
-amount and currency are enforced in the backend as `10000` USD subunits and
+The web and Android premium plan is **USD 120 per year**. Paystack's
+amount and currency are enforced in the backend as `12000` USD subunits and
 one calendar year of access. The Stripe Price referenced by
-`STRIPE_PREMIUM_PRICE_ID` must be an active recurring USD 100 yearly Price;
+`STRIPE_PREMIUM_PRICE_ID` must be an active recurring USD 120 yearly Price;
 checkout rejects any mismatched Price instead of charging the wrong amount.
 
 Keep the Stripe Price ID and both payment-provider keys in test mode until the
 production-payment migration is performed. Switching modes requires matching
-live keys, a live USD 100 yearly Stripe Price, and live webhook secrets.
+live keys, a live USD 120 yearly Stripe Price, and live webhook secrets.
 
 Example secret update:
 

@@ -6,7 +6,7 @@ const DEFAULT_SUCCESS_PATH = "?subscription=paystack-success";
 const DEFAULT_PAYMENT_METHOD = "paystack";
 const PAYSTACK_INITIALIZE_URL = "https://api.paystack.co/transaction/initialize";
 const PAYSTACK_VERIFY_URL = "https://api.paystack.co/transaction/verify";
-const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 10000;
+const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 12000;
 const PREMIUM_ANNUAL_CURRENCY = "USD";
 
 function createPaystackCheckoutSessionHandler({

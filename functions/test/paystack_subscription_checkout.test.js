@@ -129,7 +129,7 @@ test("creates a Paystack checkout session and records the request", async () => 
       email: "Reader@Example.COM",
     }),
     getSecretKey: () => "sk_test_paystack",
-    getAmountSubunits: () => "10000",
+    getAmountSubunits: () => "12000",
     getCurrency: () => "USD",
     getAppBaseUrl: () => "https://app.test",
   });
@@ -153,7 +153,7 @@ test("creates a Paystack checkout session and records the request", async () => 
     checkoutUrl: "https://checkout.paystack.com/test",
   });
   assert.equal(capturedPayload.email, "reader@example.com");
-  assert.equal(capturedPayload.amount, 10000);
+  assert.equal(capturedPayload.amount, 12000);
   assert.equal(capturedPayload.currency, "USD");
   assert.equal(capturedPayload.callback_url, "https://app.test/success");
   assert.deepEqual(capturedPayload.metadata, {
@@ -195,7 +195,7 @@ test("active premium users cannot start a Paystack checkout", async () => {
       email: "reader@example.com",
     }),
     getSecretKey: () => "sk_test_paystack",
-    getAmountSubunits: () => "10000",
+    getAmountSubunits: () => "12000",
     getCurrency: () => "USD",
     getAppBaseUrl: () => "https://app.test",
   });
@@ -223,7 +223,7 @@ test("successful Paystack charge approves request and activates access", async (
         data: {
           status: "success",
           reference: "paystack-ref-1",
-          amount: 10000,
+          amount: 12000,
           currency: "USD",
           paid_at: "2026-06-13T10:00:00.000Z",
           customer: {
@@ -293,7 +293,7 @@ test("successful Paystack charge without paid_at still sets a renewal date", asy
       data: {
         status: "success",
         reference: "paystack-ref-no-date",
-        amount: 10000,
+        amount: 12000,
         currency: "USD",
         customer: {
           email: "reader@example.com",
@@ -340,7 +340,7 @@ test("duplicate Paystack charge webhooks do not re-verify or re-approve", async 
         data: {
           status: "success",
           reference: "paystack-ref-1",
-          amount: 10000,
+          amount: 12000,
           currency: "USD",
           paid_at: "2026-06-13T10:00:00.000Z",
           customer: {
@@ -391,13 +391,13 @@ test("duplicate Paystack charge webhooks do not re-verify or re-approve", async 
 test("Paystack premium activation rejects the wrong amount or currency", () => {
   assert.throws(
       () => validatePaystackPremiumCharge({
-        charge: {amount: 9999, currency: "USD"},
+        charge: {amount: 11999, currency: "USD"},
       }),
       /does not match the premium annual price/i,
   );
   assert.throws(
       () => validatePaystackPremiumCharge({
-        charge: {amount: 10000, currency: "GHS"},
+        charge: {amount: 12000, currency: "GHS"},
       }),
       /does not match the premium annual price/i,
   );

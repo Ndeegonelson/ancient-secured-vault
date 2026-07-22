@@ -3,7 +3,7 @@ const {FieldValue} = require("firebase-admin/firestore");
 const DEFAULT_PLAN = "premium";
 const DEFAULT_SUCCESS_PATH = "?subscription=stripe-success";
 const DEFAULT_CANCEL_PATH = "?subscription=stripe-cancelled";
-const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 10000;
+const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 12000;
 const PREMIUM_ANNUAL_CURRENCY = "usd";
 
 function createStripeCheckoutSessionHandler({
@@ -87,7 +87,7 @@ function validateStripePremiumPrice(price) {
   if (!isAnnualPremiumPrice) {
     throw httpError(
         500,
-        "Stripe premium price must be an active USD 100 yearly price.",
+        "Stripe premium price must be an active USD 120 yearly price.",
     );
   }
 }
