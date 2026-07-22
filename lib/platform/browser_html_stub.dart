@@ -32,6 +32,7 @@ class Document {
   final String title = '';
   final bool? hidden = false;
   final HtmlElement? head = HtmlElement();
+  final HtmlElement? documentElement = HtmlElement();
 
   Stream<Event> get onVisibilityChange => Stream<Event>.empty();
   Stream<MouseEvent> get onContextMenu => Stream<MouseEvent>.empty();
@@ -89,6 +90,7 @@ class HtmlElement {
   final List<HtmlElement> children = [];
   final Map<String, String> dataset = {};
   String text = '';
+  String id = '';
   String src = '';
   bool async = false;
   int scrollTop = 0;

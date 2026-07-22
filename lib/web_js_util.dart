@@ -14,6 +14,10 @@ R getProperty<R>(Object? object, String property) {
   return _dartify<R>(value);
 }
 
+Object? getRawProperty(Object? object, String property) {
+  return (object as JSObject).getProperty<JSAny?>(property.toJS);
+}
+
 void setProperty(Object object, String property, Object? value) {
   (object as JSObject).setProperty(property.toJS, _jsifyValue(value));
 }
@@ -34,9 +38,6 @@ Future<R> promiseToFuture<R>(Object? promise) async {
 Object uint8ListToJS(Uint8List data) => data.toJS;
 
 JSAny? _jsifyValue(Object? value) {
-  if (value is JSAny?) {
-    return value;
-  }
   return value.jsify();
 }
 

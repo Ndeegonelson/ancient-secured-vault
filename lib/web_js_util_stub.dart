@@ -8,6 +8,8 @@ Object allowInterop(void Function(Object) function) => function;
 
 R getProperty<R>(Object? object, String property) => null as R;
 
+Object? getRawProperty(Object? object, String property) => null;
+
 void setProperty(Object object, String property, Object? value) {}
 
 R callMethod<R>(Object? object, String method, List<Object?> arguments) {

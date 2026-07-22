@@ -1,0 +1,66 @@
+{
+  "identifier" : "8EAB9DB4-83D3-4E06-BBF2-C4F390BE6B25",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6784325941",
+    "_developerTeamID" : "766R6HBSTK",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "E17A143E-53CC-442D-A834-2AA95256F71B",
+      "localizations" : [
+        {
+          "description" : "Auto-renewable access to the protected Ancient Secured Vault library and premium reader features.",
+          "displayName" : "Ancient Vault Premium",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "Ancient Vault Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "120",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "B77B0149-0A94-4DA0-BC29-BDBCF548F5F5",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Yearly access to protected documents, narration, notes, highlights, bookmarks, and reading progress.",
+              "displayName" : "Premium Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "tech.ancientsociety.vault.premium.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Premium Yearly",
+          "subscriptionGroupID" : "E17A143E-53CC-442D-A834-2AA95256F71B",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

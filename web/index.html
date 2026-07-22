@@ -40,10 +40,28 @@
         ? `ready-${window.pdfjsLib.version}`
         : 'missing';
   </script>
+  <style>
+    html.ancient-vault-ios input,
+    html.ancient-vault-ios textarea,
+    html.ancient-vault-ios flt-text-editing-host input,
+    html.ancient-vault-ios flt-text-editing-host textarea {
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      caret-color: #63f5a5 !important;
+      opacity: 1 !important;
+    }
+  </style>
   <script>
-    (function installAndroidVaultNarrationBridge() {
+    if ((navigator.userAgent || '').toLowerCase().includes('ancientsecurevaultiosapp')) {
+      document.documentElement.classList.add('ancient-vault-ios');
+    }
+
+    (function installMobileVaultNarrationBridge() {
       const userAgent = (navigator.userAgent || '').toLowerCase();
-      if (!userAgent.includes('ancientsecurevaultandroidapp')) return;
+      const isMobileVaultApp =
+        userAgent.includes('ancientsecurevaultandroidapp') ||
+        userAgent.includes('ancientsecurevaultiosapp');
+      if (!isMobileVaultApp) return;
       if (window.__ancientVaultTtsBridgeInstalled) return;
 
       window.__ancientVaultTtsBridgeInstalled = true;
@@ -213,6 +231,35 @@
         window.SpeechSynthesisUtterance = VaultSpeechSynthesisUtterance;
       }
     })();
+  </script>
+  <!--
+    Load the protected reader before Flutter starts. WKWebView can serve this
+    file successfully without delivering the dynamic script onLoad callback,
+    which previously left iOS readers waiting indefinitely.
+  -->
+  <script>
+    window.__ancientVaultRenderPdfPage = function renderVaultPdfPage(
+      page,
+      canvasId,
+      scale
+    ) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) throw new Error(`Protected PDF canvas ${canvasId} was not found.`);
+
+      const viewport = page.getViewport({ scale });
+      const context = canvas.getContext('2d', { alpha: false });
+      if (!context) throw new Error('The protected PDF canvas context is unavailable.');
+
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
+
+      return page.render({
+        canvasContext: context,
+        viewport,
+      }).promise;
+    };
   </script>
 </head>
 <body>

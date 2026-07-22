@@ -59,6 +59,19 @@ void main() {
     expect(access.needsAdminRenewalDate, isFalse);
   });
 
+  test('App Store subscriptions expose Apple billing management', () {
+    final access = UserAccessState.fromFirestore({
+      'subscriptionStatus': 'active',
+      'accessLevel': 'premium',
+      'subscriptionProvider': 'app_store',
+    });
+
+    expect(access.subscriptionProviderLabel, 'App Store');
+    expect(access.canManageAppStoreBilling, isTrue);
+    expect(access.canManageStripeBilling, isFalse);
+    expect(access.isAdminManagedSubscription, isFalse);
+  });
+
   test('Paystack subscriptions expose provider and reference details', () {
     final access = UserAccessState.fromFirestore({
       'role': 'reader',
