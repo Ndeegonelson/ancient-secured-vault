@@ -163,8 +163,8 @@ test("creates a Stripe checkout session and records the request", async () => {
         body: {
           data: {
             message: " Premium access ",
-            successUrl: "https://app.test/success",
-            cancelUrl: "https://app.test/cancel",
+            successUrl: "http://mobile-app.invalid/success",
+            cancelUrl: "http://mobile-app.invalid/cancel",
           },
         },
       }),
@@ -177,6 +177,14 @@ test("creates a Stripe checkout session and records the request", async () => {
     checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_123",
   });
   assert.equal(capturedSessionPayload.mode, "subscription");
+  assert.equal(
+      capturedSessionPayload.success_url,
+      "https://app.test/?subscription=stripe-success",
+  );
+  assert.equal(
+      capturedSessionPayload.cancel_url,
+      "https://app.test/?subscription=stripe-cancelled",
+  );
   assert.equal(capturedSessionPayload.customer_email, "reader@example.com");
   assert.deepEqual(capturedSessionPayload.line_items, [{
     price: "price_test_premium",
@@ -502,7 +510,7 @@ test("creates a Stripe billing portal session for a Stripe subscriber", async ()
       fakeRequest({
         body: {
           data: {
-            returnUrl: "https://app.test/dashboard",
+            returnUrl: "http://mobile-app.invalid/dashboard",
           },
         },
       }),
@@ -515,6 +523,6 @@ test("creates a Stripe billing portal session for a Stripe subscriber", async ()
   });
   assert.deepEqual(capturedPortalPayload, {
     customer: "cus_test_123",
-    return_url: "https://app.test/dashboard",
+    return_url: "https://app.test",
   });
 });

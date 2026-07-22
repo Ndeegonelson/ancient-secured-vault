@@ -13,7 +13,7 @@ import 'services/ios_in_app_purchase_controller.dart';
 
 const _vaultUrl = String.fromEnvironment(
   'VAULT_URL',
-  defaultValue: 'https://vault.ancientsociety.tech/',
+  defaultValue: 'https://vault.ancient.tech/',
 );
 const _readerScreenChannel = MethodChannel(
   'ancient_secure_docs/screen_security',

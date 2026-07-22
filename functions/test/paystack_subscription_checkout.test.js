@@ -140,7 +140,7 @@ test("creates a Paystack checkout session and records the request", async () => 
         body: {
           data: {
             message: " Premium access ",
-            successUrl: "https://app.test/success",
+            successUrl: "http://mobile-app.invalid/success",
           },
         },
       }),
@@ -155,7 +155,10 @@ test("creates a Paystack checkout session and records the request", async () => 
   assert.equal(capturedPayload.email, "reader@example.com");
   assert.equal(capturedPayload.amount, 12000);
   assert.equal(capturedPayload.currency, "USD");
-  assert.equal(capturedPayload.callback_url, "https://app.test/success");
+  assert.equal(
+      capturedPayload.callback_url,
+      "https://app.test/?subscription=paystack-success",
+  );
   assert.deepEqual(capturedPayload.metadata, {
     subscriptionRequestId: "user_subscription_requests-1",
     userEmail: "reader@example.com",

@@ -2,8 +2,9 @@ const crypto = require("node:crypto");
 const {FieldValue} = require("firebase-admin/firestore");
 
 const DEFAULT_PLAN = "premium";
-const DEFAULT_SUCCESS_PATH = "?subscription=paystack-success";
+const DEFAULT_SUCCESS_PATH = "/?subscription=paystack-success";
 const DEFAULT_PAYMENT_METHOD = "paystack";
+const DEFAULT_APP_BASE_URL = "https://vault.ancient.tech";
 const PAYSTACK_INITIALIZE_URL = "https://api.paystack.co/transaction/initialize";
 const PAYSTACK_VERIFY_URL = "https://api.paystack.co/transaction/verify";
 const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 12000;
@@ -46,8 +47,7 @@ function createPaystackCheckoutSessionHandler({
         input,
       });
 
-      const callbackUrl =
-        input.successUrl || `${appBaseUrl}${DEFAULT_SUCCESS_PATH}`;
+      const callbackUrl = `${appBaseUrl}${DEFAULT_SUCCESS_PATH}`;
       const paystackResponse = await postPaystackJson({
         fetchImpl,
         secretKey,
@@ -484,32 +484,14 @@ function readRequestData(request) {
 
   return {
     message: cleanText(body.message),
-    successUrl: cleanUrl(body.successUrl),
   };
-}
-
-function cleanUrl(value) {
-  const text = cleanText(value);
-  if (!text) return "";
-
-  const parsed = new URL(text);
-  if (parsed.protocol !== "https:" &&
-      parsed.hostname !== "localhost" &&
-      parsed.hostname !== "127.0.0.1") {
-    throw httpError(400, "Checkout return URL must be secure.");
-  }
-
-  return parsed.toString();
 }
 
 function requestAppBaseUrl(request) {
   const configured = cleanText(process.env.APP_BASE_URL);
   if (configured) return configured;
 
-  const origin = cleanText(request.get("origin"));
-  if (origin) return origin;
-
-  return "http://localhost:63114";
+  return DEFAULT_APP_BASE_URL;
 }
 
 function paystackSecretKey() {

@@ -10876,39 +10876,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     if (paymentMethod == UserSubscriptionPaymentMethod.stripe) {
-      final currentUrl = Uri.base;
       final checkout = await subscriptionCheckoutClient
-          .createStripeCheckoutSession(
-            message: message.trim(),
-            successUrl: currentUrl.replace(
-              queryParameters: {
-                ...currentUrl.queryParameters,
-                'subscription': 'stripe-success',
-              },
-            ),
-            cancelUrl: currentUrl.replace(
-              queryParameters: {
-                ...currentUrl.queryParameters,
-                'subscription': 'stripe-cancelled',
-              },
-            ),
-          );
+          .createStripeCheckoutSession(message: message.trim());
       html.window.location.assign(checkout.checkoutUrl.toString());
       return;
     }
 
     if (paymentMethod == UserSubscriptionPaymentMethod.paystack) {
-      final currentUrl = Uri.base;
       final checkout = await subscriptionCheckoutClient
-          .createPaystackCheckoutSession(
-            message: message.trim(),
-            successUrl: currentUrl.replace(
-              queryParameters: {
-                ...currentUrl.queryParameters,
-                'subscription': 'paystack-success',
-              },
-            ),
-          );
+          .createPaystackCheckoutSession(message: message.trim());
       html.window.location.assign(checkout.checkoutUrl.toString());
       return;
     }
@@ -10935,9 +10911,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> openStripeBillingPortal() async {
-    final currentUrl = Uri.base;
     final portal = await subscriptionCheckoutClient
-        .createStripeBillingPortalSession(returnUrl: currentUrl);
+        .createStripeBillingPortalSession();
     html.window.location.assign(portal.portalUrl.toString());
   }
 

@@ -1,8 +1,9 @@
 const {FieldValue} = require("firebase-admin/firestore");
 
 const DEFAULT_PLAN = "premium";
-const DEFAULT_SUCCESS_PATH = "?subscription=stripe-success";
-const DEFAULT_CANCEL_PATH = "?subscription=stripe-cancelled";
+const DEFAULT_SUCCESS_PATH = "/?subscription=stripe-success";
+const DEFAULT_CANCEL_PATH = "/?subscription=stripe-cancelled";
+const DEFAULT_APP_BASE_URL = "https://vault.ancient.tech";
 const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 12000;
 const PREMIUM_ANNUAL_CURRENCY = "usd";
 
@@ -46,8 +47,8 @@ function createStripeCheckoutSessionHandler({
         customer_email: user.email,
         client_reference_id: requestReference.id,
         line_items: [{price: priceId, quantity: 1}],
-        success_url: input.successUrl || `${appBaseUrl}${DEFAULT_SUCCESS_PATH}`,
-        cancel_url: input.cancelUrl || `${appBaseUrl}${DEFAULT_CANCEL_PATH}`,
+        success_url: `${appBaseUrl}${DEFAULT_SUCCESS_PATH}`,
+        cancel_url: `${appBaseUrl}${DEFAULT_CANCEL_PATH}`,
         metadata: checkoutMetadata({requestReference, user}),
         subscription_data: {
           metadata: checkoutMetadata({requestReference, user}),
@@ -140,13 +141,12 @@ function createStripeBillingPortalSessionHandler({
       requireMethod(request, "POST");
 
       const user = await requireFirebaseUser(request, verifyAuthToken);
-      const input = readRequestData(request);
       const customerId = await loadStripeCustomerId({firestore, user});
       const stripe = stripeClientFactory();
       const appBaseUrl = normalizeBaseUrl(getAppBaseUrl(request));
       const session = await stripe.billingPortal.sessions.create({
         customer: customerId,
-        return_url: input.returnUrl || appBaseUrl,
+        return_url: appBaseUrl,
       });
 
       response.json({portalUrl: session.url});
@@ -635,24 +635,7 @@ function readRequestData(request) {
 
   return {
     message: cleanText(body.message),
-    successUrl: cleanUrl(body.successUrl),
-    cancelUrl: cleanUrl(body.cancelUrl),
-    returnUrl: cleanUrl(body.returnUrl),
   };
-}
-
-function cleanUrl(value) {
-  const text = cleanText(value);
-  if (!text) return "";
-
-  const parsed = new URL(text);
-  if (parsed.protocol !== "https:" &&
-      parsed.hostname !== "localhost" &&
-      parsed.hostname !== "127.0.0.1") {
-    throw httpError(400, "Checkout return URL must be secure.");
-  }
-
-  return parsed.toString();
 }
 
 function requestAppBaseUrl(request) {
@@ -662,10 +645,7 @@ function requestAppBaseUrl(request) {
   );
   if (configured) return configured;
 
-  const origin = cleanText(request.get("origin"));
-  if (origin) return origin;
-
-  return "http://localhost:63114";
+  return DEFAULT_APP_BASE_URL;
 }
 
 function stripePremiumPriceId() {
