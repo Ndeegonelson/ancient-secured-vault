@@ -44,11 +44,13 @@ class ReaderNarrationPlaybackSnapshotBuilder {
     required ReaderTtsService ttsService,
     ReaderCloudNarrationSessionCoordinator? cloudSession,
     ReaderNarrationVoice? selectedVoice,
+    bool cloudNarrationEnabled = true,
   }) {
     final catalog = catalogBuilder.buildFromServices(
       accessPolicy: accessPolicy,
       ttsService: ttsService,
       cloudSession: cloudSession,
+      cloudNarrationEnabled: cloudNarrationEnabled,
     );
     final plan = playbackPlanner.plan(
       catalog: catalog,

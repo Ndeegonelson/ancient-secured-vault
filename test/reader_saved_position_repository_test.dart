@@ -41,6 +41,62 @@ void main() {
       'pending',
     ]);
   });
+
+  test('sorts automatically updated progress by its latest timestamp', () {
+    final olderManual = ReaderSavedPosition.fromMap({
+      'pageNumber': 4,
+      'createdAt': Timestamp.fromMillisecondsSinceEpoch(2000),
+    }, id: 'manual');
+    final automaticProgress = ReaderSavedPosition.fromMap({
+      'pageNumber': 18,
+      'createdAt': Timestamp.fromMillisecondsSinceEpoch(1000),
+      'updatedAt': Timestamp.fromMillisecondsSinceEpoch(3000),
+    }, id: 'automatic');
+
+    expect(
+      ReaderSavedPosition.sortNewest([
+        olderManual,
+        automaticProgress,
+      ]).first.pageNumber,
+      18,
+    );
+  });
+
+  test('builds a stable per-user per-document automatic progress id', () {
+    const first = ReaderSavedPositionDraft(
+      userEmail: 'Reader@Example.com',
+      pdfTitle: 'Guide.pdf',
+      documentKey: 'vault/guide.pdf',
+      pageNumber: 8,
+    );
+    const laterPage = ReaderSavedPositionDraft(
+      userEmail: 'reader@example.com',
+      pdfTitle: 'Renamed Guide.pdf',
+      documentKey: 'vault/guide.pdf',
+      pageNumber: 22,
+    );
+
+    expect(
+      readerLatestPositionDocumentId(first),
+      readerLatestPositionDocumentId(laterPage),
+    );
+  });
+
+  test('normalizes automatic reading-position data', () {
+    const draft = ReaderSavedPositionDraft(
+      userEmail: ' reader@example.com ',
+      pdfTitle: ' Guide.pdf ',
+      documentKey: ' vault/guide.pdf ',
+      pageNumber: 0,
+    );
+    final data = readerSavedPositionData(draft, updatedAt: 'server-time');
+
+    expect(data['userEmail'], 'reader@example.com');
+    expect(data['pdfTitle'], 'Guide.pdf');
+    expect(data['documentKey'], 'vault/guide.pdf');
+    expect(data['pageNumber'], 1);
+    expect(data['updatedAt'], 'server-time');
+  });
   test('applies saved positions for direct document opens', () {
     final shouldApply =
         ReaderSavedPositionResumePolicy.shouldApplySavedPosition(

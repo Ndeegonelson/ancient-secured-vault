@@ -191,6 +191,7 @@ ReaderNarrationPlaybackSnapshot snapshotFor(ReaderNarrationVoice voice) {
   final catalog = ReaderNarrationVoiceCatalog(
     accessPolicy: premiumPolicy(),
     locale: 'en-US',
+    cloudNarrationEnabled: true,
     assignedVoice: browserVoice,
     defaultVoice: voice,
     browserVoices: const [browserVoice],

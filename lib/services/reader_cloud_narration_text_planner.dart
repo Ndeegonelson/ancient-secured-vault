@@ -36,10 +36,14 @@ class ReaderCloudNarrationTextSegment {
 }
 
 class ReaderCloudNarrationTextPlanner {
-  const ReaderCloudNarrationTextPlanner({this.maximumSegmentCharacters = 300})
-    : assert(maximumSegmentCharacters > 0);
+  const ReaderCloudNarrationTextPlanner({
+    this.maximumSegmentCharacters = 2400,
+    this.preferredSegmentCharacters = 900,
+  }) : assert(maximumSegmentCharacters > 0),
+       assert(preferredSegmentCharacters > 0);
 
   final int maximumSegmentCharacters;
+  final int preferredSegmentCharacters;
 
   List<ReaderCloudNarrationTextSegment> plan({
     required String text,
@@ -58,11 +62,16 @@ class ReaderCloudNarrationTextPlanner {
         segmentStart,
         text.length,
       );
+      final preferredEnd =
+          (segmentStart +
+                  preferredSegmentCharacters.clamp(1, maximumSegmentCharacters))
+              .clamp(segmentStart, hardEnd);
       final segmentEnd = hardEnd >= text.length
           ? text.length
           : _preferredBoundary(
               text,
               segmentStart: segmentStart,
+              preferredEnd: preferredEnd,
               hardEnd: hardEnd,
             );
 
@@ -84,23 +93,40 @@ class ReaderCloudNarrationTextPlanner {
   int _preferredBoundary(
     String text, {
     required int segmentStart,
+    required int preferredEnd,
     required int hardEnd,
   }) {
     final searchWindow = text.substring(segmentStart, hardEnd);
-    final minimumPreferredLength = (maximumSegmentCharacters * 0.5).floor();
+    final preferredLength = preferredEnd - segmentStart;
 
-    final paragraphBoundary = searchWindow.lastIndexOf('\n\n');
-    if (paragraphBoundary >= minimumPreferredLength) {
+    // Prefer completing the current sentence, even when it continues beyond
+    // the target chunk size. This avoids artificial pauses in ordinary prose.
+    final forwardSentenceBoundary = _firstSentenceBoundaryAtOrAfter(
+      searchWindow,
+      preferredLength,
+    );
+    if (forwardSentenceBoundary > 0) {
+      return segmentStart + forwardSentenceBoundary;
+    }
+
+    final paragraphBoundary = searchWindow
+        .substring(0, preferredLength)
+        .lastIndexOf('\n\n');
+    if (paragraphBoundary >= (preferredLength * 0.5).floor()) {
       return segmentStart + paragraphBoundary + 2;
     }
 
-    final sentenceBoundary = _lastSentenceBoundary(searchWindow);
-    if (sentenceBoundary >= minimumPreferredLength) {
+    final sentenceBoundary = _lastSentenceBoundary(
+      searchWindow.substring(0, preferredLength),
+    );
+    if (sentenceBoundary >= (preferredLength * 0.5).floor()) {
       return segmentStart + sentenceBoundary;
     }
 
-    final whitespaceBoundary = searchWindow.lastIndexOf(RegExp(r'\s'));
-    if (whitespaceBoundary >= minimumPreferredLength) {
+    final whitespaceBoundary = searchWindow
+        .substring(0, preferredLength)
+        .lastIndexOf(RegExp(r'\s'));
+    if (whitespaceBoundary >= (preferredLength * 0.5).floor()) {
       return segmentStart + whitespaceBoundary + 1;
     }
 
@@ -115,5 +141,13 @@ class ReaderCloudNarrationTextPlanner {
     }
 
     return boundary;
+  }
+
+  int _firstSentenceBoundaryAtOrAfter(String text, int minimumLength) {
+    for (final match in RegExp(r'''[.!?]["')\]]*\s+''').allMatches(text)) {
+      if (match.end >= minimumLength) return match.end;
+    }
+
+    return -1;
   }
 }

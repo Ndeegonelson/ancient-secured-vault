@@ -8,6 +8,7 @@ class ReaderNarrationVoiceCatalog {
   const ReaderNarrationVoiceCatalog({
     required this.accessPolicy,
     required this.locale,
+    required this.cloudNarrationEnabled,
     required this.assignedVoice,
     required this.defaultVoice,
     required this.browserVoices,
@@ -18,6 +19,7 @@ class ReaderNarrationVoiceCatalog {
 
   final ReaderNarrationAccessPolicy accessPolicy;
   final String locale;
+  final bool cloudNarrationEnabled;
   final ReaderNarrationVoice? assignedVoice;
   final ReaderNarrationVoice? defaultVoice;
   final List<ReaderNarrationVoice> browserVoices;
@@ -29,6 +31,10 @@ class ReaderNarrationVoiceCatalog {
   bool get canChooseVoice => accessPolicy.canChooseVoice;
 
   String get cloudAvailabilityMessage {
+    if (!cloudNarrationEnabled) {
+      return 'Cloud narration audio is available on web only right now.';
+    }
+
     if (!accessPolicy.canUseCloudNarration) {
       return accessPolicy.cloudUpgradeMessage;
     }
@@ -60,6 +66,7 @@ class ReaderNarrationVoiceCatalogBuilder {
     required ReaderNarrationAccessPolicy accessPolicy,
     required ReaderTtsService ttsService,
     ReaderCloudNarrationSessionCoordinator? cloudSession,
+    bool cloudNarrationEnabled = true,
   }) {
     return build(
       accessPolicy: accessPolicy,
@@ -68,6 +75,7 @@ class ReaderNarrationVoiceCatalogBuilder {
       cloudVoices: cloudSession?.availableVoices ?? const [],
       providerStatuses: cloudSession?.providerStatuses ?? const {},
       preferredVoiceId: ttsService.preferredVoiceId,
+      cloudNarrationEnabled: cloudNarrationEnabled,
     );
   }
 
@@ -78,13 +86,15 @@ class ReaderNarrationVoiceCatalogBuilder {
     List<ReaderNarrationVoice> cloudVoices = const [],
     Map<String, ReaderCloudNarrationProviderStatus> providerStatuses = const {},
     String? preferredVoiceId,
+    bool cloudNarrationEnabled = true,
   }) {
     final normalizedLocale = locale.trim().isEmpty ? 'en-US' : locale.trim();
     final compatibleBrowserVoices = _compatibleVoices(
       browserVoices,
       normalizedLocale,
     );
-    final compatibleCloudVoices = accessPolicy.canUseCloudNarration
+    final compatibleCloudVoices =
+        cloudNarrationEnabled && accessPolicy.canUseCloudNarration
         ? _compatibleVoices(cloudVoices, normalizedLocale)
         : <ReaderNarrationVoice>[];
     final assignedVoice = _firstOrNull(compatibleBrowserVoices);
@@ -102,6 +112,7 @@ class ReaderNarrationVoiceCatalogBuilder {
     return ReaderNarrationVoiceCatalog(
       accessPolicy: accessPolicy,
       locale: normalizedLocale,
+      cloudNarrationEnabled: cloudNarrationEnabled,
       assignedVoice: assignedVoice,
       defaultVoice: defaultVoice,
       browserVoices: List.unmodifiable(compatibleBrowserVoices),

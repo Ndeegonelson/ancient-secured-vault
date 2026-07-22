@@ -314,4 +314,39 @@ void main() {
 
     service.dispose();
   });
+
+  test(
+    'cloud narration disabled routes selected cloud voice to browser TTS',
+    () async {
+      final fakeTts = CoordinatorTestFlutterTts();
+      final service = ReaderTtsService(flutterTts: fakeTts);
+      await service.initialize();
+      final browser = CoordinatorTestBrowserDelegate();
+      final router = ReaderNarrationPlaybackRouter(browserDelegate: browser);
+      final coordinator = ReaderNarrationPlaybackCoordinator(
+        ttsService: service,
+        cloudNarrationEnabled: false,
+        accessPolicyProvider: () => policy(),
+        router: router,
+      );
+
+      final snapshot = coordinator.snapshot(
+        selectedVoice: coordinatorCloudVoice,
+      );
+      final started = await coordinator.start(
+        text: 'Protected narration text.',
+        pageNumber: 4,
+        rate: 1,
+        selectedVoice: coordinatorCloudVoice,
+      );
+
+      expect(snapshot.usesCloud, isFalse);
+      expect(snapshot.catalog.cloudVoices, isEmpty);
+      expect(started, isTrue);
+      expect(coordinator.isUsingCloud, isFalse);
+      expect(browser.selectedVoice, service.availableBrowserVoices.first);
+
+      service.dispose();
+    },
+  );
 }

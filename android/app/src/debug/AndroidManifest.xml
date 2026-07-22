@@ -4,4 +4,7 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Debug-only: allows the mirrored phone to load the local web build
+         through `adb reverse`. Release builds remain HTTPS-only. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

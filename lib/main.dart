@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' show PointerDeviceKind;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -11,6 +12,7 @@ import 'firebase_options.dart';
 import 'services/reader_tts_service.dart';
 import 'services/reader_narration_progress_repository.dart';
 import 'services/reader_narration_progress_controller.dart';
+import 'services/reader_narration_text_normalizer.dart';
 import 'services/reader_narration_navigator.dart';
 import 'services/reader_narration_preferences_repository.dart';
 import 'services/reader_narration_preferences_controller.dart';
@@ -50,16 +52,26 @@ import 'services/reader_cloud_narration_callable_provider.dart';
 import 'services/reader_cloud_narration_http_callable_client.dart';
 import 'widgets/reader_narration_dialog.dart';
 import 'widgets/reader_text_selection_dialog.dart';
-import 'dart:html' as html;
-import 'web_js_util.dart' as js_util;
+import 'platform/browser_html_stub.dart'
+    if (dart.library.html) 'dart:html'
+    as html;
+import 'platform/browser_ui_web_stub.dart'
+    if (dart.library.html) 'dart:ui_web'
+    as ui;
+import 'web_js_util_stub.dart'
+    if (dart.library.js_interop) 'web_js_util.dart'
+    as js_util;
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:ui_web' as ui;
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart' as pdf_viewer;
 
 const UserDeviceAuthorizationMode readerDeviceAuthorizationMode =
     UserDeviceAuthorizationMode.monitoring;
+const MethodChannel readerScreenSecurityChannel = MethodChannel(
+  'ancient_secure_docs/screen_security',
+);
 
 class AncientVaultScrollBehavior extends MaterialScrollBehavior {
   const AncientVaultScrollBehavior();
@@ -75,7 +87,10 @@ class AncientVaultScrollBehavior extends MaterialScrollBehavior {
 
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
-    return const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+    // The Android app hosts the web build inside a WebView. Clamping physics
+    // gives long vault pages direct, responsive Android-style flings instead
+    // of the slower iOS-style bounce applied previously.
+    return const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
   }
 }
 
@@ -174,18 +189,25 @@ class _AncientSecureDocsBootstrapState
   }
 
   Future<void> initializeSecureServices() async {
-    if (Firebase.apps.isNotEmpty) return;
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      ).timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {
+          throw TimeoutException(
+            'Secure services took too long to start. Please retry.',
+          );
+        },
+      );
+    }
 
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    ).timeout(
-      const Duration(seconds: 20),
-      onTimeout: () {
-        throw TimeoutException(
-          'Secure services took too long to start. Please retry.',
-        );
-      },
-    );
+    // Web authentication should survive refreshes and app restarts. Firebase
+    // uses local persistence by default, but making it explicit prevents a
+    // browser or embedded WebView from falling back to a session-only login.
+    if (kIsWeb) {
+      await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+    }
   }
 
   void retryStartup() {
@@ -320,10 +342,34 @@ class AncientSecureDocsApp extends StatelessWidget {
         primarySwatch: Colors.green,
         scaffoldBackgroundColor: const Color(0xFF0F1117),
       ),
-      home: const HomeScreen(),
+      home: const _PersistentAuthGate(),
     );
   }
 }
+
+class _PersistentAuthGate extends StatelessWidget {
+  const _PersistentAuthGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      initialData: FirebaseAuth.instance.currentUser,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            snapshot.data == null) {
+          return const _StartupScreen(onRetry: _noopAuthRetry);
+        }
+
+        return snapshot.data == null
+            ? const HomeScreen()
+            : const DashboardScreen();
+      },
+    );
+  }
+}
+
+void _noopAuthRetry() {}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -525,7 +571,6 @@ class _HomeScreenState extends State<HomeScreen> {
             actions: [
               TextButton.icon(
                 onPressed: () async {
-                  await FirebaseAuth.instance.signOut();
                   if (!dialogContext.mounted || !mounted) return;
 
                   Navigator.of(dialogContext).pop();
@@ -536,7 +581,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 },
                 icon: const Icon(Icons.login, size: 18),
-                label: const Text('Login again'),
+                label: const Text('Continue to login'),
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.greenAccent,
                 ),
@@ -737,115 +782,138 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget buildDesktopHero(List<_LandingSlide> slides, double width) {
-    final heroHeight = (width * 0.46).clamp(572.0, 672.0).toDouble();
+    final bannerHeight = (width * 0.38).clamp(360.0, 520.0).toDouble();
 
-    return Stack(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        buildHeroImage(slides: slides, isPhone: false, height: heroHeight),
-        Positioned.fill(
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.035),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white10),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(34),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 540),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        buildLandingLogo(isPhone: false),
-                        const SizedBox(width: 18),
-                        const Flexible(
-                          child: Text(
-                            'ANCIENT SECURED VAULT',
-                            style: TextStyle(
-                              color: Colors.greenAccent,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0,
-                            ),
-                          ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                buildLandingLogo(isPhone: false),
+                const SizedBox(width: 28),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'ANCIENT SECURED VAULT',
+                        style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Welcome to ANCIENT SECURED VAULT',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 42,
-                        fontWeight: FontWeight.w800,
-                        height: 1.08,
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'A secure knowledge ecosystem for protected books, confidential documents, audio learning, highlighting, notes, and encrypted educational access.',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 17,
-                        height: 1.45,
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Welcome to ANCIENT SECURED VAULT',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 38,
+                          fontWeight: FontWeight.w800,
+                          height: 1.08,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 22),
-                    buildLandingActions(isPhone: false),
-                    const SizedBox(height: 24),
-                    buildLandingIndicators(slides),
-                  ],
+                      const SizedBox(height: 14),
+                      const Text(
+                        'A secure knowledge ecosystem for protected books, confidential documents, audio learning, highlighting, notes, and encrypted educational access.',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 17,
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      buildLandingActions(isPhone: false),
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         ),
+        const SizedBox(height: 22),
+        buildHeroImage(slides: slides, isPhone: false, height: bannerHeight),
+        const SizedBox(height: 14),
+        buildLandingIndicators(slides),
       ],
     );
   }
 
   Widget buildPhoneHero(List<_LandingSlide> slides, double viewportHeight) {
-    final imageHeight = (viewportHeight * 0.48).clamp(320.0, 520.0).toDouble();
+    final safeViewportHeight = viewportHeight.isFinite && viewportHeight > 0
+        ? viewportHeight
+        : 720.0;
+    final bannerHeight = (safeViewportHeight * 0.54)
+        .clamp(360.0, 500.0)
+        .toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            buildLandingLogo(isPhone: true),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'ANCIENT SECURED VAULT',
-                style: TextStyle(
-                  color: Colors.greenAccent,
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0,
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.035),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    buildLandingLogo(isPhone: true),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'ANCIENT SECURED VAULT',
+                        style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Welcome to ANCIENT SECURED VAULT',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                    height: 1.12,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Protected reading, listening, notes, highlights, and secure vault access on web and phone.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 15,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                buildLandingActions(isPhone: true),
+              ],
             ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        const Text(
-          'Welcome to ANCIENT SECURED VAULT',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 30,
-            fontWeight: FontWeight.w800,
-            height: 1.12,
           ),
         ),
-        const SizedBox(height: 12),
-        const Text(
-          'Protected reading, listening, notes, highlights, and secure vault access on web and phone.',
-          style: TextStyle(color: Colors.white70, fontSize: 15, height: 1.45),
-        ),
         const SizedBox(height: 18),
-        buildLandingActions(isPhone: true),
-        const SizedBox(height: 18),
-        buildHeroImage(slides: slides, isPhone: true, height: imageHeight),
+        buildHeroImage(slides: slides, isPhone: true, height: bannerHeight),
         const SizedBox(height: 14),
         buildLandingIndicators(slides),
       ],
@@ -1358,7 +1426,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 keyboardDismissBehavior:
                                     ScrollViewKeyboardDismissBehavior.onDrag,
                                 itemCount: countries.length,
-                                separatorBuilder: (_, __) => const Divider(
+                                separatorBuilder: (_, _) => const Divider(
                                   height: 1,
                                   color: Colors.white10,
                                 ),
@@ -1371,7 +1439,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     dense: true,
                                     selected: isSelected,
                                     selectedTileColor: Colors.greenAccent
-                                        .withOpacity(0.10),
+                                        .withValues(alpha: 0.10),
                                     title: Text(
                                       country.label,
                                       style: TextStyle(
@@ -1452,11 +1520,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       if (mode == AuthScreenMode.signIn) {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-        openDashboard();
+        final credential = await FirebaseAuth.instance
+            .signInWithEmailAndPassword(email: email, password: password);
+        await credential.user?.getIdToken();
+        closeAuthenticationScreen();
         return;
       }
 
@@ -1469,7 +1536,8 @@ class _LoginScreenState extends State<LoginScreen> {
           displayName: displayName,
           country: country,
         );
-        openDashboard();
+        await credential.user?.getIdToken();
+        closeAuthenticationScreen();
         return;
       }
 
@@ -1513,13 +1581,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void openDashboard() {
+  void closeAuthenticationScreen() {
     if (!mounted) return;
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const DashboardScreen()),
-    );
+    // The persistent auth gate owns the dashboard. Closing the login route
+    // avoids stacking a second dashboard above it, which made Back expose the
+    // old public route and look like an unexpected logout.
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   void showAuthMessage(String message) {
@@ -1571,237 +1639,254 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(25),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 30),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  helperText,
-                  style: const TextStyle(color: Colors.white70, fontSize: 16),
-                ),
-                const SizedBox(height: 40),
-                if (isSignUp) ...[
-                  TextField(
-                    controller: nameController,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      hintText: 'Full Name',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(18)),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Padding(
+                padding: const EdgeInsets.all(25),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 30),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 30,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(18),
-                    onTap: isSubmitting ? null : showCountryPicker,
-                    child: InputDecorator(
-                      decoration: const InputDecoration(
-                        labelText: 'Country',
-                        labelStyle: TextStyle(color: Colors.white70),
-                        filled: true,
-                        fillColor: Colors.white10,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(18)),
+                    const SizedBox(height: 10),
+                    Text(
+                      helperText,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                    if (isSignUp) ...[
+                      TextField(
+                        controller: nameController,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          hintText: 'Full Name',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(18)),
+                          ),
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              selectedCountryOption.label,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                      const SizedBox(height: 20),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: isSubmitting ? null : showCountryPicker,
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: 'Country',
+                            labelStyle: TextStyle(color: Colors.white70),
+                            filled: true,
+                            fillColor: Colors.white10,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(18),
                               ),
                             ),
                           ),
-                          const Icon(Icons.search, color: Colors.greenAccent),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: isPasswordReset
-                      ? TextInputAction.done
-                      : TextInputAction.next,
-                  onSubmitted: (_) {
-                    if (isPasswordReset) submitAuthAction();
-                  },
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Email Address',
-                    hintStyle: const TextStyle(color: Colors.white54),
-                    filled: true,
-                    fillColor: Colors.white10,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                  ),
-                ),
-                if (!isPasswordReset) ...[
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: passwordController,
-                    obscureText: obscurePassword,
-                    textInputAction: isSignUp
-                        ? TextInputAction.next
-                        : TextInputAction.done,
-                    onSubmitted: (_) {
-                      if (!isSignUp) submitAuthAction();
-                    },
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'Password',
-                      hintStyle: const TextStyle(color: Colors.white54),
-                      filled: true,
-                      fillColor: Colors.white10,
-                      suffixIcon: IconButton(
-                        tooltip: obscurePassword
-                            ? 'Show password'
-                            : 'Hide password',
-                        icon: Icon(
-                          obscurePassword
-                              ? Icons.visibility
-                              : Icons.visibility_off,
-                          color: Colors.greenAccent,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  selectedCountryOption.label,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const Icon(
+                                Icons.search,
+                                color: Colors.greenAccent,
+                              ),
+                            ],
+                          ),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            obscurePassword = !obscurePassword;
-                          });
-                        },
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                    ),
-                  ),
-                ],
-                if (isSignUp) ...[
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: confirmPasswordController,
-                    obscureText: obscureConfirmPassword,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => submitAuthAction(),
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'Confirm Password',
-                      hintStyle: const TextStyle(color: Colors.white54),
-                      filled: true,
-                      fillColor: Colors.white10,
-                      suffixIcon: IconButton(
-                        tooltip: obscureConfirmPassword
-                            ? 'Show confirm password'
-                            : 'Hide confirm password',
-                        icon: Icon(
-                          obscureConfirmPassword
-                              ? Icons.visibility
-                              : Icons.visibility_off,
-                          color: Colors.greenAccent,
+                      const SizedBox(height: 20),
+                    ],
+                    TextField(
+                      controller: emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: isPasswordReset
+                          ? TextInputAction.done
+                          : TextInputAction.next,
+                      onSubmitted: (_) {
+                        if (isPasswordReset) submitAuthAction();
+                      },
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Email Address',
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        filled: true,
+                        fillColor: Colors.white10,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(15),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            obscureConfirmPassword = !obscureConfirmPassword;
-                          });
+                      ),
+                    ),
+                    if (!isPasswordReset) ...[
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: passwordController,
+                        obscureText: obscurePassword,
+                        textInputAction: isSignUp
+                            ? TextInputAction.next
+                            : TextInputAction.done,
+                        onSubmitted: (_) {
+                          if (!isSignUp) submitAuthAction();
                         },
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 30),
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.greenAccent,
-                      foregroundColor: Colors.black,
-                    ),
-                    onPressed: isSubmitting ? null : submitAuthAction,
-                    child: isSubmitting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.black,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Password',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white10,
+                          suffixIcon: IconButton(
+                            tooltip: obscurePassword
+                                ? 'Show password'
+                                : 'Hide password',
+                            icon: Icon(
+                              obscurePassword
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                              color: Colors.greenAccent,
                             ),
-                          )
-                        : Text(
-                            primaryActionLabel,
-                            style: const TextStyle(
+                            onPressed: () {
+                              setState(() {
+                                obscurePassword = !obscurePassword;
+                              });
+                            },
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (isSignUp) ...[
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: confirmPasswordController,
+                        obscureText: obscureConfirmPassword,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => submitAuthAction(),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Confirm Password',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white10,
+                          suffixIcon: IconButton(
+                            tooltip: obscureConfirmPassword
+                                ? 'Show confirm password'
+                                : 'Hide confirm password',
+                            icon: Icon(
+                              obscureConfirmPassword
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                              color: Colors.greenAccent,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                obscureConfirmPassword =
+                                    !obscureConfirmPassword;
+                              });
+                            },
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 30),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 55,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.greenAccent,
+                          foregroundColor: Colors.black,
+                        ),
+                        onPressed: isSubmitting ? null : submitAuthAction,
+                        child: isSubmitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.black,
+                                ),
+                              )
+                            : Text(
+                                primaryActionLabel,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    if (mode == AuthScreenMode.signIn)
+                      Center(
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 12,
+                          children: [
+                            TextButton(
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () => switchMode(AuthScreenMode.signUp),
+                              child: const Text(
+                                'Create account',
+                                style: TextStyle(color: Colors.greenAccent),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () => switchMode(
+                                      AuthScreenMode.resetPassword,
+                                    ),
+                              child: const Text(
+                                'Forgot password?',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Center(
+                        child: TextButton(
+                          onPressed: isSubmitting
+                              ? null
+                              : () => switchMode(AuthScreenMode.signIn),
+                          child: const Text(
+                            'Back to login',
+                            style: TextStyle(
+                              color: Colors.greenAccent,
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                if (mode == AuthScreenMode.signIn)
-                  Center(
-                    child: Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 12,
-                      children: [
-                        TextButton(
-                          onPressed: isSubmitting
-                              ? null
-                              : () => switchMode(AuthScreenMode.signUp),
-                          child: const Text(
-                            'Create account',
-                            style: TextStyle(color: Colors.greenAccent),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: isSubmitting
-                              ? null
-                              : () => switchMode(AuthScreenMode.resetPassword),
-                          child: const Text(
-                            'Forgot password?',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Center(
-                    child: TextButton(
-                      onPressed: isSubmitting
-                          ? null
-                          : () => switchMode(AuthScreenMode.signIn),
-                      child: const Text(
-                        'Back to login',
-                        style: TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -2040,8 +2125,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   );
   final SecureVaultSearchClient secureVaultSearchClient =
       SecureVaultSearchClient.firebase(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
 
   final ReaderNoteRepository readerNoteRepository = ReaderNoteRepository();
   final ReaderBookmarkRepository readerBookmarkRepository =
@@ -2172,19 +2257,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               actions: [
                 TextButton.icon(
                   onPressed: () async {
-                    await FirebaseAuth.instance.signOut();
+                    await FirebaseAuth.instance.currentUser?.getIdToken(true);
                     if (!dialogContext.mounted || !mounted) return;
 
                     Navigator.of(dialogContext).pop();
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(
-                        builder: (context) => const LoginScreen(),
-                      ),
-                      (route) => route.isFirst,
-                    );
+                    await checkUserRole();
+                    if (!mounted) return;
+                    setState(() {});
                   },
-                  icon: const Icon(Icons.login, size: 18),
-                  label: const Text('Login again'),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Refresh access'),
                   style: TextButton.styleFrom(
                     foregroundColor: Colors.greenAccent,
                   ),
@@ -2626,7 +2708,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       )
                     else
                       ...summary.categoryCounts.map(
-                        (count) => ListTile(
+                        (categoryCount) => ListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
                           hoverColor: Colors.greenAccent.withValues(
@@ -2637,19 +2719,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             color: Colors.greenAccent,
                           ),
                           title: Text(
-                            count.category,
+                            categoryCount.category,
                             style: const TextStyle(color: Colors.white70),
                           ),
                           subtitle: Text(
-                            '${count.freeCount} free | '
-                            '${count.premiumCount} premium',
+                            '${categoryCount.freeCount} free | '
+                            '${categoryCount.premiumCount} premium',
                             style: const TextStyle(color: Colors.white38),
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                count.totalCount.toString(),
+                                categoryCount.totalCount.toString(),
                                 style: const TextStyle(
                                   color: Colors.greenAccent,
                                   fontWeight: FontWeight.bold,
@@ -2665,8 +2747,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           onTap: () {
                             setState(() {
-                              freeDocumentCategoryFilter = count.category;
-                              premiumDocumentCategoryFilter = count.category;
+                              freeDocumentCategoryFilter =
+                                  categoryCount.category;
+                              premiumDocumentCategoryFilter =
+                                  categoryCount.category;
                             });
                             Navigator.pop(context);
                           },
@@ -6560,25 +6644,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     final largestCount = inventory.categoryCounts
-        .map((count) => count.totalCount)
+        .map((categoryCount) => categoryCount.totalCount)
         .fold<int>(1, math.max);
 
     return Column(
-      children: inventory.categoryCounts.take(6).map((count) {
-        final progress = count.totalCount / largestCount;
+      children: inventory.categoryCounts.take(6).map((categoryCount) {
+        final progress = categoryCount.totalCount / largestCount;
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () {
               setState(() {
-                freeDocumentCategoryFilter = count.category;
-                premiumDocumentCategoryFilter = count.category;
+                freeDocumentCategoryFilter = categoryCount.category;
+                premiumDocumentCategoryFilter = categoryCount.category;
               });
               ScaffoldMessenger.of(context).hideCurrentSnackBar();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Dashboard filtered to ${count.category}.'),
+                  content: Text(
+                    'Dashboard filtered to ${categoryCount.category}.',
+                  ),
                 ),
               );
             },
@@ -6591,12 +6677,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          count.category,
+                          categoryCount.category,
                           style: const TextStyle(color: Colors.white70),
                         ),
                       ),
                       Text(
-                        '${count.totalCount}',
+                        '${categoryCount.totalCount}',
                         style: const TextStyle(color: Colors.white54),
                       ),
                       const SizedBox(width: 8),
@@ -9946,6 +10032,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 maxLines: 1,
                               ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  onPressed: isBusy
+                                      ? null
+                                      : () => showRequestReviewDetails(request),
+                                  icon: const Icon(Icons.open_in_new, size: 16),
+                                  label: const Text('Review details'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.lightBlueAccent,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                ),
+                              ),
                               if (isManualReviewPending) ...[
                                 const SizedBox(height: 10),
                                 Row(
@@ -11661,7 +11761,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
               if (!context.mounted) return;
-              Navigator.pop(context);
+              Navigator.of(context).popUntil((route) => route.isFirst);
             },
           ),
         ],
@@ -12169,6 +12269,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   static Future<void>? _pdfJsReady;
   static const int _maximumProtectedPdfImageBytes = 120 * 1024 * 1024;
   static const int _protectedPdfRetainedPageRadius = 4;
+  static const double _protectedPdfShortDocumentPixelRatio = 1.65;
+  static const double _protectedPdfMediumDocumentPixelRatio = 1.45;
+  static const double _protectedPdfLongDocumentPixelRatio = 1.25;
+  static const double _protectedPdfMaximumPixelRatio = 1.7;
   static const double _minimumReaderZoomScale = 0.4;
   static const double _maximumReaderZoomScale = 3.0;
   static const double _readerZoomStep = 0.1;
@@ -12186,6 +12290,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   Timer? standardPdfLoadTimer;
   Timer? protectedPdfPreloadTimer;
   Timer? protectedPageJumpTimer;
+  Timer? readingPositionSaveTimer;
+  Timer? narrationTextPreloadTimer;
   int currentPdfPage = 1;
   int? pdfPageCount;
   String currentSearchQuery = '';
@@ -12193,6 +12299,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool canViewDocument = false;
   bool isStandardPdfLoading = false;
   bool standardPdfLoadTimedOut = false;
+  bool nativePdfDocumentLoaded = false;
+  bool readingPositionRestoreCompleted = false;
+  bool readerPageChangedSinceOpen = false;
+  int? pendingNativePdfPage;
+  int? lastPersistedReadingPage;
   bool isProtectedPageJumping = false;
   int? protectedPageJumpTarget;
   UserAccessState readerUserAccess = const UserAccessState();
@@ -12250,8 +12361,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late final ReaderNarrationNavigator narrationNavigator;
   late final Future<void> narrationPreferencesReady;
   final Map<int, String> narrationPageTextCache = {};
+  final Map<int, Future<String>> narrationPageTextFutureCache = {};
+  Object? readerWakeLockSentinel;
   Future<List<int>>? narrationPdfBytesFuture;
   Future<Uint8List>? protectedPdfImageBytesFuture;
+  final pdf_viewer.PdfViewerController nativePdfViewerController =
+      pdf_viewer.PdfViewerController();
 
   String get shortReaderSessionId {
     if (readerSessionId.length <= 8) {
@@ -12310,8 +12425,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   bool get usesImagePdfReader {
-    return readerProtectionPolicy.usesProtectedImageReader ||
-        isAndroidWebViewReader;
+    return isAndroidWebViewReader;
   }
 
   bool get shouldShowReaderPrivacyShield {
@@ -12477,6 +12591,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Widget buildPdfDocumentSurface() {
+    if (!kIsWeb) {
+      return buildNativePdfDocumentSurface();
+    }
+
     return Stack(
       children: [
         IgnorePointer(
@@ -12489,6 +12607,69 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         if (usesImagePdfReader && isProtectedPageJumping)
           Positioned.fill(child: buildProtectedPageJumpOverlay()),
       ],
+    );
+  }
+
+  Widget buildNativePdfDocumentSurface() {
+    final initialPage = currentPdfPage < 1 ? 1 : currentPdfPage;
+
+    return ColoredBox(
+      color: const Color(0xFF111217),
+      child: pdf_viewer.SfPdfViewer.network(
+        widget.pdfUrl,
+        key: ValueKey('native-pdf-${widget.pdfUrl}'),
+        controller: nativePdfViewerController,
+        initialPageNumber: initialPage,
+        // The draggable edge scroll-head competes with normal vertical swipes on
+        // narrow phones and can turn a small gesture into a large page jump.
+        // The reader already provides an explicit, reliable page-jump control.
+        canShowScrollHead: false,
+        canShowScrollStatus: false,
+        canShowPageLoadingIndicator: true,
+        enableDoubleTapZooming: true,
+        interactionMode: pdf_viewer.PdfInteractionMode.pan,
+        onDocumentLoaded: (details) {
+          if (!mounted) return;
+
+          setState(() {
+            pdfPageCount = details.document.pages.count;
+            isStandardPdfLoading = false;
+            standardPdfLoadTimedOut = false;
+            nativePdfDocumentLoaded = true;
+          });
+          final pendingPage = pendingNativePdfPage ?? currentPdfPage;
+          pendingNativePdfPage = null;
+          if (pendingPage > 1) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || !nativePdfDocumentLoaded) return;
+              nativePdfViewerController.jumpToPage(pendingPage);
+            });
+          }
+        },
+        onDocumentLoadFailed: (details) {
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                details.description.trim().isEmpty
+                    ? 'Could not open this PDF on this device.'
+                    : details.description,
+              ),
+            ),
+          );
+        },
+        onPageChanged: (details) {
+          if (!mounted || currentPdfPage == details.newPageNumber) return;
+
+          setState(() {
+            currentPdfPage = details.newPageNumber;
+          });
+          readerPageChangedSinceOpen = true;
+          scheduleAutomaticReadingPositionSave(details.newPageNumber);
+          preloadNarrationTextForPage(details.newPageNumber);
+        },
+      ),
     );
   }
 
@@ -12877,21 +13058,70 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final userEmail = user?.email;
     if (userEmail == null || userEmail.isEmpty) return;
 
-    final position = await savedPositionRepository.loadLatest(
-      userEmail: userEmail,
-      pdfTitle: widget.title,
-    );
+    try {
+      final position = await savedPositionRepository.loadLatest(
+        userEmail: userEmail,
+        pdfTitle: widget.title,
+        documentKey: readerDocumentKey,
+      );
 
-    if (position != null) {
-      latestReadingPosition = position;
+      if (position != null) {
+        latestReadingPosition = position;
+        lastPersistedReadingPage = position.pageNumber;
 
-      if (ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
-        initialPage: widget.initialPage,
-        initialSearchQuery: widget.initialSearchQuery,
-        openSource: widget.openSource,
-      )) {
-        openPdfPage(position.pageNumber, source: 'latest_saved_position');
+        if (!readerPageChangedSinceOpen &&
+            ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
+              initialPage: widget.initialPage,
+              initialSearchQuery: widget.initialSearchQuery,
+              openSource: widget.openSource,
+            )) {
+          openPdfPage(position.pageNumber, source: 'latest_saved_position');
+        }
       }
+    } catch (error) {
+      await logReaderAction(
+        action: 'load_reading_position_failed',
+        details: {'error': error.toString()},
+      );
+    } finally {
+      readingPositionRestoreCompleted = true;
+      if (readerPageChangedSinceOpen) {
+        scheduleAutomaticReadingPositionSave(currentPdfPage);
+      }
+    }
+  }
+
+  void scheduleAutomaticReadingPositionSave(int pageNumber) {
+    if (!readingPositionRestoreCompleted || pageNumber < 1) return;
+    if (lastPersistedReadingPage == pageNumber) return;
+
+    readingPositionSaveTimer?.cancel();
+    readingPositionSaveTimer = Timer(const Duration(milliseconds: 900), () {
+      unawaited(persistLatestReadingPosition(pageNumber));
+    });
+  }
+
+  Future<void> persistLatestReadingPosition(int pageNumber) async {
+    final userEmail = FirebaseAuth.instance.currentUser?.email?.trim() ?? '';
+    if (userEmail.isEmpty || pageNumber < 1) return;
+    if (lastPersistedReadingPage == pageNumber) return;
+
+    try {
+      await savedPositionRepository.saveLatest(
+        ReaderSavedPositionDraft(
+          userEmail: userEmail,
+          pdfTitle: widget.title,
+          documentKey: readerDocumentKey,
+          storagePath: normalizedReaderStoragePath,
+          pageNumber: pageNumber,
+        ),
+      );
+      lastPersistedReadingPage = pageNumber;
+    } catch (error) {
+      await logReaderAction(
+        action: 'auto_save_reading_position_failed',
+        details: {'pageNumber': pageNumber, 'error': error.toString()},
+      );
     }
   }
 
@@ -13104,8 +13334,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   void scheduleProtectedPdfPreloadAroundPage(
     int pageNumber, {
-    int radius = 2,
-    Duration delay = const Duration(milliseconds: 180),
+    int radius = 1,
+    Duration delay = const Duration(milliseconds: 120),
   }) {
     protectedPdfPreloadTimer?.cancel();
     protectedPdfPreloadTimer = Timer(delay, () {
@@ -13132,23 +13362,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       return completer.future;
     }
 
-    final script = html.ScriptElement()
-      ..src =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js'
-      ..async = true;
-
-    script.onLoad.first.then((_) {
-      configurePdfJsWorker();
-      completer.complete();
-    });
-    script.onError.first.then((_) {
-      _pdfJsReady = null;
-      completer.completeError(
-        StateError('Protected PDF image renderer could not load.'),
-      );
-    });
-
-    html.document.head?.append(script);
+    // PDF.js is shipped with the app and loaded by web/index.html. Depending
+    // on a third-party CDN here caused the protected reader to wait forever in
+    // Android WebViews when that host was slow or blocked.
+    _pdfJsReady = null;
+    completer.completeError(
+      StateError('The bundled protected PDF renderer is unavailable.'),
+    );
     return completer.future;
   }
 
@@ -13160,11 +13380,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       pdfJs,
       'GlobalWorkerOptions',
     );
-    js_util.setProperty(
-      workerOptions,
-      'workerSrc',
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js',
-    );
+    js_util.setProperty(workerOptions, 'workerSrc', 'pdfjs/pdf.worker.min.js');
   }
 
   Future<Uint8List> loadProtectedPdfImageBytes() async {
@@ -13236,7 +13452,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final renderGeneration = ++protectedPdfRenderGeneration;
 
     try {
-      await ensurePdfJsReady();
+      await ensurePdfJsReady().timeout(const Duration(seconds: 12));
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
       final pdfJs = js_util.getProperty<Object>(html.window, 'pdfjsLib');
@@ -13244,13 +13460,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
       final documentOptions = js_util.newObject();
-      js_util.setProperty(documentOptions, 'data', pdfBytes);
+      js_util.setProperty(
+        documentOptions,
+        'data',
+        js_util.uint8ListToJS(pdfBytes),
+      );
       final loadingTask = js_util.callMethod<Object>(pdfJs, 'getDocument', [
         documentOptions,
       ]);
-      final document = await js_util.promiseToFuture<Object>(
-        js_util.getProperty<Object>(loadingTask, 'promise'),
-      );
+      final document = await js_util
+          .promiseToFuture<Object>(
+            js_util.getProperty<Object>(loadingTask, 'promise'),
+          )
+          .timeout(const Duration(seconds: 30));
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
       final pageCount = (js_util.getProperty<num>(
@@ -13265,9 +13487,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       protectedPdfRenderJobs.clear();
       pendingProtectedPdfRenderPage = null;
 
-      final firstPage = await js_util.promiseToFuture<Object>(
-        js_util.callMethod<Object>(document, 'getPage', [1]),
-      );
+      final firstPage = await js_util
+          .promiseToFuture<Object>(
+            js_util.callMethod<Object>(document, 'getPage', [1]),
+          )
+          .timeout(const Duration(seconds: 15));
       final baseViewport = js_util.callMethod<Object>(
         firstPage,
         'getViewport',
@@ -13282,13 +13506,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final availableWidth = math.max(320, containerWidth - 48);
       final displayScale = (availableWidth / baseWidth).clamp(0.35, 1.8);
       final targetPixelRatio = pageCount <= 12
-          ? 2.35
+          ? _protectedPdfShortDocumentPixelRatio
           : pageCount <= 60
-          ? 1.85
-          : 1.55;
+          ? _protectedPdfMediumDocumentPixelRatio
+          : _protectedPdfLongDocumentPixelRatio;
       final pixelRatio = math.min(
         math.max(html.window.devicePixelRatio, targetPixelRatio),
-        2.2,
+        _protectedPdfMaximumPixelRatio,
       );
       final renderScale = displayScale * pixelRatio;
       final zoomedDisplayScale = displayScale * readerZoomScale;
@@ -13361,7 +13585,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       await renderProtectedPdfPagesAroundPage(
         currentPdfPage,
         renderGeneration: renderGeneration,
-        radius: 2,
+        radius: 0,
       );
       scheduleProtectedPdfPreloadAroundPage(currentPdfPage);
     } catch (error) {
@@ -13556,9 +13780,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final renderTask = js_util.callMethod<Object>(page, 'render', [
         renderContext,
       ]);
-      await js_util.promiseToFuture<Object>(
-        js_util.getProperty<Object>(renderTask, 'promise'),
-      );
+      await js_util
+          .promiseToFuture<Object>(
+            js_util.getProperty<Object>(renderTask, 'promise'),
+          )
+          .timeout(const Duration(seconds: 20));
 
       if (renderGeneration != protectedPdfRenderGeneration) {
         canvas.remove();
@@ -13721,7 +13947,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     var visiblePage = currentPdfPage;
 
     for (final child in container.children) {
-      final pageElement = child as html.HtmlElement;
+      final pageElement = child;
       final pageNumber = int.tryParse(
         pageElement.dataset['readerPageNumber'] ?? '',
       );
@@ -13743,6 +13969,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     } else {
       currentPdfPage = visiblePage;
     }
+    readerPageChangedSinceOpen = true;
+    scheduleAutomaticReadingPositionSave(visiblePage);
     preloadNarrationTextForPage(visiblePage);
     unawaited(
       renderProtectedPdfPagesAroundPage(
@@ -14027,8 +14255,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       handleProtectedReaderAction(source: 'context_menu', event: event);
     });
     readerKeyDownSubscription = html.document.onKeyDown.listen((event) {
+      final key = event.key ?? '';
+      if (key.toLowerCase() == 'printscreen') {
+        handleReaderScreenshotAttempt(event);
+        return;
+      }
+
       final shouldBlock = readerProtectionPolicy.shouldBlockShortcut(
-        event.key ?? '',
+        key,
         controlOrMetaPressed: event.ctrlKey || event.metaKey,
       );
 
@@ -14039,6 +14273,113 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         event: event,
       );
     });
+  }
+
+  Future<void> enableReaderScreenSecurity() async {
+    if (kIsWeb) return;
+
+    try {
+      await readerScreenSecurityChannel.invokeMethod<void>(
+        'enableSecureScreen',
+      );
+    } on MissingPluginException {
+      // Platform support is optional outside Android.
+    } on PlatformException {
+      // Reader access must not fail if the host platform cannot apply the flag.
+    }
+  }
+
+  Future<void> enableReaderStayAwake() async {
+    if (!kIsWeb) {
+      try {
+        await readerScreenSecurityChannel.invokeMethod<void>(
+          'enableReaderStayAwake',
+        );
+      } on MissingPluginException {
+        // The web and embedded-web implementations below cover other hosts.
+      } on PlatformException {
+        // Reading must still open when a platform cannot apply a wake lock.
+      }
+      return;
+    }
+
+    try {
+      final bridge = js_util.getProperty<Object?>(
+        html.window,
+        'AncientVaultReader',
+      );
+      if (bridge != null) {
+        js_util.callMethod<void>(bridge, 'postMessage', ['{"keepAwake":true}']);
+      }
+
+      final wakeLock = js_util.getProperty<Object?>(
+        html.window.navigator,
+        'wakeLock',
+      );
+      if (wakeLock == null) return;
+      final request = js_util.callMethod<Object?>(wakeLock, 'request', [
+        'screen',
+      ]);
+      if (request != null) {
+        readerWakeLockSentinel = await js_util.promiseToFuture<Object?>(
+          request,
+        );
+      }
+    } catch (_) {
+      // Wake Lock API support varies; the Android bridge remains the fallback.
+    }
+  }
+
+  Future<void> disableReaderStayAwake() async {
+    if (!kIsWeb) {
+      try {
+        await readerScreenSecurityChannel.invokeMethod<void>(
+          'disableReaderStayAwake',
+        );
+      } on MissingPluginException {
+        // Optional outside Android.
+      } on PlatformException {
+        // Leaving the reader must never be blocked by wake-lock cleanup.
+      }
+      return;
+    }
+
+    try {
+      final sentinel = readerWakeLockSentinel;
+      readerWakeLockSentinel = null;
+      if (sentinel != null) {
+        final release = js_util.callMethod<Object?>(sentinel, 'release', []);
+        if (release != null) {
+          await js_util.promiseToFuture<Object?>(release);
+        }
+      }
+
+      final bridge = js_util.getProperty<Object?>(
+        html.window,
+        'AncientVaultReader',
+      );
+      if (bridge != null) {
+        js_util.callMethod<void>(bridge, 'postMessage', [
+          '{"keepAwake":false}',
+        ]);
+      }
+    } catch (_) {
+      // Cleanup is best-effort on browsers without the Wake Lock API.
+    }
+  }
+
+  Future<void> disableReaderScreenSecurity() async {
+    if (kIsWeb) return;
+
+    try {
+      await readerScreenSecurityChannel.invokeMethod<void>(
+        'disableSecureScreen',
+      );
+    } on MissingPluginException {
+      // Platform support is optional outside Android.
+    } on PlatformException {
+      // Leaving the reader should continue even if the platform call fails.
+    }
   }
 
   void updateReaderWindowActivity({
@@ -14085,6 +14426,32 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
   }
 
+  void handleReaderScreenshotAttempt(html.KeyboardEvent event) {
+    if (!canViewDocument) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    updateReaderWindowActivity(isActive: false, source: 'print_screen_key');
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Screenshot attempts are blocked in protected reader.'),
+        ),
+      );
+    }
+
+    logReaderAction(
+      action: 'reader_screenshot_attempt_blocked',
+      details: {
+        'source': 'print_screen_key',
+        'pageNumber': currentPdfPage,
+        'accessLevel': widget.accessLevel,
+      },
+    );
+  }
+
   void handleProtectedReaderAction({
     required String source,
     required html.Event event,
@@ -14121,6 +14488,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }) {
     final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
     final nextSearchQuery = searchQuery ?? currentSearchQuery;
+    if (source != 'latest_saved_position') {
+      readerPageChangedSinceOpen = true;
+    }
 
     if (mounted) {
       setState(() {
@@ -14141,6 +14511,17 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       },
     );
 
+    if (!kIsWeb) {
+      if (nativePdfDocumentLoaded) {
+        nativePdfViewerController.jumpToPage(safePageNumber);
+      } else {
+        pendingNativePdfPage = safePageNumber;
+      }
+      scheduleAutomaticReadingPositionSave(safePageNumber);
+      preloadNarrationTextForPage(safePageNumber);
+      return;
+    }
+
     if (usesImagePdfReader) {
       showProtectedPageJumpOverlay(safePageNumber);
       scrollProtectedPdfImageReaderToPage(currentPdfPage);
@@ -14151,6 +14532,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         forceReload: forceReload,
       );
     }
+    scheduleAutomaticReadingPositionSave(safePageNumber);
     preloadNarrationTextForPage(safePageNumber);
   }
 
@@ -14884,9 +15266,34 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   void preloadNarrationTextForPage(int pageNumber) {
     final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
-    if (narrationPageTextCache.containsKey(safePageNumber)) return;
+    narrationTextPreloadTimer?.cancel();
 
-    loadNarrationTextForPage(safePageNumber).catchError((_) => '');
+    // PDF text extraction is intentionally delayed until the swipe settles.
+    // Starting multiple full-document parses during a fast fling can contend
+    // with the native PDF renderer and make page scrolling feel erratic.
+    narrationTextPreloadTimer = Timer(const Duration(milliseconds: 450), () {
+      unawaited(_preloadNarrationTextAroundPage(safePageNumber));
+    });
+  }
+
+  Future<void> _preloadNarrationTextAroundPage(int pageNumber) async {
+    final lastPage = pdfPageCount;
+    final pages = [
+      pageNumber,
+      if (lastPage == null || pageNumber < lastPage) pageNumber + 1,
+    ];
+
+    // Load sequentially so the current and next-page parsers never compete for
+    // memory or CPU. Narration itself still reads directly from this same cache.
+    for (final page in pages) {
+      if (!mounted) return;
+      if (narrationPageTextCache.containsKey(page)) continue;
+      try {
+        await loadNarrationTextForPage(page);
+      } catch (_) {
+        // Preloading is best-effort. Playback surfaces any actionable error.
+      }
+    }
   }
 
   Future<List<int>> loadNarrationPdfBytes() async {
@@ -14924,6 +15331,21 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       return cachedText;
     }
 
+    final pendingText = narrationPageTextFutureCache[safePageNumber];
+    if (pendingText != null) return pendingText;
+
+    final future = _extractNarrationTextForPage(safePageNumber);
+    narrationPageTextFutureCache[safePageNumber] = future;
+
+    try {
+      return await future;
+    } catch (_) {
+      narrationPageTextFutureCache.remove(safePageNumber);
+      rethrow;
+    }
+  }
+
+  Future<String> _extractNarrationTextForPage(int safePageNumber) async {
     final document = PdfDocument(inputBytes: await loadNarrationPdfBytes());
 
     try {
@@ -14936,14 +15358,17 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       pdfPageCount = pageCount;
 
       final extractor = PdfTextExtractor(document);
-      final text = extractor
-          .extractText(
-            startPageIndex: safePageNumber - 1,
-            endPageIndex: safePageNumber - 1,
-          )
-          .trim();
+      final text = normalizeNarrationText(
+        extractor
+            .extractText(
+              startPageIndex: safePageNumber - 1,
+              endPageIndex: safePageNumber - 1,
+            )
+            .trim(),
+      );
 
       narrationPageTextCache[safePageNumber] = text;
+      narrationPageTextFutureCache.remove(safePageNumber);
       return text;
     } finally {
       document.dispose();
@@ -17752,8 +18177,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Future<void> continueNarrationAfterPage(int completedPage) async {
-    await saveNarrationCheckpoint(completedPage);
-    await saveNarrationSessionSummary();
+    // Persist in parallel so network writes never create an audible gap.
+    unawaited(saveNarrationCheckpoint(completedPage));
+    unawaited(saveNarrationSessionSummary());
 
     if (!readerTtsService.canContinueAfterPage(completedPage)) return;
 
@@ -17834,7 +18260,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
 
     narrationCloudSession.updateAccessPolicy(narrationAccessPolicy);
-    unawaited(narrationCloudSession.refreshCatalog().catchError((_) => false));
+    if (kIsWeb) {
+      unawaited(
+        narrationCloudSession.refreshCatalog().catchError((_) => false),
+      );
+    }
 
     var narrationPage = currentPdfPage;
     final isSelectedPassage = selectedText != null;
@@ -18175,7 +18605,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerActivityRepository = ReaderActivityRepository();
     readerDeviceIdentity = ReaderDeviceIdentityResolver(
       storage: const HtmlDeviceIdentityStorage(),
-      platformProvider: () => html.window.navigator.platform ?? '',
+      platformProvider: () => html.window.navigator.userAgent,
       deviceIdFactory: createReaderDeviceId,
     ).resolve();
     readerDeviceAuthorizationRepository = UserDeviceAuthorizationRepository();
@@ -18206,6 +18636,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     narrationPlaybackCoordinator = ReaderNarrationPlaybackCoordinator(
       ttsService: readerTtsService,
       cloudSession: narrationCloudSession,
+      cloudNarrationEnabled: kIsWeb,
       accessPolicyProvider: () => narrationAccessPolicy,
     );
     narrationPreferencesController = ReaderNarrationPreferencesController(
@@ -18225,6 +18656,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     currentSearchQuery = widget.initialSearchQuery;
     readerZoomScale = loadSavedReaderZoomScale();
     showReaderStatusOverlay = loadSavedReaderStatusVisibility();
+    unawaited(enableReaderScreenSecurity());
+    unawaited(enableReaderStayAwake());
     startReaderProtectionObservers();
     startViewerAccessFallbackTimer();
     checkViewerAccess();
@@ -18238,6 +18671,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     standardPdfLoadTimer?.cancel();
     protectedPdfPreloadTimer?.cancel();
     protectedPageJumpTimer?.cancel();
+    readingPositionSaveTimer?.cancel();
+    narrationTextPreloadTimer?.cancel();
     readerWindowBlurSubscription?.cancel();
     readerWindowFocusSubscription?.cancel();
     readerContextMenuSubscription?.cancel();
@@ -18257,6 +18692,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     pendingProtectedPdfRenderPage = null;
     readerTtsService.removeListener(observeNarrationSession);
     narrationCloudSession.dispose();
+    nativePdfViewerController.dispose();
+    unawaited(disableReaderScreenSecurity());
+    unawaited(disableReaderStayAwake());
+
+    if (readingPositionRestoreCompleted &&
+        currentPdfPage != lastPersistedReadingPage) {
+      unawaited(persistLatestReadingPosition(currentPdfPage));
+    }
 
     if (readerSessionStarted) {
       final startedAt = readerSessionStartedAt;
@@ -18698,8 +19141,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                             .addPostFrameCallback((
                                                               _,
                                                             ) {
-                                                              if (!mounted)
+                                                              if (!mounted) {
                                                                 return;
+                                                              }
                                                               openPdfPage(
                                                                 page,
                                                                 searchQuery:
@@ -18877,7 +19321,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Opacity(
-                      opacity: 0.08,
+                      opacity: 0.035,
                       child: Center(
                         child: RotatedBox(
                           quarterTurns: 3,
@@ -18886,8 +19330,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Colors.greenAccent,
-                              fontSize: 34,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),

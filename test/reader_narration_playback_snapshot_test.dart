@@ -223,6 +223,7 @@ class SnapshotCatalogBuilder extends ReaderNarrationVoiceCatalogBuilder {
     required ReaderNarrationAccessPolicy accessPolicy,
     required ReaderTtsService ttsService,
     ReaderCloudNarrationSessionCoordinator? cloudSession,
+    bool cloudNarrationEnabled = true,
   }) {
     return build(
       accessPolicy: accessPolicy,
@@ -230,6 +231,7 @@ class SnapshotCatalogBuilder extends ReaderNarrationVoiceCatalogBuilder {
       browserVoices: browserVoices ?? ttsService.availableBrowserVoices,
       cloudVoices: cloudVoices,
       preferredVoiceId: ttsService.preferredVoiceId,
+      cloudNarrationEnabled: cloudNarrationEnabled,
     );
   }
 }

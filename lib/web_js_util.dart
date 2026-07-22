@@ -1,5 +1,6 @@
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
+import 'dart:typed_data';
 
 JSAny? jsify(Object? object) => object.jsify();
 
@@ -29,6 +30,8 @@ Future<R> promiseToFuture<R>(Object? promise) async {
   final value = await (promise as JSPromise<JSAny?>).toDart;
   return _dartify<R>(value);
 }
+
+Object uint8ListToJS(Uint8List data) => data.toJS;
 
 JSAny? _jsifyValue(Object? value) {
   if (value is JSAny?) {

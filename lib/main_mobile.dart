@@ -6,7 +6,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-const _vaultUrl = 'https://vault.ancientsociety.tech/';
+const _vaultUrl = String.fromEnvironment(
+  'VAULT_URL',
+  defaultValue: 'https://vault.ancientsociety.tech/',
+);
+const _readerScreenChannel = MethodChannel(
+  'ancient_secure_docs/screen_security',
+);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -72,6 +78,10 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
         'AncientVaultTts',
         onMessageReceived: handleNativeTtsMessage,
       )
+      ..addJavaScriptChannel(
+        'AncientVaultReader',
+        onMessageReceived: handleReaderWakeLockMessage,
+      )
       ..setBackgroundColor(const Color(0xFF10131A))
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -92,6 +102,21 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
         ),
       )
       ..loadRequest(Uri.parse(_vaultUrl));
+  }
+
+  Future<void> handleReaderWakeLockMessage(JavaScriptMessage message) async {
+    try {
+      final payload = jsonDecode(message.message);
+      if (payload is! Map<String, dynamic>) return;
+      final keepAwake = payload['keepAwake'] == true;
+      await _readerScreenChannel.invokeMethod<void>(
+        keepAwake ? 'enableReaderStayAwake' : 'disableReaderStayAwake',
+      );
+    } on PlatformException {
+      // The protected reader remains usable if a device rejects the flag.
+    } on FormatException {
+      // Ignore malformed messages from a page that is navigating away.
+    }
   }
 
   Future<void> lockMobileWebViewZoom() async {
@@ -300,7 +325,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (_, __) => handleBackNavigation(),
+      onPopInvokedWithResult: (_, _) => handleBackNavigation(),
       child: Scaffold(
         body: Stack(
           children: [
@@ -329,6 +354,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     launchSplashTimer?.cancel();
     estimatedProgressTimer?.cancel();
     nativeTts.stop();
+    _readerScreenChannel.invokeMethod<void>('disableReaderStayAwake');
     super.dispose();
   }
 }

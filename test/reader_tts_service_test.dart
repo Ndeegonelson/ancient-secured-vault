@@ -156,7 +156,10 @@ void main() {
     await service.initialize();
 
     expect(fakeTts.selectedLanguage, 'en-US');
-    expect(fakeTts.selectedRate, ReaderTtsService.defaultRate);
+    expect(
+      fakeTts.selectedRate,
+      ReaderTtsService.platformSpeechRateFor(ReaderTtsService.defaultRate),
+    );
     expect(service.language, ReaderNarrationLanguage.english);
     expect(service.activeLocale, 'en-US');
 
@@ -172,7 +175,10 @@ void main() {
 
     expect(fakeTts.selectedLanguage, 'fr-FR');
     expect(service.rate, ReaderTtsService.maximumRate);
-    expect(fakeTts.selectedRate, ReaderTtsService.maximumRate);
+    expect(
+      fakeTts.selectedRate,
+      ReaderTtsService.platformSpeechRateFor(ReaderTtsService.maximumRate),
+    );
 
     service.dispose();
   });
@@ -341,6 +347,13 @@ void main() {
     expect(service.rate, ReaderTtsService.maximumRate);
 
     service.dispose();
+  });
+
+  test('maps display speed to native TTS speed safely', () {
+    expect(ReaderTtsService.platformSpeechRateFor(1), 0.5);
+    expect(ReaderTtsService.platformSpeechRateFor(0.4), 0.2);
+    expect(ReaderTtsService.platformSpeechRateFor(3), 1.0);
+    expect(ReaderTtsService.platformSpeechRateFor(1, isWeb: true), 1.0);
   });
 
   test('Auto selects an English voice for English text', () async {
@@ -539,7 +552,7 @@ void main() {
     await service.speakPage(text: 'Protected learning text.', pageNumber: 7);
     await service.setRate(0.75);
 
-    expect(fakeTts.selectedRate, 0.75);
+    expect(fakeTts.selectedRate, ReaderTtsService.platformSpeechRateFor(0.75));
     expect(fakeTts.speakCount, 1);
     expect(fakeTts.spokenText, 'Protected learning text.');
 

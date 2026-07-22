@@ -62,6 +62,20 @@ void main() {
     expect(segments.first.containsCharacter(resumeOffset - 1), isFalse);
   });
 
+  test('default planner finishes a long sentence before splitting', () {
+    const planner = ReaderCloudNarrationTextPlanner();
+    final longSentence = '${List.filled(205, 'continuous').join(' ')}. ';
+    final nextSentence = '${List.filled(45, 'next').join(' ')}.';
+    final text = '$longSentence$nextSentence';
+
+    final segments = planner.plan(text: text);
+
+    expect(segments, hasLength(2));
+    expect(segments.first.text, longSentence);
+    expect(segments.first.text.trimRight(), endsWith('.'));
+    expect(segments.map((segment) => segment.text).join(), text);
+  });
+
   test('unusually long words safely use the hard provider limit', () {
     const planner = ReaderCloudNarrationTextPlanner(
       maximumSegmentCharacters: 10,

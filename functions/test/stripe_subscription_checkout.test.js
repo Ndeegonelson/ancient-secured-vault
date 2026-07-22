@@ -191,11 +191,13 @@ test("creates a Stripe checkout session and records the request", async () => {
 
 test("active premium users cannot start a Stripe checkout", async () => {
   const firestore = new FakeFirestore();
+  const futureExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      .toISOString();
   await firestore.collection("users").doc("reader@example.com").set({
     email: "reader@example.com",
     accessLevel: "premium",
     subscriptionStatus: "active",
-    subscriptionExpiresAt: "2026-07-14T12:00:00.000Z",
+    subscriptionExpiresAt: futureExpiry,
   });
   let checkoutWasCreated = false;
   const handler = createStripeCheckoutSessionHandler({

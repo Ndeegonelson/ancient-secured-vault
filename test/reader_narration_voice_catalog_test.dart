@@ -183,6 +183,26 @@ void main() {
     );
   });
 
+  test('native platforms hide cloud voices even for premium users', () {
+    final catalog = builder.build(
+      accessPolicy: policy(hasActiveSubscription: true),
+      locale: 'en-US',
+      browserVoices: const [browserEnglishDavid, browserEnglishZira],
+      cloudVoices: const [cloudAfricanEnglish],
+      preferredVoiceId: cloudAfricanEnglish.id,
+      cloudNarrationEnabled: false,
+    );
+
+    expect(catalog.cloudNarrationEnabled, isFalse);
+    expect(catalog.defaultVoice, browserEnglishDavid);
+    expect(catalog.cloudVoices, isEmpty);
+    expect(catalog.selectableVoices, [browserEnglishDavid, browserEnglishZira]);
+    expect(
+      catalog.cloudAvailabilityMessage,
+      'Cloud narration audio is available on web only right now.',
+    );
+  });
+
   test('admin users can see compatible custom cloud voices by language', () {
     final catalog = builder.build(
       accessPolicy: policy(isAdmin: true),

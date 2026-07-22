@@ -34,6 +34,7 @@ class ReaderTtsService extends ChangeNotifier {
   static const double minimumRate = 0.4;
   static const double maximumRate = 3.0;
   static const double defaultRate = 1.0;
+  static const double _nativeDefaultSpeechRate = 0.5;
   static const int maximumPassageLength = 220;
   static const Duration _stopRestartDelay = Duration(milliseconds: 120);
 
@@ -527,7 +528,15 @@ class ReaderTtsService extends ChangeNotifier {
   }
 
   Future<void> _applyRate() async {
-    await _flutterTts.setSpeechRate(_rate);
+    await _flutterTts.setSpeechRate(platformSpeechRateFor(_rate));
+  }
+
+  @visibleForTesting
+  static double platformSpeechRateFor(double rate, {bool isWeb = kIsWeb}) {
+    final safeRate = rate.clamp(minimumRate, maximumRate).toDouble();
+    if (isWeb) return safeRate;
+
+    return (safeRate * _nativeDefaultSpeechRate).clamp(0.1, 1.0).toDouble();
   }
 
   Future<void> _refreshAvailableLanguages({

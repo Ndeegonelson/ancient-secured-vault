@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ReaderSavedPosition {
@@ -9,6 +11,7 @@ class ReaderSavedPosition {
     this.documentKey = '',
     this.storagePath = '',
     this.createdAt,
+    this.updatedAt,
   });
 
   factory ReaderSavedPosition.fromSnapshot(
@@ -29,6 +32,7 @@ class ReaderSavedPosition {
       storagePath: data['storagePath']?.toString() ?? '',
       pageNumber: _readPageNumber(data['pageNumber']),
       createdAt: data['createdAt'],
+      updatedAt: data['updatedAt'],
     );
   }
 
@@ -39,16 +43,19 @@ class ReaderSavedPosition {
   final String storagePath;
   final int pageNumber;
   final dynamic createdAt;
+  final dynamic updatedAt;
 
-  bool get hasServerTimestamp => createdAt is Timestamp;
+  dynamic get latestTimestamp => updatedAt is Timestamp ? updatedAt : createdAt;
+
+  bool get hasServerTimestamp => latestTimestamp is Timestamp;
 
   static List<ReaderSavedPosition> sortNewest(
     Iterable<ReaderSavedPosition> positions,
   ) {
     final sorted = List<ReaderSavedPosition>.from(positions);
     sorted.sort((a, b) {
-      final aCreatedAt = a.createdAt;
-      final bCreatedAt = b.createdAt;
+      final aCreatedAt = a.latestTimestamp;
+      final bCreatedAt = b.latestTimestamp;
 
       if (aCreatedAt is Timestamp && bCreatedAt is Timestamp) {
         return bCreatedAt.compareTo(aCreatedAt);
@@ -103,6 +110,36 @@ class ReaderSavedPositionDraft {
   final int pageNumber;
 }
 
+String readerLatestPositionDocumentId(ReaderSavedPositionDraft position) {
+  final documentIdentity =
+      [position.documentKey, position.storagePath, position.pdfTitle]
+          .map((value) => value.trim())
+          .firstWhere(
+            (value) => value.isNotEmpty,
+            orElse: () => 'untitled-document',
+          );
+  final identity =
+      '${position.userEmail.trim().toLowerCase()}|'
+      '${documentIdentity.toLowerCase()}';
+  return 'latest_${base64Url.encode(utf8.encode(identity)).replaceAll('=', '')}';
+}
+
+Map<String, dynamic> readerSavedPositionData(
+  ReaderSavedPositionDraft position, {
+  Object? createdAt,
+  Object? updatedAt,
+}) {
+  return {
+    'userEmail': position.userEmail.trim(),
+    'pdfTitle': position.pdfTitle.trim(),
+    'documentKey': position.documentKey.trim(),
+    'storagePath': position.storagePath.trim(),
+    'pageNumber': position.pageNumber < 1 ? 1 : position.pageNumber,
+    'createdAt': ?createdAt,
+    'updatedAt': ?updatedAt,
+  };
+}
+
 abstract interface class ReaderSavedPositionStore {
   Stream<List<ReaderSavedPosition>> watchForDocument({
     required String userEmail,
@@ -122,9 +159,12 @@ abstract interface class ReaderSavedPositionStore {
   Future<ReaderSavedPosition?> loadLatest({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   });
 
   Future<void> save(ReaderSavedPositionDraft position);
+
+  Future<void> saveLatest(ReaderSavedPositionDraft position);
 
   Future<void> delete(String positionId);
 }
@@ -184,7 +224,20 @@ class ReaderSavedPositionRepository implements ReaderSavedPositionStore {
   Future<ReaderSavedPosition?> loadLatest({
     required String userEmail,
     required String pdfTitle,
+    String documentKey = '',
   }) async {
+    final cleanDocumentKey = documentKey.trim();
+    if (cleanDocumentKey.isNotEmpty) {
+      final keyedSnapshot = await _collection
+          .where('userEmail', isEqualTo: userEmail)
+          .where('documentKey', isEqualTo: cleanDocumentKey)
+          .get();
+      final keyedPositions = ReaderSavedPosition.sortNewest(
+        keyedSnapshot.docs.map(ReaderSavedPosition.fromSnapshot),
+      );
+      if (keyedPositions.isNotEmpty) return keyedPositions.first;
+    }
+
     final positions = await listForDocument(
       userEmail: userEmail,
       pdfTitle: pdfTitle,
@@ -195,14 +248,26 @@ class ReaderSavedPositionRepository implements ReaderSavedPositionStore {
 
   @override
   Future<void> save(ReaderSavedPositionDraft position) async {
-    await _collection.add({
-      'userEmail': position.userEmail,
-      'pdfTitle': position.pdfTitle,
-      'documentKey': position.documentKey,
-      'storagePath': position.storagePath,
-      'pageNumber': position.pageNumber,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    await _collection.add(
+      readerSavedPositionData(
+        position,
+        createdAt: FieldValue.serverTimestamp(),
+      ),
+    );
+  }
+
+  @override
+  Future<void> saveLatest(ReaderSavedPositionDraft position) {
+    return _collection
+        .doc(readerLatestPositionDocumentId(position))
+        .set(
+          readerSavedPositionData(
+            position,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          ),
+          SetOptions(merge: true),
+        );
   }
 
   @override

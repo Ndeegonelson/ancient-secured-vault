@@ -26,7 +26,7 @@ class ReaderCloudNarrationPreparationQueue {
   ReaderCloudNarrationPreparationQueue({
     required this.registry,
     this.planner = const ReaderCloudNarrationTextPlanner(),
-    this.maximumBufferedSegments = 1,
+    this.maximumBufferedSegments = 2,
     this.maximumBufferedAudioBytes = 8 * 1024 * 1024,
   }) : assert(maximumBufferedSegments > 0),
        assert(maximumBufferedAudioBytes > 0);

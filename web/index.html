@@ -31,6 +31,15 @@
 
   <title>ANCIENT SECURED VAULT</title>
   <link rel="manifest" href="manifest.json">
+  <!-- Keep protected PDF rendering available offline and inside Android
+       WebViews; do not depend on a third-party runtime script. -->
+  <script src="pdfjs/pdf.min.js"></script>
+  <script>
+    document.documentElement.dataset.pdfRenderer =
+      window.pdfjsLib && window.pdfjsLib.version
+        ? `ready-${window.pdfjsLib.version}`
+        : 'missing';
+  </script>
   <script>
     (function installAndroidVaultNarrationBridge() {
       const userAgent = (navigator.userAgent || '').toLowerCase();

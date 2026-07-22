@@ -78,12 +78,15 @@ class ReaderNarrationVoiceCatalogPresenter {
   }
 
   String _availabilitySummary(ReaderNarrationVoiceCatalog catalog) {
+    final localVoiceType = catalog.cloudNarrationEnabled ? 'browser' : 'device';
     final browserSummary = _countLabel(
       catalog.browserVoices.length,
-      singular: 'synced browser voice',
-      plural: 'synced browser voices',
+      singular: 'synced $localVoiceType voice',
+      plural: 'synced $localVoiceType voices',
     );
-    final cloudSummary = catalog.accessPolicy.canUseCloudNarration
+    final cloudSummary = !catalog.cloudNarrationEnabled
+        ? 'natural cloud voices web-only'
+        : catalog.accessPolicy.canUseCloudNarration
         ? _countLabel(
             catalog.cloudVoices.length,
             singular: 'natural cloud voice',
@@ -132,7 +135,9 @@ class ReaderNarrationVoiceCatalogPresenter {
     }
 
     if (!catalog.hasCloudVoices) {
-      return 'Browser narration is active. Cloud voices are unavailable right now.';
+      return catalog.cloudNarrationEnabled
+          ? 'Browser narration is active. Cloud voices are unavailable right now.'
+          : 'Device narration is active. Cloud voices are unavailable on this platform.';
     }
 
     return 'Browser voices are best for word-by-word read-along. '

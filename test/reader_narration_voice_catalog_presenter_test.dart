@@ -36,6 +36,7 @@ ReaderNarrationVoiceCatalog catalog({
   List<ReaderNarrationVoice> browserVoices = const [browserDavid],
   List<ReaderNarrationVoice> cloudVoices = const [],
   String? preferredVoiceId,
+  bool cloudNarrationEnabled = true,
 }) {
   return const ReaderNarrationVoiceCatalogBuilder().build(
     accessPolicy: accessPolicy,
@@ -43,6 +44,7 @@ ReaderNarrationVoiceCatalog catalog({
     browserVoices: browserVoices,
     cloudVoices: cloudVoices,
     preferredVoiceId: preferredVoiceId,
+    cloudNarrationEnabled: cloudNarrationEnabled,
   );
 }
 
@@ -129,6 +131,30 @@ void main() {
       viewModel.helperMessage,
       'Browser voices are best for word-by-word read-along. '
       'Cloud voices provide premium natural narration.',
+    );
+  });
+
+  test('presents native device narration when cloud audio is disabled', () {
+    final viewModel = presenter.present(
+      catalog: catalog(
+        accessPolicy: policy(),
+        browserVoices: const [browserDavid, browserZira],
+        cloudVoices: const [cloudAfricanGuide],
+        cloudNarrationEnabled: false,
+      ),
+      activeVoice: browserDavid,
+      activeLocale: 'en-US',
+    );
+
+    expect(
+      viewModel.availabilitySummary,
+      '2 synced device voices | natural cloud voices web-only | '
+      'Cloud narration audio is available on web only right now.',
+    );
+    expect(viewModel.selectableVoices, [browserDavid, browserZira]);
+    expect(
+      viewModel.helperMessage,
+      'Device narration is active. Cloud voices are unavailable on this platform.',
     );
   });
 

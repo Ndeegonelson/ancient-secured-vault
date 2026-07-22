@@ -15,6 +15,7 @@ class ReaderNarrationPlaybackCoordinator {
     required this.ttsService,
     required this.accessPolicyProvider,
     this.cloudSession,
+    this.cloudNarrationEnabled = true,
     this.snapshotBuilder = const ReaderNarrationPlaybackSnapshotBuilder(),
     ReaderNarrationPlaybackRouterFactory routerFactory =
         const ReaderNarrationPlaybackRouterFactory(),
@@ -28,6 +29,7 @@ class ReaderNarrationPlaybackCoordinator {
 
   final ReaderTtsService ttsService;
   final ReaderCloudNarrationSessionCoordinator? cloudSession;
+  final bool cloudNarrationEnabled;
   final ReaderNarrationAccessPolicyProvider accessPolicyProvider;
   final ReaderNarrationPlaybackSnapshotBuilder snapshotBuilder;
   final ReaderNarrationPlaybackRouter router;
@@ -48,6 +50,7 @@ class ReaderNarrationPlaybackCoordinator {
       ttsService: ttsService,
       cloudSession: cloudSession,
       selectedVoice: selectedVoice,
+      cloudNarrationEnabled: cloudNarrationEnabled,
     );
   }
 

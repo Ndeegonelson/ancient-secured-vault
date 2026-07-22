@@ -416,7 +416,7 @@ class ReaderNarrationDialog extends StatelessWidget {
                               ),
                             ),
                             IconButton(
-                              tooltip: 'Refresh browser voices',
+                              tooltip: 'Refresh narration voices',
                               onPressed: service.refreshVoices,
                               icon: const Icon(Icons.refresh),
                               color: Colors.greenAccent,
@@ -498,10 +498,17 @@ class ReaderNarrationDialog extends StatelessWidget {
                           onChangeEnd: onRateChangeEnd,
                         ),
                         const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 6,
+                          runSpacing: 4,
                           children: [
                             IconButton(
+                              constraints: const BoxConstraints.tightFor(
+                                width: 42,
+                                height: 42,
+                              ),
+                              padding: EdgeInsets.zero,
                               tooltip:
                                   'Previous paragraph; repeat for section/page start',
                               onPressed: hasReadableText
@@ -511,6 +518,11 @@ class ReaderNarrationDialog extends StatelessWidget {
                               color: Colors.white70,
                             ),
                             IconButton(
+                              constraints: const BoxConstraints.tightFor(
+                                width: 42,
+                                height: 42,
+                              ),
+                              padding: EdgeInsets.zero,
                               tooltip:
                                   playbackCoordinator.isPaused ||
                                       resumePercent != null
@@ -525,6 +537,11 @@ class ReaderNarrationDialog extends StatelessWidget {
                               color: Colors.greenAccent,
                             ),
                             IconButton(
+                              constraints: const BoxConstraints.tightFor(
+                                width: 42,
+                                height: 42,
+                              ),
+                              padding: EdgeInsets.zero,
                               tooltip: 'Pause narration',
                               onPressed: playbackCoordinator.isPlaying
                                   ? onPause
@@ -533,6 +550,11 @@ class ReaderNarrationDialog extends StatelessWidget {
                               color: Colors.orangeAccent,
                             ),
                             IconButton(
+                              constraints: const BoxConstraints.tightFor(
+                                width: 42,
+                                height: 42,
+                              ),
+                              padding: EdgeInsets.zero,
                               tooltip: 'Stop narration',
                               onPressed:
                                   playbackCoordinator.state ==
@@ -543,6 +565,11 @@ class ReaderNarrationDialog extends StatelessWidget {
                               color: Colors.redAccent,
                             ),
                             IconButton(
+                              constraints: const BoxConstraints.tightFor(
+                                width: 42,
+                                height: 42,
+                              ),
+                              padding: EdgeInsets.zero,
                               tooltip:
                                   'Next paragraph; repeat for section/page end',
                               onPressed: hasReadableText
