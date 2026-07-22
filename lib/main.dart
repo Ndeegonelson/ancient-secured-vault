@@ -11168,7 +11168,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ] else ...[
                         const SizedBox(height: 12),
                         const Text(
-                          'Paystack securely charges \$120 USD for one year. Your access updates after payment is confirmed.',
+                          webAndroidPaystackAnnualPriceDetail,
                           style: TextStyle(color: Colors.white54),
                         ),
                       ],

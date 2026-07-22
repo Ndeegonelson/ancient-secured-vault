@@ -7,5 +7,10 @@ void main() {
     expect(webAndroidPremiumAnnualTermMonths, 12);
     expect(webAndroidPremiumAnnualPriceLabel, r'$120 USD per year');
     expect(webAndroidPremiumAnnualTermLabel, '12 months of premium access');
+    expect(
+      webAndroidPaystackAnnualPriceDetail,
+      contains('current GHS equivalent'),
+    );
+    expect(webAndroidPaystackAnnualPriceDetail, contains('one year'));
   });
 }

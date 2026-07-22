@@ -1,8 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  createPaystackGhsQuote,
   createPaystackCheckoutSessionHandler,
   handlePaystackEvent,
+  loadUsdGhsRate,
+  parseUsdGhsRateResponse,
   validatePaystackPremiumCharge,
 } = require("../paystack_subscription_checkout");
 
@@ -129,8 +132,12 @@ test("creates a Paystack checkout session and records the request", async () => 
       email: "Reader@Example.COM",
     }),
     getSecretKey: () => "sk_test_paystack",
-    getAmountSubunits: () => "12000",
-    getCurrency: () => "USD",
+    getUsdAmountSubunits: () => "12000",
+    getUsdGhsRate: async () => ({
+      rate: 11.594989,
+      source: "exchangerate-api-v6",
+      updatedAt: Date.parse("2026-07-22T00:02:31.000Z"),
+    }),
     getAppBaseUrl: () => "https://app.test",
   });
   const response = fakeResponse();
@@ -151,10 +158,13 @@ test("creates a Paystack checkout session and records the request", async () => 
   assert.deepEqual(response.body, {
     requestId: "user_subscription_requests-1",
     checkoutUrl: "https://checkout.paystack.com/test",
+    quotedAmountSubunits: 139140,
+    quotedCurrency: "GHS",
+    usdGhsRate: 11.594989,
   });
   assert.equal(capturedPayload.email, "reader@example.com");
-  assert.equal(capturedPayload.amount, 12000);
-  assert.equal(capturedPayload.currency, "USD");
+  assert.equal(capturedPayload.amount, 139140);
+  assert.equal(capturedPayload.currency, "GHS");
   assert.equal(
       capturedPayload.callback_url,
       "https://app.test/?subscription=paystack-success",
@@ -164,11 +174,21 @@ test("creates a Paystack checkout session and records the request", async () => 
     userEmail: "reader@example.com",
     requestedPlan: "premium",
     source: "paystack_checkout",
+    paystackQuotedAmountSubunits: 139140,
+    paystackQuotedCurrency: "GHS",
+    premiumUsdAmountSubunits: 12000,
+    usdGhsRate: 11.594989,
   });
+  const requestData = firestore.data(
+      "user_subscription_requests",
+      "user_subscription_requests-1",
+  );
+  assert.equal(requestData.paystackReference, "paystack-ref-1");
+  assert.equal(requestData.paystackQuotedAmountSubunits, 139140);
+  assert.equal(requestData.paystackQuotedCurrency, "GHS");
   assert.equal(
-      firestore.data("user_subscription_requests", "user_subscription_requests-1")
-          .paystackReference,
-      "paystack-ref-1",
+      requestData.exchangeRateUpdatedAt.toISOString(),
+      "2026-07-22T00:02:31.000Z",
   );
 });
 
@@ -198,8 +218,8 @@ test("active premium users cannot start a Paystack checkout", async () => {
       email: "reader@example.com",
     }),
     getSecretKey: () => "sk_test_paystack",
-    getAmountSubunits: () => "12000",
-    getCurrency: () => "USD",
+    getUsdAmountSubunits: () => "12000",
+    getUsdGhsRate: async () => 11.5,
     getAppBaseUrl: () => "https://app.test",
   });
   const response = fakeResponse();
@@ -213,6 +233,12 @@ test("active premium users cannot start a Paystack checkout", async () => {
 
 test("successful Paystack charge approves request and activates access", async () => {
   const firestore = new FakeFirestore();
+  await firestore.collection("user_subscription_requests").doc("request-1").set({
+    userEmail: "reader@example.com",
+    paystackReference: "paystack-ref-1",
+    paystackQuotedAmountSubunits: 139140,
+    paystackQuotedCurrency: "GHS",
+  });
   const fetchImpl = async (url) => {
     assert.equal(
         url,
@@ -226,8 +252,8 @@ test("successful Paystack charge approves request and activates access", async (
         data: {
           status: "success",
           reference: "paystack-ref-1",
-          amount: 12000,
-          currency: "USD",
+          amount: 139140,
+          currency: "GHS",
           paid_at: "2026-06-13T10:00:00.000Z",
           customer: {
             email: "reader@example.com",
@@ -288,6 +314,12 @@ test("successful Paystack charge approves request and activates access", async (
 
 test("successful Paystack charge without paid_at still sets a renewal date", async () => {
   const firestore = new FakeFirestore();
+  await firestore.collection("user_subscription_requests").doc("request-1").set({
+    userEmail: "reader@example.com",
+    paystackReference: "paystack-ref-no-date",
+    paystackQuotedAmountSubunits: 139140,
+    paystackQuotedCurrency: "GHS",
+  });
   const fetchImpl = async () => ({
     ok: true,
     status: 200,
@@ -296,8 +328,8 @@ test("successful Paystack charge without paid_at still sets a renewal date", asy
       data: {
         status: "success",
         reference: "paystack-ref-no-date",
-        amount: 12000,
-        currency: "USD",
+        amount: 139140,
+        currency: "GHS",
         customer: {
           email: "reader@example.com",
           customer_code: "CUS_test",
@@ -332,6 +364,12 @@ test("successful Paystack charge without paid_at still sets a renewal date", asy
 
 test("duplicate Paystack charge webhooks do not re-verify or re-approve", async () => {
   const firestore = new FakeFirestore();
+  await firestore.collection("user_subscription_requests").doc("request-1").set({
+    userEmail: "reader@example.com",
+    paystackReference: "paystack-ref-1",
+    paystackQuotedAmountSubunits: 139140,
+    paystackQuotedCurrency: "GHS",
+  });
   let verifyCount = 0;
   const fetchImpl = async () => {
     verifyCount += 1;
@@ -343,8 +381,8 @@ test("duplicate Paystack charge webhooks do not re-verify or re-approve", async 
         data: {
           status: "success",
           reference: "paystack-ref-1",
-          amount: 12000,
-          currency: "USD",
+          amount: 139140,
+          currency: "GHS",
           paid_at: "2026-06-13T10:00:00.000Z",
           customer: {
             email: "reader@example.com",
@@ -394,14 +432,113 @@ test("duplicate Paystack charge webhooks do not re-verify or re-approve", async 
 test("Paystack premium activation rejects the wrong amount or currency", () => {
   assert.throws(
       () => validatePaystackPremiumCharge({
-        charge: {amount: 11999, currency: "USD"},
+        charge: {amount: 139139, currency: "GHS"},
+        expectedAmountSubunits: 139140,
+        expectedCurrency: "GHS",
       }),
       /does not match the premium annual price/i,
   );
   assert.throws(
       () => validatePaystackPremiumCharge({
-        charge: {amount: 12000, currency: "GHS"},
+        charge: {amount: 139140, currency: "USD"},
+        expectedAmountSubunits: 139140,
+        expectedCurrency: "GHS",
       }),
       /does not match the premium annual price/i,
+  );
+});
+
+test("converts the USD 120 annual offer to rounded Ghana pesewas", () => {
+  assert.deepEqual(
+      createPaystackGhsQuote({
+        usdAmountSubunits: 12000,
+        usdGhsRate: 11.594989,
+        exchangeRateSource: "exchangerate-api-v6",
+        exchangeRateUpdatedAt: Date.parse("2026-07-22T00:02:31.000Z"),
+      }),
+      {
+        amountSubunits: 139140,
+        currency: "GHS",
+        usdAmountSubunits: 12000,
+        usdGhsRate: 11.594989,
+        exchangeRateSource: "exchangerate-api-v6",
+        exchangeRateUpdatedAt: Date.parse("2026-07-22T00:02:31.000Z"),
+      },
+  );
+});
+
+test("reads fresh USD to GHS rates from both supported response formats", () => {
+  const nowMs = Date.parse("2026-07-22T12:00:00.000Z");
+  assert.equal(
+      parseUsdGhsRateResponse({
+        body: {
+          result: "success",
+          base_code: "USD",
+          time_last_update_unix:
+            Date.parse("2026-07-22T00:02:31.000Z") / 1000,
+          rates: {GHS: 11.594989},
+        },
+        source: "exchangerate-api-v6",
+        nowMs,
+      }).rate,
+      11.594989,
+  );
+  assert.equal(
+      parseUsdGhsRateResponse({
+        body: {
+          base: "USD",
+          time_last_updated:
+            Date.parse("2026-07-22T00:00:01.000Z") / 1000,
+          rates: {GHS: 11.59},
+        },
+        source: "exchangerate-api-v4",
+        nowMs,
+      }).rate,
+      11.59,
+  );
+});
+
+test("uses the v4 compatibility endpoint when the v6 rate fails", async () => {
+  const requestedUrls = [];
+  const nowMs = Date.parse("2026-07-22T12:00:00.000Z");
+  const rate = await loadUsdGhsRate({
+    useCache: false,
+    now: () => nowMs,
+    fetchImpl: async (url) => {
+      requestedUrls.push(url);
+      if (url.includes("open.er-api.com")) {
+        throw new Error("primary unavailable");
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          base: "USD",
+          time_last_updated:
+            Date.parse("2026-07-22T00:00:01.000Z") / 1000,
+          rates: {GHS: 11.59},
+        }),
+      };
+    },
+  });
+
+  assert.equal(rate.rate, 11.59);
+  assert.equal(rate.source, "exchangerate-api-v4");
+  assert.equal(requestedUrls.length, 2);
+});
+
+test("rejects stale exchange rates instead of charging an uncertain amount", () => {
+  assert.throws(
+      () => parseUsdGhsRateResponse({
+        body: {
+          result: "success",
+          base_code: "USD",
+          time_last_update_unix:
+            Date.parse("2026-07-01T00:00:00.000Z") / 1000,
+          rates: {GHS: 11.5},
+        },
+        source: "exchangerate-api-v6",
+        nowMs: Date.parse("2026-07-22T12:00:00.000Z"),
+      }),
+      /invalid or stale/i,
   );
 });

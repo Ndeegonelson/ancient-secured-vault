@@ -7,16 +7,26 @@ const DEFAULT_PAYMENT_METHOD = "paystack";
 const DEFAULT_APP_BASE_URL = "https://vault.ancientsociety.tech";
 const PAYSTACK_INITIALIZE_URL = "https://api.paystack.co/transaction/initialize";
 const PAYSTACK_VERIFY_URL = "https://api.paystack.co/transaction/verify";
-const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 12000;
-const PREMIUM_ANNUAL_CURRENCY = "USD";
+const PRIMARY_USD_RATE_URL = "https://open.er-api.com/v6/latest/USD";
+const FALLBACK_USD_RATE_URL =
+  "https://api.exchangerate-api.com/v4/latest/USD";
+const PREMIUM_ANNUAL_USD_AMOUNT_SUBUNITS = 12000;
+const PAYSTACK_CHARGE_CURRENCY = "GHS";
+const LEGACY_PREMIUM_AMOUNT_SUBUNITS = 12000;
+const LEGACY_PREMIUM_CURRENCY = "USD";
+const EXCHANGE_RATE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const EXCHANGE_RATE_MAX_STALE_MS = 48 * 60 * 60 * 1000;
+const EXCHANGE_RATE_MAX_SOURCE_AGE_MS = 72 * 60 * 60 * 1000;
+
+let cachedUsdGhsRate;
 
 function createPaystackCheckoutSessionHandler({
   firestore,
   verifyAuthToken,
   fetchImpl = fetch,
   getSecretKey = paystackSecretKey,
-  getAmountSubunits = paystackPremiumAmountSubunits,
-  getCurrency = paystackPremiumCurrency,
+  getUsdAmountSubunits = paystackPremiumUsdAmountSubunits,
+  getUsdGhsRate = () => loadUsdGhsRate({fetchImpl}),
   getAppBaseUrl = requestAppBaseUrl,
 } = {}) {
   if (!firestore) throw new TypeError("Firestore is required.");
@@ -36,15 +46,25 @@ function createPaystackCheckoutSessionHandler({
           getSecretKey(),
           "Paystack secret key is not configured.",
       );
-      const amount = readRequiredAmountSubunits(getAmountSubunits());
-      const currency = cleanText(getCurrency()).toUpperCase() ||
-        PREMIUM_ANNUAL_CURRENCY;
+      const usdAmountSubunits = readRequiredAmountSubunits(
+          getUsdAmountSubunits(),
+      );
+      const exchangeRateQuote = readRequiredExchangeRate(
+          await getUsdGhsRate(),
+      );
+      const quote = createPaystackGhsQuote({
+        usdAmountSubunits,
+        usdGhsRate: exchangeRateQuote.rate,
+        exchangeRateSource: exchangeRateQuote.source,
+        exchangeRateUpdatedAt: exchangeRateQuote.updatedAt,
+      });
       const input = readRequestData(request);
       const appBaseUrl = normalizeBaseUrl(getAppBaseUrl(request));
       const requestReference = await createSubscriptionRequest({
         firestore,
         user,
         input,
+        quote,
       });
 
       const callbackUrl = `${appBaseUrl}${DEFAULT_SUCCESS_PATH}`;
@@ -54,10 +74,10 @@ function createPaystackCheckoutSessionHandler({
         url: PAYSTACK_INITIALIZE_URL,
         body: {
           email: user.email,
-          amount,
-          currency,
+          amount: quote.amountSubunits,
+          currency: quote.currency,
           callback_url: callbackUrl,
-          metadata: checkoutMetadata({requestReference, user}),
+          metadata: checkoutMetadata({requestReference, user, quote}),
         },
       });
       const data = paystackResponse.data || {};
@@ -77,6 +97,9 @@ function createPaystackCheckoutSessionHandler({
       response.json({
         requestId: requestReference.id,
         checkoutUrl,
+        quotedAmountSubunits: quote.amountSubunits,
+        quotedCurrency: quote.currency,
+        usdGhsRate: quote.usdGhsRate,
       });
     } catch (error) {
       sendHttpError(response, error);
@@ -88,8 +111,8 @@ function createPaystackWebhookHandler({
   firestore,
   fetchImpl = fetch,
   getSecretKey = paystackSecretKey,
-  getAmountSubunits = paystackPremiumAmountSubunits,
-  getCurrency = paystackPremiumCurrency,
+  getAmountSubunits = paystackLegacyAmountSubunits,
+  getCurrency = paystackLegacyCurrency,
 } = {}) {
   if (!firestore) throw new TypeError("Firestore is required.");
 
@@ -125,8 +148,8 @@ async function handlePaystackEvent({
   event,
   fetchImpl = fetch,
   secretKey,
-  expectedAmountSubunits = PREMIUM_ANNUAL_AMOUNT_SUBUNITS,
-  expectedCurrency = PREMIUM_ANNUAL_CURRENCY,
+  expectedAmountSubunits = LEGACY_PREMIUM_AMOUNT_SUBUNITS,
+  expectedCurrency = LEGACY_PREMIUM_CURRENCY,
 }) {
   if (!event || event.event !== "charge.success") return;
 
@@ -188,11 +211,6 @@ async function approveSuccessfulPaystackCharge({
   expectedAmountSubunits,
   expectedCurrency,
 }) {
-  validatePaystackPremiumCharge({
-    charge,
-    expectedAmountSubunits,
-    expectedCurrency,
-  });
   const metadata = charge.metadata || {};
   const requestId = cleanText(metadata.subscriptionRequestId);
   const customer = charge.customer || {};
@@ -201,22 +219,47 @@ async function approveSuccessfulPaystackCharge({
     return {ignored: true, reason: "missing_charge_metadata"};
   }
 
+  const requestRef = firestore
+      .collection("user_subscription_requests")
+      .doc(requestId);
+  const requestSnapshot = await requestRef.get();
+  const requestData = requestSnapshot.exists ? requestSnapshot.data() : {};
+  const storedUserEmail = cleanEmail(requestData && requestData.userEmail);
+  if (storedUserEmail && storedUserEmail !== userEmail) {
+    throw httpError(400, "Verified Paystack customer does not match checkout.");
+  }
+
+  const recordedReference = cleanText(
+      requestData &&
+      (requestData.paystackReference || requestData.paymentReference),
+  );
+  if (recordedReference && recordedReference !== cleanText(charge.reference)) {
+    throw httpError(400, "Verified Paystack reference does not match checkout.");
+  }
+
+  const quotedAmountSubunits =
+    requestData && requestData.paystackQuotedAmountSubunits;
+  const quotedCurrency =
+    requestData && requestData.paystackQuotedCurrency;
+  validatePaystackPremiumCharge({
+    charge,
+    expectedAmountSubunits: quotedAmountSubunits || expectedAmountSubunits,
+    expectedCurrency: quotedCurrency || expectedCurrency,
+  });
+
   const expiresAt = paystackSubscriptionExpiresAt(charge);
 
-  await firestore
-      .collection("user_subscription_requests")
-      .doc(requestId)
-      .set({
-        userEmail,
-        requestedPlan: cleanText(metadata.requestedPlan) || DEFAULT_PLAN,
-        paymentMethod: DEFAULT_PAYMENT_METHOD,
-        paymentStatus: "confirmed",
-        paymentReference: cleanText(charge.reference),
-        paystackReference: cleanText(charge.reference),
-        status: "approved",
-        source: "paystack_checkout",
-        updatedAt: FieldValue.serverTimestamp(),
-      }, {merge: true});
+  await requestRef.set({
+    userEmail,
+    requestedPlan: cleanText(metadata.requestedPlan) || DEFAULT_PLAN,
+    paymentMethod: DEFAULT_PAYMENT_METHOD,
+    paymentStatus: "confirmed",
+    paymentReference: cleanText(charge.reference),
+    paystackReference: cleanText(charge.reference),
+    status: "approved",
+    source: "paystack_checkout",
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
 
   await firestore.collection("users").doc(userEmail).set({
     email: userEmail,
@@ -239,8 +282,8 @@ async function approveSuccessfulPaystackCharge({
 
 function validatePaystackPremiumCharge({
   charge,
-  expectedAmountSubunits = PREMIUM_ANNUAL_AMOUNT_SUBUNITS,
-  expectedCurrency = PREMIUM_ANNUAL_CURRENCY,
+  expectedAmountSubunits = LEGACY_PREMIUM_AMOUNT_SUBUNITS,
+  expectedCurrency = LEGACY_PREMIUM_CURRENCY,
 }) {
   const paidAmount = Number.parseInt(cleanText(charge && charge.amount), 10);
   const paidCurrency = cleanText(charge && charge.currency).toUpperCase();
@@ -262,6 +305,119 @@ function paystackSubscriptionExpiresAt(charge, now = new Date()) {
   const expiresAt = new Date(safeBaseDate.getTime());
   expiresAt.setUTCFullYear(expiresAt.getUTCFullYear() + 1);
   return expiresAt;
+}
+
+async function loadUsdGhsRate({
+  fetchImpl = fetch,
+  now = () => Date.now(),
+  useCache = true,
+} = {}) {
+  const nowMs = now();
+  if (useCache && cachedUsdGhsRate &&
+      nowMs - cachedUsdGhsRate.cachedAt <= EXCHANGE_RATE_CACHE_TTL_MS) {
+    return cachedUsdGhsRate;
+  }
+
+  const endpoints = [
+    {url: PRIMARY_USD_RATE_URL, source: "exchangerate-api-v6"},
+    {url: FALLBACK_USD_RATE_URL, source: "exchangerate-api-v4"},
+  ];
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetchImpl(endpoint.url, {
+        method: "GET",
+        headers: {"Accept": "application/json"},
+      });
+      const body = await response.json();
+      if (!response.ok) continue;
+
+      const quote = parseUsdGhsRateResponse({
+        body,
+        source: endpoint.source,
+        nowMs,
+      });
+      cachedUsdGhsRate = {...quote, cachedAt: nowMs};
+      return cachedUsdGhsRate;
+    } catch (_) {
+      // Try the compatibility endpoint, then a recently cached safe quote.
+    }
+  }
+
+  if (useCache && cachedUsdGhsRate &&
+      nowMs - cachedUsdGhsRate.cachedAt <= EXCHANGE_RATE_MAX_STALE_MS) {
+    return cachedUsdGhsRate;
+  }
+
+  throw httpError(
+      503,
+      "Currency conversion is temporarily unavailable. Please try again.",
+  );
+}
+
+function parseUsdGhsRateResponse({body, source, nowMs = Date.now()}) {
+  const baseCurrency = cleanText(body && (body.base_code || body.base))
+      .toUpperCase();
+  const result = cleanText(body && body.result).toLowerCase();
+  if (baseCurrency !== "USD" || (result && result !== "success")) {
+    throw new TypeError("Exchange-rate response has the wrong base currency.");
+  }
+
+  const rate = Number(body && body.rates && body.rates.GHS);
+  const updatedSeconds = Number(
+      body && (body.time_last_update_unix || body.time_last_updated),
+  );
+  const updatedAt = updatedSeconds * 1000;
+  const sourceAgeMs = nowMs - updatedAt;
+  if (!Number.isFinite(rate) || rate <= 0 || rate > 1000 ||
+      !Number.isFinite(updatedAt) || updatedAt <= 0 ||
+      sourceAgeMs > EXCHANGE_RATE_MAX_SOURCE_AGE_MS ||
+      sourceAgeMs < -24 * 60 * 60 * 1000) {
+    throw new TypeError("Exchange-rate response is invalid or stale.");
+  }
+
+  return {rate, source, updatedAt};
+}
+
+function readRequiredExchangeRate(value) {
+  const quote = value && typeof value === "object" ? value : {rate: value};
+  const rate = Number(quote.rate);
+  if (!Number.isFinite(rate) || rate <= 0 || rate > 1000) {
+    throw httpError(503, "Currency conversion returned an invalid rate.");
+  }
+
+  const updatedAt = Number(quote.updatedAt) || Date.now();
+  return {
+    rate,
+    source: cleanText(quote.source) || "configured-rate-provider",
+    updatedAt,
+  };
+}
+
+function createPaystackGhsQuote({
+  usdAmountSubunits,
+  usdGhsRate,
+  exchangeRateSource = "configured-rate-provider",
+  exchangeRateUpdatedAt = Date.now(),
+}) {
+  const safeUsdAmount = readRequiredAmountSubunits(usdAmountSubunits);
+  const safeRate = readRequiredExchangeRate({
+    rate: usdGhsRate,
+    source: exchangeRateSource,
+    updatedAt: exchangeRateUpdatedAt,
+  });
+  const amountSubunits = Math.round(safeUsdAmount * safeRate.rate);
+  if (!Number.isSafeInteger(amountSubunits) || amountSubunits < 100) {
+    throw httpError(503, "Currency conversion returned an invalid amount.");
+  }
+
+  return {
+    amountSubunits,
+    currency: PAYSTACK_CHARGE_CURRENCY,
+    usdAmountSubunits: safeUsdAmount,
+    usdGhsRate: safeRate.rate,
+    exchangeRateSource: safeRate.source,
+    exchangeRateUpdatedAt: safeRate.updatedAt,
+  };
 }
 
 async function startPaymentWebhookEvent({
@@ -391,16 +547,20 @@ function safeCompare(left, right) {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function checkoutMetadata({requestReference, user}) {
+function checkoutMetadata({requestReference, user, quote}) {
   return {
     subscriptionRequestId: requestReference.id,
     userEmail: user.email,
     requestedPlan: DEFAULT_PLAN,
     source: "paystack_checkout",
+    paystackQuotedAmountSubunits: quote.amountSubunits,
+    paystackQuotedCurrency: quote.currency,
+    premiumUsdAmountSubunits: quote.usdAmountSubunits,
+    usdGhsRate: quote.usdGhsRate,
   };
 }
 
-async function createSubscriptionRequest({firestore, user, input}) {
+async function createSubscriptionRequest({firestore, user, input, quote}) {
   const reference = firestore.collection("user_subscription_requests").doc();
   await reference.set({
     userEmail: user.email,
@@ -410,6 +570,12 @@ async function createSubscriptionRequest({firestore, user, input}) {
     message: cleanText(input.message),
     source: "paystack_checkout",
     status: "open",
+    paystackQuotedAmountSubunits: quote.amountSubunits,
+    paystackQuotedCurrency: quote.currency,
+    premiumUsdAmountSubunits: quote.usdAmountSubunits,
+    usdGhsRate: quote.usdGhsRate,
+    exchangeRateSource: quote.exchangeRateSource,
+    exchangeRateUpdatedAt: new Date(quote.exchangeRateUpdatedAt),
     createdAt: FieldValue.serverTimestamp(),
   });
 
@@ -498,12 +664,16 @@ function paystackSecretKey() {
   return cleanText(process.env.PAYSTACK_SECRET_KEY);
 }
 
-function paystackPremiumAmountSubunits() {
-  return PREMIUM_ANNUAL_AMOUNT_SUBUNITS.toString();
+function paystackPremiumUsdAmountSubunits() {
+  return PREMIUM_ANNUAL_USD_AMOUNT_SUBUNITS.toString();
 }
 
-function paystackPremiumCurrency() {
-  return PREMIUM_ANNUAL_CURRENCY;
+function paystackLegacyAmountSubunits() {
+  return LEGACY_PREMIUM_AMOUNT_SUBUNITS.toString();
+}
+
+function paystackLegacyCurrency() {
+  return LEGACY_PREMIUM_CURRENCY;
 }
 
 function normalizeBaseUrl(value) {
@@ -572,6 +742,9 @@ function cleanEmail(value) {
 module.exports = {
   createPaystackCheckoutSessionHandler,
   createPaystackWebhookHandler,
+  createPaystackGhsQuote,
   handlePaystackEvent,
+  loadUsdGhsRate,
+  parseUsdGhsRateResponse,
   validatePaystackPremiumCharge,
 };
