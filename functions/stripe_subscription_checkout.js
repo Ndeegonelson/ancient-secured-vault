@@ -3,7 +3,7 @@ const {FieldValue} = require("firebase-admin/firestore");
 const DEFAULT_PLAN = "premium";
 const DEFAULT_SUCCESS_PATH = "/?subscription=stripe-success";
 const DEFAULT_CANCEL_PATH = "/?subscription=stripe-cancelled";
-const DEFAULT_APP_BASE_URL = "https://vault.ancient.tech";
+const DEFAULT_APP_BASE_URL = "https://vault.ancientsociety.tech";
 const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 12000;
 const PREMIUM_ANNUAL_CURRENCY = "usd";
 
