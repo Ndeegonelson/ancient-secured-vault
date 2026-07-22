@@ -132,9 +132,15 @@ Required secrets/config values include:
 - `PAYSTACK_SECRET_KEY`
 - `APP_BASE_URL`
 
-The web and Android premium plan is **USD 120 per year**. Paystack's
-amount and currency are enforced in the backend as `12000` USD subunits and
-one calendar year of access. The Stripe Price referenced by
+The web and Android premium plan is **USD 120 per year**. Stripe charges the
+canonical USD price. Paystack obtains a server-side USD-to-GHS quote, rounds
+the result to Ghana pesewas, records the exact quote with the checkout request,
+and verifies the successful charge against that stored amount before granting
+one calendar year of access. Exchange-rate lookup uses the v6 endpoint first,
+then its v4 compatibility endpoint, with a bounded cache for temporary provider
+outages. Checkout fails closed when no trustworthy quote is available.
+
+The Stripe Price referenced by
 `STRIPE_PREMIUM_PRICE_ID` must be an active recurring USD 120 yearly Price;
 checkout rejects any mismatched Price instead of charging the wrong amount.
 
@@ -147,6 +153,43 @@ Example secret update:
 ```powershell
 firebase functions:secrets:set APP_BASE_URL --project ancient--docs
 ```
+
+### Production payment cutover
+
+Perform the cutover only after both sandbox providers pass end-to-end checkout,
+webhook, entitlement, and expiry testing.
+
+Before enabling real-money Stripe or Paystack checkout inside the
+Google-Play-distributed Android app, confirm that the app and its target market
+are enrolled in an applicable Google Play alternative-billing or external
+payments program. If they are not, keep these providers on the web and use
+Google Play Billing for Android digital subscriptions. Sandbox approval does
+not replace this production policy requirement.
+
+1. In Stripe live mode, create an active recurring USD 120 yearly Price.
+2. In Stripe live mode, register the deployed `stripeWebhook` HTTPS endpoint
+   for `checkout.session.completed`, `checkout.session.expired`,
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `invoice.paid`, and
+   `invoice.payment_failed`.
+3. In Paystack live mode, register the deployed `paystackWebhook` HTTPS
+   endpoint. The backend validates `x-paystack-signature` and re-verifies the
+   transaction before granting access.
+4. Set matching live versions of `STRIPE_SECRET_KEY`,
+   `STRIPE_PREMIUM_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`, and
+   `PAYSTACK_SECRET_KEY`. Keep `APP_BASE_URL` set to
+   `https://vault.ancientsociety.tech`.
+5. Redeploy all five payment functions together so no function is left on a
+   stale secret version:
+
+```powershell
+firebase deploy --only "functions:createStripeCheckoutSession,functions:createStripeBillingPortalSession,functions:stripeWebhook,functions:createPaystackCheckoutSession,functions:paystackWebhook" --project ancient--docs
+```
+
+6. Complete one low-risk live Stripe payment and one low-risk live Paystack
+   payment using dedicated accounts. Confirm the provider transaction, webhook
+   audit record, premium entitlement, renewal/expiry date, and billing portal
+   before announcing production availability.
 
 ## Verification Checklist
 

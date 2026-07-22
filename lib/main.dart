@@ -8839,6 +8839,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String readerSubscriptionDashboardDetail(_ReaderDashboardOverview overview) {
+    if (userAccess.canAccessMainVault && !userAccess.isSubscriptionExpired) {
+      return readerSubscriptionDetail();
+    }
+
     final latestManualProof = overview.latestManualProofRequest;
     if (latestManualProof != null) {
       return switch (latestManualProof.status) {
