@@ -3,6 +3,8 @@ const {FieldValue} = require("firebase-admin/firestore");
 const DEFAULT_PLAN = "premium";
 const DEFAULT_SUCCESS_PATH = "?subscription=stripe-success";
 const DEFAULT_CANCEL_PATH = "?subscription=stripe-cancelled";
+const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 10000;
+const PREMIUM_ANNUAL_CURRENCY = "usd";
 
 function createStripeCheckoutSessionHandler({
   firestore,
@@ -29,6 +31,8 @@ function createStripeCheckoutSessionHandler({
           "Stripe premium price id is not configured.",
       );
       const stripe = stripeClientFactory();
+      const price = await stripe.prices.retrieve(priceId);
+      validateStripePremiumPrice(price);
       const input = readRequestData(request);
       const appBaseUrl = normalizeBaseUrl(getAppBaseUrl(request));
       const requestReference = await createSubscriptionRequest({
@@ -65,6 +69,27 @@ function createStripeCheckoutSessionHandler({
       sendHttpError(response, error);
     }
   };
+}
+
+function validateStripePremiumPrice(price) {
+  const recurring = price && price.recurring;
+  const intervalCount = Number(recurring && recurring.interval_count || 1);
+  const isAnnualPremiumPrice = Boolean(
+      price &&
+      price.active !== false &&
+      price.unit_amount === PREMIUM_ANNUAL_AMOUNT_SUBUNITS &&
+      cleanText(price.currency).toLowerCase() === PREMIUM_ANNUAL_CURRENCY &&
+      recurring &&
+      recurring.interval === "year" &&
+      intervalCount === 1,
+  );
+
+  if (!isAnnualPremiumPrice) {
+    throw httpError(
+        500,
+        "Stripe premium price must be an active USD 100 yearly price.",
+    );
+  }
 }
 
 function createStripeWebhookHandler({
@@ -722,4 +747,5 @@ module.exports = {
   createStripeBillingPortalSessionHandler,
   createStripeWebhookHandler,
   handleStripeEvent,
+  validateStripePremiumPrice,
 };

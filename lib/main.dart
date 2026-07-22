@@ -41,6 +41,7 @@ import 'services/user_access_state.dart';
 import 'services/user_subscription_checkout_client.dart';
 import 'services/user_subscription_request_repository.dart';
 import 'services/payment_webhook_event_repository.dart';
+import 'services/premium_subscription_offer.dart';
 import 'services/vault_document_metadata.dart';
 import 'services/vault_search_snippet.dart';
 import 'services/secure_vault_search_client.dart';
@@ -11068,8 +11069,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ],
                           ),
-                        )
-                      else
+                        ),
+                      if (!isIosAppShell) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.withValues(alpha: 0.07),
+                            border: Border.all(color: Colors.greenAccent),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                webAndroidPremiumAnnualPriceLabel,
+                                style: TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              SizedBox(height: 3),
+                              Text(
+                                webAndroidPremiumAnnualTermLabel,
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         DropdownButtonFormField<UserSubscriptionPaymentMethod>(
                           initialValue: paymentMethod,
                           dropdownColor: const Color(0xFF1A1D25),
@@ -11104,6 +11133,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             });
                           },
                         ),
+                      ],
                       if (paymentMethod ==
                           UserSubscriptionPaymentMethod.manual) ...[
                         const SizedBox(height: 12),
@@ -11157,13 +11187,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           UserSubscriptionPaymentMethod.stripe) ...[
                         const SizedBox(height: 12),
                         const Text(
-                          'Stripe opens a secure checkout page. Your access updates after payment is confirmed.',
+                          'Stripe securely charges \$100 USD for one year. Your access updates after payment is confirmed.',
                           style: TextStyle(color: Colors.white54),
                         ),
                       ] else ...[
                         const SizedBox(height: 12),
                         const Text(
-                          'Paystack opens a secure checkout page. Your access updates after payment is confirmed.',
+                          'Paystack securely charges \$100 USD for one year. Your access updates after payment is confirmed.',
                           style: TextStyle(color: Colors.white54),
                         ),
                       ],

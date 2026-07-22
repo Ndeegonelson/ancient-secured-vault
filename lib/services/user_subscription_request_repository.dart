@@ -3,8 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'user_access_repository.dart';
 import 'user_access_state.dart';
 
-const Duration defaultAdminManagedSubscriptionDuration = Duration(days: 30);
-
 enum UserSubscriptionRequestStatus {
   open,
   reviewing,
@@ -455,7 +453,28 @@ bool isAdminManagedSubscriptionPaymentMethod(
 }
 
 DateTime defaultAdminManagedSubscriptionExpiresAt({DateTime? now}) {
-  return (now ?? DateTime.now()).add(defaultAdminManagedSubscriptionDuration);
+  final start = now ?? DateTime.now();
+  return start.isUtc
+      ? DateTime.utc(
+          start.year + 1,
+          start.month,
+          start.day,
+          start.hour,
+          start.minute,
+          start.second,
+          start.millisecond,
+          start.microsecond,
+        )
+      : DateTime(
+          start.year + 1,
+          start.month,
+          start.day,
+          start.hour,
+          start.minute,
+          start.second,
+          start.millisecond,
+          start.microsecond,
+        );
 }
 
 UserSubscriptionPaymentStatus readUserSubscriptionPaymentStatus(dynamic value) {

@@ -166,8 +166,6 @@ exports.createPaystackCheckoutSession = onRequest(
       timeoutSeconds: 30,
       secrets: [
         "PAYSTACK_SECRET_KEY",
-        "PAYSTACK_PREMIUM_AMOUNT_SUBUNITS",
-        "PAYSTACK_PREMIUM_CURRENCY",
         "APP_BASE_URL",
       ],
     },

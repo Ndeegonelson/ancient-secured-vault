@@ -4,6 +4,7 @@ const {
   createStripeBillingPortalSessionHandler,
   createStripeCheckoutSessionHandler,
   handleStripeEvent,
+  validateStripePremiumPrice,
 } = require("../stripe_subscription_checkout");
 
 class FakeFirestore {
@@ -124,6 +125,15 @@ test("creates a Stripe checkout session and records the request", async () => {
   const firestore = new FakeFirestore();
   let capturedSessionPayload;
   const stripe = {
+    prices: {
+      retrieve: async (priceId) => ({
+        id: priceId,
+        active: true,
+        unit_amount: 10000,
+        currency: "usd",
+        recurring: {interval: "year", interval_count: 1},
+      }),
+    },
     checkout: {
       sessions: {
         create: async (payload) => {
@@ -187,6 +197,54 @@ test("creates a Stripe checkout session and records the request", async () => {
           .paymentReference,
       "cs_test_123",
   );
+});
+
+test("Stripe checkout rejects a price that is not USD 100 yearly", async () => {
+  const firestore = new FakeFirestore();
+  let checkoutWasCreated = false;
+  const handler = createStripeCheckoutSessionHandler({
+    firestore,
+    verifyAuthToken: async () => ({
+      uid: "reader-1",
+      email: "reader@example.com",
+    }),
+    stripeClientFactory: () => ({
+      prices: {
+        retrieve: async () => ({
+          active: true,
+          unit_amount: 12000,
+          currency: "usd",
+          recurring: {interval: "year", interval_count: 1},
+        }),
+      },
+      checkout: {
+        sessions: {
+          create: async () => {
+            checkoutWasCreated = true;
+            return {id: "cs_wrong", url: "https://checkout.test"};
+          },
+        },
+      },
+    }),
+    getPriceId: () => "price_wrong",
+    getAppBaseUrl: () => "https://app.test",
+  });
+  const response = fakeResponse();
+
+  await handler(fakeRequest(), response);
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(checkoutWasCreated, false);
+  assert.match(response.body.error.message, /USD 100 yearly/i);
+});
+
+test("Stripe premium price validation accepts the canonical annual price", () => {
+  assert.doesNotThrow(() => validateStripePremiumPrice({
+    active: true,
+    unit_amount: 10000,
+    currency: "usd",
+    recurring: {interval: "year", interval_count: 1},
+  }));
 });
 
 test("active premium users cannot start a Stripe checkout", async () => {

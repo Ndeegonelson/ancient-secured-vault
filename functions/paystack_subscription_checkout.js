@@ -6,7 +6,8 @@ const DEFAULT_SUCCESS_PATH = "?subscription=paystack-success";
 const DEFAULT_PAYMENT_METHOD = "paystack";
 const PAYSTACK_INITIALIZE_URL = "https://api.paystack.co/transaction/initialize";
 const PAYSTACK_VERIFY_URL = "https://api.paystack.co/transaction/verify";
-const DEFAULT_SUBSCRIPTION_DAYS = 30;
+const PREMIUM_ANNUAL_AMOUNT_SUBUNITS = 10000;
+const PREMIUM_ANNUAL_CURRENCY = "USD";
 
 function createPaystackCheckoutSessionHandler({
   firestore,
@@ -35,7 +36,8 @@ function createPaystackCheckoutSessionHandler({
           "Paystack secret key is not configured.",
       );
       const amount = readRequiredAmountSubunits(getAmountSubunits());
-      const currency = cleanText(getCurrency()).toUpperCase() || "GHS";
+      const currency = cleanText(getCurrency()).toUpperCase() ||
+        PREMIUM_ANNUAL_CURRENCY;
       const input = readRequestData(request);
       const appBaseUrl = normalizeBaseUrl(getAppBaseUrl(request));
       const requestReference = await createSubscriptionRequest({
@@ -86,6 +88,8 @@ function createPaystackWebhookHandler({
   firestore,
   fetchImpl = fetch,
   getSecretKey = paystackSecretKey,
+  getAmountSubunits = paystackPremiumAmountSubunits,
+  getCurrency = paystackPremiumCurrency,
 } = {}) {
   if (!firestore) throw new TypeError("Firestore is required.");
 
@@ -99,7 +103,16 @@ function createPaystackWebhookHandler({
       verifyPaystackSignature({request, secretKey});
       const event = request.body || {};
 
-      await handlePaystackEvent({firestore, event, fetchImpl, secretKey});
+      await handlePaystackEvent({
+        firestore,
+        event,
+        fetchImpl,
+        secretKey,
+        expectedAmountSubunits: readRequiredAmountSubunits(
+            getAmountSubunits(),
+        ),
+        expectedCurrency: cleanText(getCurrency()).toUpperCase(),
+      });
       response.json({received: true});
     } catch (error) {
       sendHttpError(response, error);
@@ -107,7 +120,14 @@ function createPaystackWebhookHandler({
   };
 }
 
-async function handlePaystackEvent({firestore, event, fetchImpl = fetch, secretKey}) {
+async function handlePaystackEvent({
+  firestore,
+  event,
+  fetchImpl = fetch,
+  secretKey,
+  expectedAmountSubunits = PREMIUM_ANNUAL_AMOUNT_SUBUNITS,
+  expectedCurrency = PREMIUM_ANNUAL_CURRENCY,
+}) {
   if (!event || event.event !== "charge.success") return;
 
   const data = event.data || {};
@@ -144,6 +164,8 @@ async function handlePaystackEvent({firestore, event, fetchImpl = fetch, secretK
     const result = await approveSuccessfulPaystackCharge({
       firestore,
       charge: verified,
+      expectedAmountSubunits,
+      expectedCurrency,
     });
     await finishPaymentWebhookEvent({
       eventRef: eventRecord.ref,
@@ -160,7 +182,17 @@ async function handlePaystackEvent({firestore, event, fetchImpl = fetch, secretK
   }
 }
 
-async function approveSuccessfulPaystackCharge({firestore, charge}) {
+async function approveSuccessfulPaystackCharge({
+  firestore,
+  charge,
+  expectedAmountSubunits,
+  expectedCurrency,
+}) {
+  validatePaystackPremiumCharge({
+    charge,
+    expectedAmountSubunits,
+    expectedCurrency,
+  });
   const metadata = charge.metadata || {};
   const requestId = cleanText(metadata.subscriptionRequestId);
   const customer = charge.customer || {};
@@ -205,14 +237,31 @@ async function approveSuccessfulPaystackCharge({firestore, charge}) {
   };
 }
 
+function validatePaystackPremiumCharge({
+  charge,
+  expectedAmountSubunits = PREMIUM_ANNUAL_AMOUNT_SUBUNITS,
+  expectedCurrency = PREMIUM_ANNUAL_CURRENCY,
+}) {
+  const paidAmount = Number.parseInt(cleanText(charge && charge.amount), 10);
+  const paidCurrency = cleanText(charge && charge.currency).toUpperCase();
+  const expectedAmount = readRequiredAmountSubunits(expectedAmountSubunits);
+  const expectedCurrencyCode = cleanText(expectedCurrency).toUpperCase();
+
+  if (paidAmount !== expectedAmount || paidCurrency !== expectedCurrencyCode) {
+    throw httpError(
+        400,
+        "Verified Paystack payment does not match the premium annual price.",
+    );
+  }
+}
+
 function paystackSubscriptionExpiresAt(charge, now = new Date()) {
   const paidAt = cleanText(charge && (charge.paid_at || charge.paidAt));
   const baseDate = paidAt ? new Date(Date.parse(paidAt)) : now;
   const safeBaseDate = Number.isFinite(baseDate.getTime()) ? baseDate : now;
-  return new Date(
-      safeBaseDate.getTime() +
-      DEFAULT_SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000,
-  );
+  const expiresAt = new Date(safeBaseDate.getTime());
+  expiresAt.setUTCFullYear(expiresAt.getUTCFullYear() + 1);
+  return expiresAt;
 }
 
 async function startPaymentWebhookEvent({
@@ -468,11 +517,11 @@ function paystackSecretKey() {
 }
 
 function paystackPremiumAmountSubunits() {
-  return cleanText(process.env.PAYSTACK_PREMIUM_AMOUNT_SUBUNITS);
+  return PREMIUM_ANNUAL_AMOUNT_SUBUNITS.toString();
 }
 
 function paystackPremiumCurrency() {
-  return cleanText(process.env.PAYSTACK_PREMIUM_CURRENCY || "GHS");
+  return PREMIUM_ANNUAL_CURRENCY;
 }
 
 function normalizeBaseUrl(value) {
@@ -542,4 +591,5 @@ module.exports = {
   createPaystackCheckoutSessionHandler,
   createPaystackWebhookHandler,
   handlePaystackEvent,
+  validatePaystackPremiumCharge,
 };

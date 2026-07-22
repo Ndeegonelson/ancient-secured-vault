@@ -166,12 +166,12 @@ void main() {
     );
   });
 
-  test('admin-managed subscription approvals default to 30 days', () {
+  test('admin-managed subscription approvals default to one year', () {
     final now = DateTime(2026, 6, 14, 12);
 
     expect(
       defaultAdminManagedSubscriptionExpiresAt(now: now),
-      DateTime(2026, 7, 14, 12),
+      DateTime(2027, 6, 14, 12),
     );
   });
 
