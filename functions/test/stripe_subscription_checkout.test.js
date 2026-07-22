@@ -305,6 +305,7 @@ test("completed checkout approves the request and activates user access", async 
       data: {
         object: {
           id: "cs_test_123",
+          created: Date.parse("2026-07-22T16:29:00.000Z") / 1000,
           customer: "cus_test_123",
           subscription: "sub_test_123",
           customer_email: "reader@example.com",
@@ -333,6 +334,16 @@ test("completed checkout approves the request and activates user access", async 
   assert.equal(
       firestore.data("users", "reader@example.com").subscriptionProvider,
       "stripe",
+  );
+  assert.equal(
+      firestore.data("users", "reader@example.com")
+          .subscriptionExpiresAt.toISOString(),
+      "2027-07-22T16:29:00.000Z",
+  );
+  assert.equal(
+      firestore.data("user_subscription_requests", "request-1")
+          .subscriptionExpiresAt.toISOString(),
+      "2027-07-22T16:29:00.000Z",
   );
   assert.equal(
       firestore.data("payment_webhook_events", "stripe_evt_checkout_complete")
@@ -413,6 +424,43 @@ test("updated active subscription keeps premium vault access", async () => {
   assert.equal(access.stripeSubscriptionStatus, "active");
   assert.equal(access.stripeSubscriptionId, "sub_test_123");
   assert.ok(access.subscriptionExpiresAt instanceof Date);
+});
+
+test("created subscription reads renewal date from current Stripe item", async () => {
+  const firestore = new FakeFirestore();
+
+  await handleStripeEvent({
+    firestore,
+    event: {
+      id: "evt_subscription_created",
+      type: "customer.subscription.created",
+      data: {
+        object: {
+          id: "sub_test_created",
+          customer: "cus_test_created",
+          status: "active",
+          items: {
+            data: [
+              {
+                current_period_end:
+                  Date.parse("2027-07-22T16:29:00.000Z") / 1000,
+              },
+            ],
+          },
+          metadata: {
+            userEmail: "reader@example.com",
+          },
+        },
+      },
+    },
+  });
+
+  const access = firestore.data("users", "reader@example.com");
+  assert.equal(access.subscriptionStatus, "active");
+  assert.equal(
+      access.subscriptionExpiresAt.toISOString(),
+      "2027-07-22T16:29:00.000Z",
+  );
 });
 
 test("deleted subscription removes protected vault access", async () => {

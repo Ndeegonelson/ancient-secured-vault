@@ -199,7 +199,8 @@ async function dispatchStripeEvent({firestore, event}) {
     });
   }
 
-  if (event.type === "customer.subscription.updated" ||
+  if (event.type === "customer.subscription.created" ||
+      event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted") {
     return syncStripeSubscriptionAccess({
       firestore,
@@ -243,6 +244,7 @@ async function approveCompletedCheckoutSession({firestore, session}) {
   if (!requestId || !userEmail) {
     return {ignored: true, reason: "missing_checkout_metadata"};
   }
+  const subscriptionExpiresAt = stripeCheckoutAnnualExpiresAt(session);
 
   const requestRef = firestore
       .collection("user_subscription_requests")
@@ -257,6 +259,7 @@ async function approveCompletedCheckoutSession({firestore, session}) {
     source: "stripe_checkout",
     stripeCustomerId: cleanText(session.customer),
     stripeSubscriptionId: cleanText(session.subscription),
+    subscriptionExpiresAt,
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
 
@@ -268,6 +271,7 @@ async function approveCompletedCheckoutSession({firestore, session}) {
     subscriptionProvider: "stripe",
     stripeCustomerId: cleanText(session.customer),
     stripeSubscriptionId: cleanText(session.subscription),
+    subscriptionExpiresAt,
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
 
@@ -357,9 +361,7 @@ async function syncStripeSubscriptionAccess({
   const mappedAccess = stripeSubscriptionAccessUpdate({
     status: deleted ? "canceled" : subscription.status,
   });
-  const subscriptionExpiresAt = stripeTimestampToDate(
-      subscription.current_period_end,
-  );
+  const subscriptionExpiresAt = stripeSubscriptionExpiresAt(subscription);
 
   await firestore.collection("users").doc(userEmail).set({
     email: userEmail,
@@ -525,6 +527,33 @@ function stripeTimestampToDate(value) {
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds <= 0) return null;
   return new Date(seconds * 1000);
+}
+
+function stripeSubscriptionExpiresAt(subscription) {
+  const itemPeriods = subscription && subscription.items &&
+    Array.isArray(subscription.items.data) ?
+    subscription.items.data.map((item) => item && item.current_period_end) :
+    [];
+  const periodEnds = [
+    subscription && subscription.current_period_end,
+    ...itemPeriods,
+  ]
+      .map(Number)
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (periodEnds.length === 0) return null;
+  return stripeTimestampToDate(Math.min(...periodEnds));
+}
+
+function stripeCheckoutAnnualExpiresAt(session, now = new Date()) {
+  const startedAt = stripeTimestampToDate(session && session.created) || now;
+  const expiresAt = new Date(startedAt.getTime());
+  const originalMonth = expiresAt.getUTCMonth();
+  expiresAt.setUTCFullYear(expiresAt.getUTCFullYear() + 1);
+  if (expiresAt.getUTCMonth() !== originalMonth) {
+    expiresAt.setUTCDate(0);
+  }
+  return expiresAt;
 }
 
 async function createSubscriptionRequest({firestore, user, input}) {
