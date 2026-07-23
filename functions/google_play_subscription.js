@@ -17,6 +17,21 @@ const ENTITLED_SUBSCRIPTION_STATES = new Set([
   "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
   "SUBSCRIPTION_STATE_CANCELED",
 ]);
+const GOOGLE_PLAY_NOTIFICATION_TYPES = Object.freeze({
+  1: "recovered",
+  2: "renewed",
+  3: "cancelled",
+  4: "purchased",
+  5: "on_hold",
+  6: "in_grace_period",
+  7: "restarted",
+  9: "deferred",
+  10: "paused",
+  11: "pause_schedule_changed",
+  12: "revoked",
+  13: "expired",
+  19: "price_step_up_consent_updated",
+});
 
 function createVerifyGooglePlayPurchaseHandler({
   firestore,
@@ -82,6 +97,48 @@ function createVerifyGooglePlayPurchaseHandler({
           error.message : "Google Play purchase verification failed.",
       });
     }
+  };
+}
+
+function createGooglePlayRtdnHandler({
+  firestore,
+  fetchSubscription = defaultFetchSubscription,
+} = {}) {
+  if (!firestore) throw new TypeError("Firestore is required.");
+
+  return async (event) => {
+    const notification = decodeGooglePlayRtdn(event);
+    if (notification.packageName !== ANDROID_PACKAGE_NAME) {
+      return {ignored: true, reason: "other_package"};
+    }
+
+    const subscriptionNotification = notification.subscriptionNotification;
+    if (!subscriptionNotification) {
+      return {ignored: true, reason: "not_a_subscription"};
+    }
+
+    const productId = cleanText(subscriptionNotification.subscriptionId);
+    if (productId !== PREMIUM_YEARLY_PRODUCT_ID) {
+      return {ignored: true, reason: "other_product"};
+    }
+
+    const purchaseToken = cleanText(subscriptionNotification.purchaseToken);
+    if (!purchaseToken) {
+      throw playError(400, "Google Play notification has no purchase token.");
+    }
+
+    const subscription = await fetchSubscription({purchaseToken});
+    const snapshot = googlePlayLifecycleSnapshot(subscription, {productId});
+    return syncGooglePlaySubscriptionNotification({
+      firestore,
+      eventId: notification.eventId,
+      eventTime: notification.eventTime,
+      notificationType: subscriptionNotification.notificationType,
+      purchaseToken,
+      productId,
+      subscription,
+      snapshot,
+    });
   };
 }
 
@@ -248,6 +305,7 @@ async function activateGooglePlaySubscription({
     }, {merge: true});
     transaction.set(userRef, {
       email: userEmail,
+      userUid,
       role: "reader",
       accessLevel: "premium",
       subscriptionStatus: "active",
@@ -271,6 +329,210 @@ async function activateGooglePlaySubscription({
     environment: verified.environment,
     expiresAt: verified.expiresAt.toISOString(),
   };
+}
+
+function decodeGooglePlayRtdn(event) {
+  const message = event && event.data && event.data.message ?
+    event.data.message : event && event.message ? event.message : {};
+  const encodedData = message && message.data;
+  let decoded;
+  try {
+    const json = Buffer.isBuffer(encodedData) ?
+      encodedData.toString("utf8") :
+      Buffer.from(cleanText(encodedData), "base64").toString("utf8");
+    decoded = JSON.parse(json);
+  } catch (_) {
+    throw playError(400, "Google Play notification data is invalid.");
+  }
+
+  if (!decoded || typeof decoded !== "object") {
+    throw playError(400, "Google Play notification data is invalid.");
+  }
+
+  const eventId = cleanText(message.messageId) || cleanText(event && event.id) ||
+    crypto.createHash("sha256").update(JSON.stringify(decoded)).digest("hex");
+  const eventTimeMillis = Number(decoded.eventTimeMillis);
+  const eventTime = Number.isFinite(eventTimeMillis) && eventTimeMillis > 0 ?
+    new Date(eventTimeMillis) : null;
+
+  return {
+    ...decoded,
+    eventId,
+    eventTime,
+  };
+}
+
+function googlePlayLifecycleSnapshot(subscription, {
+  productId = PREMIUM_YEARLY_PRODUCT_ID,
+  now = Date.now(),
+} = {}) {
+  if (!subscription || typeof subscription !== "object") {
+    throw playError(400, "Google Play returned an invalid subscription.");
+  }
+
+  const state = cleanText(subscription.subscriptionState).toUpperCase();
+  const lineItems = Array.isArray(subscription.lineItems) ?
+    subscription.lineItems : [];
+  const matchingItems = lineItems.filter(
+      (item) => cleanText(item && item.productId) === productId,
+  );
+  if (matchingItems.length === 0) {
+    throw playError(400, "Google Play verified a different subscription product.");
+  }
+
+  const expiresAt = matchingItems
+      .map((item) => readDate(item && item.expiryTime))
+      .filter(Boolean)
+      .sort((left, right) => right.getTime() - left.getTime())[0] || null;
+  const unexpired = Boolean(expiresAt && expiresAt.getTime() > now);
+  const entitled = unexpired && ENTITLED_SUBSCRIPTION_STATES.has(state);
+  const autoRenewing = matchingItems.some((item) => Boolean(
+      item && item.autoRenewingPlan && item.autoRenewingPlan.autoRenewEnabled,
+  ));
+
+  return {
+    state,
+    entitled,
+    expiresAt,
+    autoRenewing,
+    latestOrderId: cleanText(subscription.latestOrderId),
+    linkedPurchaseToken: cleanText(subscription.linkedPurchaseToken),
+    environment: subscription.testPurchase ? "test" : "production",
+    subscriptionStatus: entitled ? "active" : lifecycleStatus(state, unexpired),
+  };
+}
+
+async function syncGooglePlaySubscriptionNotification({
+  firestore,
+  eventId,
+  eventTime,
+  notificationType,
+  purchaseToken,
+  productId,
+  subscription,
+  snapshot,
+}) {
+  const tokenHash = purchaseTokenHash(purchaseToken);
+  const eventHash = crypto.createHash("sha256")
+      .update(cleanText(eventId))
+      .digest("hex");
+  const purchaseRef = firestore
+      .collection("google_play_subscription_purchases")
+      .doc(tokenHash);
+  const eventRef = firestore
+      .collection("google_play_rtdn_events")
+      .doc(eventHash);
+  let result;
+
+  await firestore.runTransaction(async (transaction) => {
+    const previousEvent = await transaction.get(eventRef);
+    if (previousEvent.exists) {
+      result = {duplicate: true, eventId};
+      return;
+    }
+
+    const purchaseDocument = await transaction.get(purchaseRef);
+    if (!purchaseDocument.exists) {
+      result = {
+        eventId,
+        ignored: true,
+        reason: "unknown_purchase",
+        notificationType: Number(notificationType) || 0,
+      };
+      transaction.set(eventRef, {
+        ...result,
+        purchaseTokenHash: tokenHash,
+        productId,
+        subscriptionState: snapshot.state,
+        eventTime,
+        processedAt: FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+
+    const purchase = purchaseDocument.data();
+    const userEmail = cleanEmail(purchase.userEmail);
+    if (!userEmail) {
+      throw playError(409, "Google Play purchase has no Ancient Vault owner.");
+    }
+
+    const userRef = firestore.collection("users").doc(userEmail);
+    const userDocument = await transaction.get(userRef);
+    const user = userDocument.exists ? userDocument.data() : {};
+    const ownsCurrentEntitlement =
+      cleanText(user.subscriptionProvider) === GOOGLE_PLAY_PROVIDER &&
+      cleanText(user.googlePlayPurchaseTokenHash) === tokenHash;
+    const notificationName = GOOGLE_PLAY_NOTIFICATION_TYPES[
+      Number(notificationType)
+    ] || "unknown";
+
+    transaction.set(purchaseRef, {
+      subscriptionState: snapshot.state,
+      lifecycleStatus: snapshot.subscriptionStatus,
+      autoRenewing: snapshot.autoRenewing,
+      environment: snapshot.environment,
+      latestOrderId: snapshot.latestOrderId,
+      linkedPurchaseToken: snapshot.linkedPurchaseToken,
+      expiresAt: snapshot.expiresAt,
+      lastNotificationType: Number(notificationType) || 0,
+      lastNotificationName: notificationName,
+      lastNotificationEventId: eventId,
+      lastNotificationEventTime: eventTime,
+      regionCode: cleanText(subscription.regionCode),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+    if (ownsCurrentEntitlement) {
+      transaction.set(userRef, {
+        accessLevel: snapshot.entitled ? "premium" : "free",
+        subscriptionStatus: snapshot.subscriptionStatus,
+        subscriptionProvider: GOOGLE_PLAY_PROVIDER,
+        subscriptionReference: snapshot.latestOrderId || tokenHash,
+        ...(snapshot.expiresAt ? {
+          subscriptionExpiresAt: snapshot.expiresAt,
+        } : {}),
+        googlePlayLatestOrderId: snapshot.latestOrderId,
+        googlePlaySubscriptionState: snapshot.state,
+        googlePlayAutoRenewing: snapshot.autoRenewing,
+        googlePlayEnvironment: snapshot.environment,
+        googlePlayLastNotificationType: Number(notificationType) || 0,
+        googlePlayLastNotificationName: notificationName,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
+
+    result = {
+      eventId,
+      userEmail,
+      active: snapshot.entitled,
+      subscriptionStatus: snapshot.subscriptionStatus,
+      notificationType: Number(notificationType) || 0,
+      notificationName,
+      ignored: !ownsCurrentEntitlement,
+      ...(ownsCurrentEntitlement ? {} : {reason: "superseded_entitlement"}),
+    };
+    transaction.set(eventRef, {
+      ...result,
+      purchaseTokenHash: tokenHash,
+      productId,
+      subscriptionState: snapshot.state,
+      eventTime,
+      processedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return result;
+}
+
+function lifecycleStatus(state, unexpired) {
+  if (!unexpired || state === "SUBSCRIPTION_STATE_EXPIRED") return "expired";
+  return switchState(state, {
+    SUBSCRIPTION_STATE_ON_HOLD: "on_hold",
+    SUBSCRIPTION_STATE_PAUSED: "paused",
+    SUBSCRIPTION_STATE_PENDING: "pending",
+    SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED: "cancelled",
+    default: "inactive",
+  });
 }
 
 function googlePlayAccountId(uid) {
@@ -346,9 +608,13 @@ module.exports = {
   PREMIUM_YEARLY_PRODUCT_ID,
   activateGooglePlaySubscription,
   createAndroidPublisherAuth,
+  createGooglePlayRtdnHandler,
   createVerifyGooglePlayPurchaseHandler,
+  decodeGooglePlayRtdn,
   googleAccessToken,
   googlePlayAccountId,
+  googlePlayLifecycleSnapshot,
   purchaseTokenHash,
+  syncGooglePlaySubscriptionNotification,
   validateGooglePlaySubscription,
 };

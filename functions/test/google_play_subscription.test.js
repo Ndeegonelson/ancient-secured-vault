@@ -6,9 +6,12 @@ const {
   PREMIUM_YEARLY_PRODUCT_ID,
   activateGooglePlaySubscription,
   createAndroidPublisherAuth,
+  createGooglePlayRtdnHandler,
   createVerifyGooglePlayPurchaseHandler,
+  decodeGooglePlayRtdn,
   googleAccessToken,
   googlePlayAccountId,
+  googlePlayLifecycleSnapshot,
   purchaseTokenHash,
   validateGooglePlaySubscription,
 } = require("../google_play_subscription");
@@ -100,6 +103,35 @@ function createFirestore() {
           );
         },
       });
+    },
+  };
+}
+
+function rtdnEvent({
+  messageId = "rtdn-message-1",
+  notificationType = 2,
+  purchaseToken = "rtdn-purchase-token",
+  productId = PREMIUM_YEARLY_PRODUCT_ID,
+  packageName = "tech.ancientsociety.vault",
+} = {}) {
+  const payload = {
+    version: "1.0",
+    packageName,
+    eventTimeMillis: "1784840400000",
+    subscriptionNotification: {
+      version: "1.0",
+      notificationType,
+      purchaseToken,
+      subscriptionId: productId,
+    },
+  };
+  return {
+    id: `cloud-${messageId}`,
+    data: {
+      message: {
+        messageId,
+        data: Buffer.from(JSON.stringify(payload)).toString("base64"),
+      },
     },
   };
 }
@@ -270,4 +302,206 @@ test("does not grant premium when Google Play acknowledgement fails", async () =
 
   assert.equal(response.statusCode, 502);
   assert.equal(firestore.documents.has("users/reader@example.com"), false);
+});
+
+test("decodes a Google Play real-time developer notification", () => {
+  const decoded = decodeGooglePlayRtdn(rtdnEvent());
+  assert.equal(decoded.eventId, "rtdn-message-1");
+  assert.equal(decoded.packageName, "tech.ancientsociety.vault");
+  assert.equal(decoded.subscriptionNotification.notificationType, 2);
+  assert.ok(decoded.eventTime instanceof Date);
+});
+
+test("maps renewal and cancellation to an active paid entitlement", () => {
+  const renewed = googlePlayLifecycleSnapshot(activeSubscription({
+    overrides: {
+      acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+      lineItems: [{
+        productId: PREMIUM_YEARLY_PRODUCT_ID,
+        expiryTime: "2028-07-23T00:00:00Z",
+        autoRenewingPlan: {autoRenewEnabled: true},
+      }],
+    },
+  }), {now: Date.parse("2026-07-23T12:00:00Z")});
+  assert.equal(renewed.entitled, true);
+  assert.equal(renewed.autoRenewing, true);
+
+  const cancelled = googlePlayLifecycleSnapshot(activeSubscription({
+    overrides: {
+      subscriptionState: "SUBSCRIPTION_STATE_CANCELED",
+      lineItems: [{
+        productId: PREMIUM_YEARLY_PRODUCT_ID,
+        expiryTime: "2026-08-23T00:00:00Z",
+        autoRenewingPlan: {autoRenewEnabled: false},
+      }],
+    },
+  }), {now: Date.parse("2026-07-23T12:00:00Z")});
+  assert.equal(cancelled.entitled, true);
+  assert.equal(cancelled.subscriptionStatus, "active");
+  assert.equal(cancelled.autoRenewing, false);
+});
+
+test("RTDN renewal extends access and duplicate delivery is idempotent", async () => {
+  const firestore = createFirestore();
+  const purchaseToken = "rtdn-purchase-token";
+  const initial = activeSubscription();
+  await activateGooglePlaySubscription({
+    firestore,
+    userEmail: "reader@example.com",
+    userUid: "firebase-user-1",
+    purchaseToken,
+    productId: PREMIUM_YEARLY_PRODUCT_ID,
+    subscription: initial,
+    verified: validateGooglePlaySubscription(initial, {
+      expectedAccountId: googlePlayAccountId("firebase-user-1"),
+    }),
+    source: "purchase",
+  });
+
+  const renewed = activeSubscription({
+    overrides: {
+      acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+      lineItems: [{
+        productId: PREMIUM_YEARLY_PRODUCT_ID,
+        expiryTime: "2028-07-23T00:00:00Z",
+        autoRenewingPlan: {autoRenewEnabled: true},
+      }],
+    },
+  });
+  const handler = createGooglePlayRtdnHandler({
+    firestore,
+    fetchSubscription: async () => renewed,
+  });
+
+  const first = await handler(rtdnEvent({purchaseToken}));
+  const second = await handler(rtdnEvent({purchaseToken}));
+  const user = firestore.documents.get("users/reader@example.com");
+  assert.equal(first.notificationName, "renewed");
+  assert.equal(first.active, true);
+  assert.equal(second.duplicate, true);
+  assert.equal(
+      user.subscriptionExpiresAt.toISOString(),
+      "2028-07-23T00:00:00.000Z",
+  );
+});
+
+test("RTDN removes access after expiry, revocation, hold, or pause", async () => {
+  const cases = [
+    ["SUBSCRIPTION_STATE_EXPIRED", 13, "expired"],
+    ["SUBSCRIPTION_STATE_EXPIRED", 12, "expired"],
+    ["SUBSCRIPTION_STATE_ON_HOLD", 5, "on_hold"],
+    ["SUBSCRIPTION_STATE_PAUSED", 10, "paused"],
+  ];
+
+  for (const [state, notificationType, expectedStatus] of cases) {
+    const firestore = createFirestore();
+    const purchaseToken = `inactive-token-${notificationType}`;
+    const initial = activeSubscription();
+    await activateGooglePlaySubscription({
+      firestore,
+      userEmail: `reader-${notificationType}@example.com`,
+      userUid: "firebase-user-1",
+      purchaseToken,
+      productId: PREMIUM_YEARLY_PRODUCT_ID,
+      subscription: initial,
+      verified: validateGooglePlaySubscription(initial, {
+        expectedAccountId: googlePlayAccountId("firebase-user-1"),
+      }),
+      source: "purchase",
+    });
+    const inactive = activeSubscription({
+      overrides: {
+        subscriptionState: state,
+        acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+        lineItems: [{
+          productId: PREMIUM_YEARLY_PRODUCT_ID,
+          expiryTime: state === "SUBSCRIPTION_STATE_EXPIRED" ?
+            "2026-07-22T00:00:00Z" : "2027-07-23T00:00:00Z",
+        }],
+      },
+    });
+    const handler = createGooglePlayRtdnHandler({
+      firestore,
+      fetchSubscription: async () => inactive,
+    });
+
+    await handler(rtdnEvent({
+      messageId: `inactive-${notificationType}`,
+      notificationType,
+      purchaseToken,
+    }));
+    const user = firestore.documents.get(
+        `users/reader-${notificationType}@example.com`,
+    );
+    assert.equal(user.accessLevel, "free");
+    assert.equal(user.subscriptionStatus, expectedStatus);
+  }
+});
+
+test("RTDN never revokes a newer Stripe or Paystack entitlement", async () => {
+  const firestore = createFirestore();
+  const purchaseToken = "superseded-play-token";
+  const initial = activeSubscription();
+  await activateGooglePlaySubscription({
+    firestore,
+    userEmail: "multi-provider@example.com",
+    userUid: "firebase-user-1",
+    purchaseToken,
+    productId: PREMIUM_YEARLY_PRODUCT_ID,
+    subscription: initial,
+    verified: validateGooglePlaySubscription(initial, {
+      expectedAccountId: googlePlayAccountId("firebase-user-1"),
+    }),
+    source: "purchase",
+  });
+  firestore.documents.set("users/multi-provider@example.com", {
+    ...firestore.documents.get("users/multi-provider@example.com"),
+    accessLevel: "premium",
+    subscriptionStatus: "active",
+    subscriptionProvider: "stripe",
+    subscriptionReference: "sub_newer_stripe",
+  });
+  const expired = activeSubscription({
+    overrides: {
+      subscriptionState: "SUBSCRIPTION_STATE_EXPIRED",
+      lineItems: [{
+        productId: PREMIUM_YEARLY_PRODUCT_ID,
+        expiryTime: "2026-07-22T00:00:00Z",
+      }],
+    },
+  });
+  const handler = createGooglePlayRtdnHandler({
+    firestore,
+    fetchSubscription: async () => expired,
+  });
+
+  const result = await handler(rtdnEvent({
+    messageId: "superseded-event",
+    notificationType: 13,
+    purchaseToken,
+  }));
+  const user = firestore.documents.get("users/multi-provider@example.com");
+  assert.equal(result.reason, "superseded_entitlement");
+  assert.equal(user.accessLevel, "premium");
+  assert.equal(user.subscriptionProvider, "stripe");
+});
+
+test("RTDN safely records a purchase that has not reached the app yet", async () => {
+  const firestore = createFirestore();
+  const handler = createGooglePlayRtdnHandler({
+    firestore,
+    fetchSubscription: async () => activeSubscription(),
+  });
+
+  const result = await handler(rtdnEvent({
+    messageId: "orphan-purchase-event",
+    notificationType: 4,
+    purchaseToken: "not-yet-registered",
+  }));
+  assert.equal(result.ignored, true);
+  assert.equal(result.reason, "unknown_purchase");
+  assert.equal(
+      firestore.documents.has("users/reader@example.com"),
+      false,
+  );
 });
