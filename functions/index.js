@@ -217,6 +217,7 @@ exports.verifyGooglePlayPurchase = onRequest(
 exports.googlePlaySubscriptionNotifications = onMessagePublished(
     {
       topic: "google-play-rtdn",
+      region: "us-central1",
       maxInstances: 5,
       retry: true,
       timeoutSeconds: 60,
