@@ -10,6 +10,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'services/ios_in_app_purchase_controller.dart';
+import 'services/google_play_in_app_purchase_controller.dart';
 
 const _vaultUrl = String.fromEnvironment(
   'VAULT_URL',
@@ -57,6 +58,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   late final WebViewController controller;
   final FlutterTts nativeTts = FlutterTts();
   IosInAppPurchaseController? iosPurchases;
+  GooglePlayInAppPurchaseController? googlePlayPurchases;
   var loadProgress = 0;
   String? loadError;
   String? activeUtteranceId;
@@ -114,6 +116,8 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
             await lockMobileWebViewZoom();
             if (isIos) {
               await iosPurchases?.initialize(silent: true);
+            } else {
+              await googlePlayPurchases?.initialize(silent: true);
             }
           },
           onWebResourceError: (error) {
@@ -136,6 +140,16 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
         'AncientVaultIap',
         onMessageReceived: (message) {
           unawaited(iosPurchases?.handleMessage(message.message));
+        },
+      );
+    } else {
+      googlePlayPurchases = GooglePlayInAppPurchaseController(
+        onEvent: emitGooglePlayPurchaseEvent,
+      );
+      webViewController.addJavaScriptChannel(
+        'AncientVaultPlayBilling',
+        onMessageReceived: (message) {
+          unawaited(googlePlayPurchases?.handleMessage(message.message));
         },
       );
     }
@@ -233,6 +247,14 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     final detail = jsonEncode(jsonEncode(event));
     await controller.runJavaScript(
       "window.dispatchEvent(new CustomEvent('ancientVaultPdfFetch', "
+      "{detail: $detail}));",
+    );
+  }
+
+  Future<void> emitGooglePlayPurchaseEvent(Map<String, dynamic> event) async {
+    final detail = jsonEncode(jsonEncode(event));
+    await controller.runJavaScript(
+      "window.dispatchEvent(new CustomEvent('ancientVaultPlayBilling', "
       "{detail: $detail}));",
     );
   }
@@ -533,6 +555,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     nativeTts.stop();
     unawaited(disableReaderStayAwake());
     unawaited(iosPurchases?.dispose());
+    unawaited(googlePlayPurchases?.dispose());
     super.dispose();
   }
 }

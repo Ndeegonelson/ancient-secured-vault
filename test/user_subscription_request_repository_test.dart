@@ -145,6 +145,28 @@ void main() {
       isFalse,
     );
     expect(
+      readUserSubscriptionPaymentMethod('google_play'),
+      UserSubscriptionPaymentMethod.googlePlay,
+    );
+    expect(
+      userSubscriptionPaymentMethodKey(
+        UserSubscriptionPaymentMethod.googlePlay,
+      ),
+      'google_play',
+    );
+    expect(
+      userSubscriptionPaymentMethodLabel(
+        UserSubscriptionPaymentMethod.googlePlay,
+      ),
+      'Google Play',
+    );
+    expect(
+      isAdminManagedSubscriptionPaymentMethod(
+        UserSubscriptionPaymentMethod.googlePlay,
+      ),
+      isFalse,
+    );
+    expect(
       readUserSubscriptionPaymentMethod('bank transfer'),
       UserSubscriptionPaymentMethod.manual,
     );

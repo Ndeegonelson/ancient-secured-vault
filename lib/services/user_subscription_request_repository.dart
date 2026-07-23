@@ -13,6 +13,7 @@ enum UserSubscriptionRequestStatus {
 
 enum UserSubscriptionPaymentMethod {
   appStore,
+  googlePlay,
   stripe,
   paystack,
   manual,
@@ -402,6 +403,12 @@ UserSubscriptionPaymentMethod readUserSubscriptionPaymentMethod(dynamic value) {
     'appstore' ||
     'apple' ||
     'ios' => UserSubscriptionPaymentMethod.appStore,
+    'google_play' ||
+    'google-play' ||
+    'googleplay' ||
+    'play_store' ||
+    'play-store' ||
+    'android' => UserSubscriptionPaymentMethod.googlePlay,
     'stripe' => UserSubscriptionPaymentMethod.stripe,
     'manual' ||
     'manual_payment' ||
@@ -421,6 +428,7 @@ UserSubscriptionPaymentMethod readUserSubscriptionPaymentMethod(dynamic value) {
 String userSubscriptionPaymentMethodKey(UserSubscriptionPaymentMethod method) {
   return switch (method) {
     UserSubscriptionPaymentMethod.appStore => 'app_store',
+    UserSubscriptionPaymentMethod.googlePlay => 'google_play',
     UserSubscriptionPaymentMethod.stripe => 'stripe',
     UserSubscriptionPaymentMethod.paystack => 'paystack',
     UserSubscriptionPaymentMethod.manual => 'manual',
@@ -433,6 +441,7 @@ String userSubscriptionPaymentMethodLabel(
 ) {
   return switch (method) {
     UserSubscriptionPaymentMethod.appStore => 'App Store',
+    UserSubscriptionPaymentMethod.googlePlay => 'Google Play',
     UserSubscriptionPaymentMethod.stripe => 'Stripe',
     UserSubscriptionPaymentMethod.paystack => 'Paystack',
     UserSubscriptionPaymentMethod.manual => 'Manual proof',
@@ -445,6 +454,7 @@ bool isAdminManagedSubscriptionPaymentMethod(
 ) {
   return switch (method) {
     UserSubscriptionPaymentMethod.appStore => false,
+    UserSubscriptionPaymentMethod.googlePlay => false,
     UserSubscriptionPaymentMethod.paystack ||
     UserSubscriptionPaymentMethod.manual ||
     UserSubscriptionPaymentMethod.ancientCoin => true,

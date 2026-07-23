@@ -21,6 +21,7 @@ class UserAccessState {
     this.stripeSubscriptionId = '',
     this.paystackCustomerId = '',
     this.paystackReference = '',
+    this.googlePlayLatestOrderId = '',
     this.manualPaymentReference = '',
     this.subscriptionExpiresAt,
   });
@@ -53,6 +54,12 @@ class UserAccessState {
       stripeSubscriptionId: _readIdentifier(data?['stripeSubscriptionId']),
       paystackCustomerId: _readIdentifier(data?['paystackCustomerId']),
       paystackReference: _readIdentifier(data?['paystackReference']),
+      googlePlayLatestOrderId: _readIdentifier(
+        data?['googlePlayLatestOrderId'] ??
+            (data != null && data['subscriptionProvider'] == 'google_play'
+                ? data['subscriptionReference']
+                : null),
+      ),
       manualPaymentReference: _readIdentifier(data?['manualPaymentReference']),
       subscriptionExpiresAt: subscriptionExpiresAt,
     );
@@ -69,6 +76,7 @@ class UserAccessState {
   final String stripeSubscriptionId;
   final String paystackCustomerId;
   final String paystackReference;
+  final String googlePlayLatestOrderId;
   final String manualPaymentReference;
   final DateTime? subscriptionExpiresAt;
 
@@ -91,6 +99,11 @@ class UserAccessState {
       'appstore' ||
       'apple' ||
       'ios' => 'App Store',
+      'google_play' ||
+      'google-play' ||
+      'googleplay' ||
+      'play_store' ||
+      'play-store' => 'Google Play',
       'paystack' => 'Paystack',
       'manual' || 'manual_payment' || 'manual-payment' => 'Manual proof',
       'ancient_coin' || 'ancient-coin' || 'ancientcoin' => 'Ancient Coin',
@@ -101,6 +114,10 @@ class UserAccessState {
   }
 
   String get subscriptionReference {
+    if (subscriptionProvider == 'google_play' &&
+        googlePlayLatestOrderId.isNotEmpty) {
+      return googlePlayLatestOrderId;
+    }
     for (final value in [
       paystackReference,
       manualPaymentReference,
@@ -119,6 +136,11 @@ class UserAccessState {
 
     return switch (subscriptionProvider) {
       'paystack' => 'Paystack ref: $reference',
+      'google_play' ||
+      'google-play' ||
+      'googleplay' ||
+      'play_store' ||
+      'play-store' => 'Google Play order: $reference',
       'manual' ||
       'manual_payment' ||
       'manual-payment' => 'Manual proof: $reference',

@@ -50,6 +50,7 @@ dependencies:
   syncfusion_flutter_pdfviewer: ^33.2.7
   webview_flutter: ^4.13.1
   in_app_purchase: ^3.3.0
+  crypto: ^3.0.7
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -38,6 +38,9 @@ const {
   createAppleServerNotificationHandler,
   createVerifyApplePurchaseHandler,
 } = require("./apple_subscription");
+const {
+  createVerifyGooglePlayPurchaseHandler,
+} = require("./google_play_subscription");
 
 initializeApp();
 const firestore = getFirestore();
@@ -198,6 +201,15 @@ exports.appleAppStoreNotifications = onRequest(
       timeoutSeconds: 30,
     },
     createAppleServerNotificationHandler({firestore}),
+);
+
+exports.verifyGooglePlayPurchase = onRequest(
+    {
+      cors: false,
+      maxInstances: 5,
+      timeoutSeconds: 30,
+    },
+    createVerifyGooglePlayPurchaseHandler({firestore}),
 );
 
 exports.searchVaultDocuments = onRequest(

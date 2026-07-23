@@ -72,6 +72,24 @@ void main() {
     expect(access.isAdminManagedSubscription, isFalse);
   });
 
+  test('Google Play subscriptions expose provider and order details', () {
+    final access = UserAccessState.fromFirestore({
+      'subscriptionStatus': 'active',
+      'accessLevel': 'premium',
+      'subscriptionProvider': 'google_play',
+      'googlePlayLatestOrderId': 'GPA.1234-5678-9012-34567',
+    });
+
+    expect(access.subscriptionProviderLabel, 'Google Play');
+    expect(access.subscriptionReference, 'GPA.1234-5678-9012-34567');
+    expect(
+      access.subscriptionReferenceLabel,
+      'Google Play order: GPA.1234-5678-9012-34567',
+    );
+    expect(access.canManageStripeBilling, isFalse);
+    expect(access.isAdminManagedSubscription, isFalse);
+  });
+
   test('Paystack subscriptions expose provider and reference details', () {
     final access = UserAccessState.fromFirestore({
       'role': 'reader',

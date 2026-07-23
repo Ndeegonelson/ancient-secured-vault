@@ -84,6 +84,12 @@ bool get isIosAppShell {
   );
 }
 
+bool get isAndroidAppShell {
+  return html.window.navigator.userAgent.toLowerCase().contains(
+    'ancientsecurevaultandroidapp',
+  );
+}
+
 class AncientVaultScrollBehavior extends MaterialScrollBehavior {
   const AncientVaultScrollBehavior();
 
@@ -2160,11 +2166,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String iosSubscriptionPrice = '';
   String iosSubscriptionTitle = 'Premium Yearly';
   bool iosPurchaseInteractionActive = false;
+  Object? googlePlayPurchaseEventHandler;
+  String googlePlaySubscriptionPrice = '';
+  String googlePlaySubscriptionTitle = 'Premium Yearly';
+  bool googlePlayPurchaseInteractionActive = false;
 
   @override
   void initState() {
     super.initState();
     registerIosPurchaseBridge();
+    registerGooglePlayPurchaseBridge();
     readerDashboardFuture = loadReaderDashboardOverview();
     loadDashboardData();
   }
@@ -2278,6 +2289,113 @@ class _DashboardScreenState extends State<DashboardScreen> {
       jsonEncode({
         'action': action,
         if (idToken != null) 'firebaseIdToken': idToken,
+      }),
+    ]);
+  }
+
+  void registerGooglePlayPurchaseBridge() {
+    if (!isAndroidAppShell) return;
+
+    final handler = js_util.allowInterop((Object event) {
+      final rawDetail = js_util.getProperty<Object?>(event, 'detail');
+      if (rawDetail == null) return;
+      try {
+        final decoded = jsonDecode(rawDetail.toString());
+        if (decoded is Map<String, dynamic>) {
+          handleGooglePlayPurchaseEvent(decoded);
+        }
+      } catch (_) {}
+    });
+    googlePlayPurchaseEventHandler = handler;
+    js_util.callMethod<void>(html.window, 'addEventListener', [
+      'ancientVaultPlayBilling',
+      handler,
+    ]);
+    unawaited(
+      requestGooglePlayPurchaseAction('status', requireAuthentication: false),
+    );
+  }
+
+  void handleGooglePlayPurchaseEvent(Map<String, dynamic> event) {
+    if (!mounted) return;
+
+    final type = event['type']?.toString() ?? '';
+    final message = event['message']?.toString() ?? '';
+    if ((type == 'error' || type == 'unavailable') &&
+        (event['silent'] == true || !googlePlayPurchaseInteractionActive)) {
+      return;
+    }
+    if (type == 'ready') {
+      setState(() {
+        googlePlaySubscriptionPrice = event['price']?.toString().trim() ?? '';
+        googlePlaySubscriptionTitle =
+            event['title']?.toString().trim().isNotEmpty == true
+            ? event['title'].toString().trim()
+            : 'Premium Yearly';
+      });
+      return;
+    }
+    if (type == 'success') {
+      googlePlayPurchaseInteractionActive = false;
+      showDashboardMessage(message, color: Colors.greenAccent);
+      unawaited(refreshAccessAfterIosPurchase());
+      return;
+    }
+    if (type == 'cancelled') {
+      googlePlayPurchaseInteractionActive = false;
+    }
+    if (type == 'error' || type == 'unavailable') {
+      googlePlayPurchaseInteractionActive = false;
+      showDashboardMessage(message, color: Colors.redAccent);
+      return;
+    }
+    if (message.isNotEmpty) {
+      showDashboardMessage(message, color: Colors.orangeAccent);
+    }
+  }
+
+  Future<void> requestGooglePlayPurchaseAction(
+    String action, {
+    bool requireAuthentication = true,
+  }) async {
+    if (!isAndroidAppShell) {
+      throw StateError(
+        'Google Play purchases are available only in the Android app.',
+      );
+    }
+
+    String? idToken;
+    String? uid;
+    if (requireAuthentication) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw StateError('Sign in before using Google Play purchases.');
+      }
+      idToken = await user.getIdToken(true);
+      uid = user.uid;
+      if (idToken == null || idToken.trim().isEmpty || uid.trim().isEmpty) {
+        throw StateError('Could not authorize the Google Play purchase.');
+      }
+    }
+
+    final bridge = js_util.getProperty<Object?>(
+      html.window,
+      'AncientVaultPlayBilling',
+    );
+    if (bridge == null) {
+      throw StateError(
+        'The native Google Play purchase bridge is unavailable.',
+      );
+    }
+
+    if (action == 'purchase' || action == 'restore') {
+      googlePlayPurchaseInteractionActive = true;
+    }
+    js_util.callMethod<void>(bridge, 'postMessage', [
+      jsonEncode({
+        'action': action,
+        if (idToken != null) 'firebaseIdToken': idToken,
+        if (uid != null) 'firebaseUid': uid,
       }),
     ]);
   }
@@ -2527,6 +2645,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       js_util.callMethod<void>(html.window, 'removeEventListener', [
         'ancientVaultIap',
         purchaseHandler,
+      ]);
+    }
+    final googlePlayHandler = googlePlayPurchaseEventHandler;
+    if (googlePlayHandler != null) {
+      js_util.callMethod<void>(html.window, 'removeEventListener', [
+        'ancientVaultPlayBilling',
+        googlePlayHandler,
       ]);
     }
     dashboardDocumentSearchController.dispose();
@@ -8786,6 +8911,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return switch (request.paymentMethod) {
       UserSubscriptionPaymentMethod.appStore => Icons.apple,
+      UserSubscriptionPaymentMethod.googlePlay => Icons.play_circle_outline,
       UserSubscriptionPaymentMethod.stripe => Icons.credit_card_outlined,
       UserSubscriptionPaymentMethod.paystack =>
         Icons.account_balance_wallet_outlined,
@@ -10879,6 +11005,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
+    if (paymentMethod == UserSubscriptionPaymentMethod.googlePlay) {
+      await requestGooglePlayPurchaseAction('purchase');
+      return;
+    }
+
     if (paymentMethod == UserSubscriptionPaymentMethod.stripe) {
       final checkout = await subscriptionCheckoutClient
           .createStripeCheckoutSession(message: message.trim());
@@ -10958,10 +11089,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final referenceController = TextEditingController();
     var paymentMethod = isIosAppShell
         ? UserSubscriptionPaymentMethod.appStore
+        : isAndroidAppShell
+        ? UserSubscriptionPaymentMethod.googlePlay
         : UserSubscriptionPaymentMethod.stripe;
     String? checkoutErrorMessage;
     final selectablePaymentMethods = isIosAppShell
         ? const [UserSubscriptionPaymentMethod.appStore]
+        : isAndroidAppShell
+        ? const [UserSubscriptionPaymentMethod.googlePlay]
         : const [
             UserSubscriptionPaymentMethod.stripe,
             UserSubscriptionPaymentMethod.paystack,
@@ -10993,6 +11128,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             : paymentMethod ==
                                   UserSubscriptionPaymentMethod.appStore
                             ? 'Subscribe securely with your Apple Account to unlock the protected vault.'
+                            : paymentMethod ==
+                                  UserSubscriptionPaymentMethod.googlePlay
+                            ? 'Subscribe securely with Google Play to unlock the protected vault.'
                             : paymentMethod ==
                                   UserSubscriptionPaymentMethod.stripe
                             ? 'Continue to secure Stripe checkout to unlock the protected vault.'
@@ -11049,7 +11187,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ],
                           ),
                         ),
-                      if (!isIosAppShell) ...[
+                      if (isAndroidAppShell)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.withValues(alpha: 0.07),
+                            border: Border.all(color: Colors.greenAccent),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.play_circle_outline,
+                                color: Colors.greenAccent,
+                                size: 28,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      googlePlaySubscriptionTitle,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      googlePlaySubscriptionPrice.isEmpty
+                                          ? '\$120 USD per year, auto-renewable'
+                                          : '$googlePlaySubscriptionPrice per year, auto-renewable',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (!isIosAppShell && !isAndroidAppShell) ...[
                         Container(
                           width: double.infinity,
                           padding: const EdgeInsets.all(14),
@@ -11163,6 +11344,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ],
                         ),
                       ] else if (paymentMethod ==
+                          UserSubscriptionPaymentMethod.googlePlay) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Payment is processed by Google Play. The subscription renews automatically unless cancelled in Google Play, and purchases can be restored on another signed-in Android device.',
+                          style: TextStyle(color: Colors.white54, height: 1.35),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            TextButton(
+                              onPressed: () =>
+                                  html.window.location.assign('/privacy.html'),
+                              child: const Text('Privacy Policy'),
+                            ),
+                            TextButton(
+                              onPressed: () => html.window.location.assign(
+                                'https://play.google.com/store/account/subscriptions',
+                              ),
+                              child: const Text('Manage subscriptions'),
+                            ),
+                          ],
+                        ),
+                      ] else if (paymentMethod ==
                           UserSubscriptionPaymentMethod.stripe) ...[
                         const SizedBox(height: 12),
                         const Text(
@@ -11215,13 +11420,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
                 actions: [
-                  if (isIosAppShell)
+                  if (isIosAppShell || isAndroidAppShell)
                     TextButton(
                       onPressed: isSending
                           ? null
                           : () async {
                               try {
-                                await requestIosPurchaseAction('restore');
+                                if (isIosAppShell) {
+                                  await requestIosPurchaseAction('restore');
+                                } else {
+                                  await requestGooglePlayPurchaseAction(
+                                    'restore',
+                                  );
+                                }
                               } catch (error) {
                                 if (!context.mounted) return;
                                 setDialogState(() {
@@ -11254,7 +11465,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 paymentReference: referenceController.text,
                               );
                               if (paymentMethod ==
-                                  UserSubscriptionPaymentMethod.appStore) {
+                                      UserSubscriptionPaymentMethod.appStore ||
+                                  paymentMethod ==
+                                      UserSubscriptionPaymentMethod
+                                          .googlePlay) {
                                 if (context.mounted) {
                                   setDialogState(() => isSending = false);
                                 }
@@ -11279,6 +11493,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         UserSubscriptionPaymentMethod.appStore
                                     ? 'App Store purchase could not start: $error'
                                     : paymentMethod ==
+                                          UserSubscriptionPaymentMethod
+                                              .googlePlay
+                                    ? 'Google Play purchase could not start: $error'
+                                    : paymentMethod ==
                                           UserSubscriptionPaymentMethod.stripe
                                     ? 'Stripe checkout could not start: $error'
                                     : paymentMethod ==
@@ -11293,6 +11511,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             UserSubscriptionPaymentMethod
                                                 .appStore
                                         ? 'App Store purchase could not start: $error'
+                                        : paymentMethod ==
+                                              UserSubscriptionPaymentMethod
+                                                  .googlePlay
+                                        ? 'Google Play purchase could not start: $error'
                                         : paymentMethod ==
                                               UserSubscriptionPaymentMethod
                                                   .stripe
@@ -11323,6 +11545,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     label: Text(
                       paymentMethod == UserSubscriptionPaymentMethod.appStore
                           ? 'Subscribe with Apple'
+                          : paymentMethod ==
+                                UserSubscriptionPaymentMethod.googlePlay
+                          ? 'Subscribe with Google Play'
                           : paymentMethod ==
                                 UserSubscriptionPaymentMethod.stripe
                           ? 'Continue to Stripe'
