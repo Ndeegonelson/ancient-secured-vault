@@ -2,13 +2,32 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  ANDROID_PUBLISHER_SCOPE,
   PREMIUM_YEARLY_PRODUCT_ID,
   activateGooglePlaySubscription,
+  createAndroidPublisherAuth,
   createVerifyGooglePlayPurchaseHandler,
+  googleAccessToken,
   googlePlayAccountId,
   purchaseTokenHash,
   validateGooglePlaySubscription,
 } = require("../google_play_subscription");
+
+test("creates credentials with the Android Publisher OAuth scope", async () => {
+  let options;
+  class FakeGoogleAuth {
+    constructor(receivedOptions) {
+      options = receivedOptions;
+    }
+  }
+
+  createAndroidPublisherAuth(FakeGoogleAuth);
+  assert.deepEqual(options, {scopes: [ANDROID_PUBLISHER_SCOPE]});
+  assert.equal(
+      await googleAccessToken({getAccessToken: async () => "scoped-token"}),
+      "scoped-token",
+  );
+});
 
 function fakeRequest(body) {
   return {
@@ -226,4 +245,29 @@ test("verifies, grants, and acknowledges through the authenticated handler", asy
       firestore.documents.get("users/reader@example.com").subscriptionStatus,
       "active",
   );
+});
+
+test("does not grant premium when Google Play acknowledgement fails", async () => {
+  const firestore = createFirestore();
+  const handler = createVerifyGooglePlayPurchaseHandler({
+    firestore,
+    verifyIdToken: async () => ({
+      uid: "firebase-user-1",
+      email: "reader@example.com",
+    }),
+    fetchSubscription: async () => activeSubscription(),
+    acknowledgeSubscription: async () => {
+      throw Object.assign(new Error("Acknowledgement rejected."), {status: 502});
+    },
+  });
+  const response = fakeResponse();
+
+  await handler(fakeRequest({
+    productId: PREMIUM_YEARLY_PRODUCT_ID,
+    purchaseToken: "unacknowledged-token",
+    source: "purchase",
+  }), response);
+
+  assert.equal(response.statusCode, 502);
+  assert.equal(firestore.documents.has("users/reader@example.com"), false);
 });

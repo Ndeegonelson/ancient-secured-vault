@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const {getApp} = require("firebase-admin/app");
+const {GoogleAuth} = require("google-auth-library");
 const {getAuth} = require("firebase-admin/auth");
 const {FieldValue} = require("firebase-admin/firestore");
 
@@ -9,6 +9,9 @@ const PREMIUM_YEARLY_PRODUCT_ID =
 const GOOGLE_PLAY_PROVIDER = "google_play";
 const ANDROID_PUBLISHER_BASE_URL =
   "https://androidpublisher.googleapis.com/androidpublisher/v3";
+const ANDROID_PUBLISHER_SCOPE =
+  "https://www.googleapis.com/auth/androidpublisher";
+const googlePlayAuth = createAndroidPublisherAuth();
 const ENTITLED_SUBSCRIPTION_STATES = new Set([
   "SUBSCRIPTION_STATE_ACTIVE",
   "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
@@ -53,6 +56,11 @@ function createVerifyGooglePlayPurchaseHandler({
         productId,
         expectedAccountId,
       });
+
+      if (verified.needsAcknowledgement) {
+        await acknowledgeSubscription({purchaseToken, productId});
+      }
+
       const result = await activateGooglePlaySubscription({
         firestore,
         userEmail,
@@ -63,12 +71,12 @@ function createVerifyGooglePlayPurchaseHandler({
         verified,
         source: cleanText(input && input.source) || "purchase",
       });
-
-      if (verified.needsAcknowledgement) {
-        await acknowledgeSubscription({purchaseToken, productId});
-      }
       response.json(result);
     } catch (error) {
+      console.error("Google Play purchase handler failed", {
+        status: error && error.status ? error.status : 500,
+        message: error && error.message ? error.message : "Unknown error",
+      });
       response.status(error && error.status ? error.status : 500).json({
         error: error && error.message ?
           error.message : "Google Play purchase verification failed.",
@@ -130,13 +138,18 @@ async function defaultAcknowledgeSubscription({
   }
 }
 
-async function googleAccessToken() {
-  const credential = getApp().options.credential;
-  if (!credential || typeof credential.getAccessToken !== "function") {
+function createAndroidPublisherAuth(GoogleAuthConstructor = GoogleAuth) {
+  return new GoogleAuthConstructor({scopes: [ANDROID_PUBLISHER_SCOPE]});
+}
+
+async function googleAccessToken(auth = googlePlayAuth) {
+  if (!auth || typeof auth.getAccessToken !== "function") {
     throw playError(500, "Google Play verification credentials are unavailable.");
   }
-  const token = await credential.getAccessToken();
-  const accessToken = cleanText(token && token.access_token);
+  const token = await auth.getAccessToken();
+  const accessToken = cleanText(
+      typeof token === "string" ? token : token && token.token,
+  );
   if (!accessToken) {
     throw playError(500, "Google Play verification credentials are unavailable.");
   }
@@ -329,9 +342,12 @@ function playError(status, message) {
 
 module.exports = {
   ANDROID_PACKAGE_NAME,
+  ANDROID_PUBLISHER_SCOPE,
   PREMIUM_YEARLY_PRODUCT_ID,
   activateGooglePlaySubscription,
+  createAndroidPublisherAuth,
   createVerifyGooglePlayPurchaseHandler,
+  googleAccessToken,
   googlePlayAccountId,
   purchaseTokenHash,
   validateGooglePlaySubscription,
