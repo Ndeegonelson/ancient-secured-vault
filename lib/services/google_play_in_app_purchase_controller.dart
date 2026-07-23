@@ -9,7 +9,7 @@ const String googlePlayPremiumYearlyProductId =
     'tech.ancientsociety.vault.premium.yearly';
 
 const String defaultGooglePlayPurchaseVerificationUrl =
-    'https://verifygoogleplaypurchase-63jholaf6a-uc.a.run.app';
+    'https://us-central1-ancient--docs.cloudfunctions.net/verifyGooglePlayPurchase';
 
 typedef GooglePlayPurchaseEventHandler =
     void Function(Map<String, dynamic> event);
