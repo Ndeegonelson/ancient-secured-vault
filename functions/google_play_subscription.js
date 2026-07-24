@@ -32,6 +32,8 @@ const GOOGLE_PLAY_NOTIFICATION_TYPES = Object.freeze({
   13: "expired",
   19: "price_step_up_consent_updated",
 });
+const TERMINAL_RECONCILIATION_STATUSES = new Set(["expired", "revoked"]);
+const DEFAULT_RECONCILIATION_BATCH_SIZE = 250;
 
 function createVerifyGooglePlayPurchaseHandler({
   firestore,
@@ -140,6 +142,83 @@ function createGooglePlayRtdnHandler({
       snapshot,
     });
   };
+}
+
+function createGooglePlayReconciliationHandler({
+  firestore,
+  fetchSubscription = defaultFetchSubscription,
+  loadPurchases = defaultLoadGooglePlayPurchases,
+  batchSize = DEFAULT_RECONCILIATION_BATCH_SIZE,
+} = {}) {
+  if (!firestore) throw new TypeError("Firestore is required.");
+
+  return async () => {
+    const purchaseDocuments = await loadPurchases({firestore, batchSize});
+    const result = {
+      checkedCount: purchaseDocuments.length,
+      updatedCount: 0,
+      activeCount: 0,
+      inactiveCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+    };
+
+    for (const purchaseDocument of purchaseDocuments) {
+      const purchase = purchaseDocument && purchaseDocument.data ?
+        purchaseDocument.data() : purchaseDocument || {};
+      const purchaseToken = cleanText(purchase.purchaseToken);
+      const productId = cleanText(purchase.productId);
+      const lifecycleStatus = cleanText(purchase.lifecycleStatus).toLowerCase();
+
+      if (!purchaseToken || productId !== PREMIUM_YEARLY_PRODUCT_ID ||
+          TERMINAL_RECONCILIATION_STATUSES.has(lifecycleStatus)) {
+        result.skippedCount += 1;
+        continue;
+      }
+
+      try {
+        const subscription = await fetchSubscription({purchaseToken});
+        const snapshot = googlePlayLifecycleSnapshot(subscription, {productId});
+        await syncGooglePlaySubscriptionReconciliation({
+          firestore,
+          purchaseToken,
+          productId,
+          subscription,
+          snapshot,
+        });
+        result.updatedCount += 1;
+        if (snapshot.entitled) {
+          result.activeCount += 1;
+        } else {
+          result.inactiveCount += 1;
+        }
+      } catch (error) {
+        result.failedCount += 1;
+        console.error("Google Play subscription reconciliation failed", {
+          purchaseTokenHash: purchaseTokenHash(purchaseToken),
+          status: error && error.status ? error.status : 500,
+          message: error && error.message ? error.message : "Unknown error",
+        });
+      }
+    }
+
+    return result;
+  };
+}
+
+async function defaultLoadGooglePlayPurchases({
+  firestore,
+  batchSize = DEFAULT_RECONCILIATION_BATCH_SIZE,
+}) {
+  const safeBatchSize = Number.isFinite(batchSize) && batchSize > 0 ?
+    Math.min(Math.floor(batchSize), 1000) :
+    DEFAULT_RECONCILIATION_BATCH_SIZE;
+  const snapshot = await firestore
+      .collection("google_play_subscription_purchases")
+      .where("productId", "==", PREMIUM_YEARLY_PRODUCT_ID)
+      .limit(safeBatchSize)
+      .get();
+  return snapshot.docs || [];
 }
 
 async function defaultFetchSubscription({purchaseToken, fetchImpl = fetch}) {
@@ -524,6 +603,82 @@ async function syncGooglePlaySubscriptionNotification({
   return result;
 }
 
+async function syncGooglePlaySubscriptionReconciliation({
+  firestore,
+  purchaseToken,
+  productId,
+  subscription,
+  snapshot,
+}) {
+  const tokenHash = purchaseTokenHash(purchaseToken);
+  const purchaseRef = firestore
+      .collection("google_play_subscription_purchases")
+      .doc(tokenHash);
+  let result;
+
+  await firestore.runTransaction(async (transaction) => {
+    const purchaseDocument = await transaction.get(purchaseRef);
+    if (!purchaseDocument.exists) {
+      result = {ignored: true, reason: "unknown_purchase"};
+      return;
+    }
+
+    const purchase = purchaseDocument.data();
+    const userEmail = cleanEmail(purchase.userEmail);
+    if (!userEmail) {
+      throw playError(409, "Google Play purchase has no Ancient Vault owner.");
+    }
+
+    const userRef = firestore.collection("users").doc(userEmail);
+    const userDocument = await transaction.get(userRef);
+    const user = userDocument.exists ? userDocument.data() : {};
+    const ownsCurrentEntitlement =
+      cleanText(user.subscriptionProvider) === GOOGLE_PLAY_PROVIDER &&
+      cleanText(user.googlePlayPurchaseTokenHash) === tokenHash;
+
+    transaction.set(purchaseRef, {
+      subscriptionState: snapshot.state,
+      lifecycleStatus: snapshot.subscriptionStatus,
+      autoRenewing: snapshot.autoRenewing,
+      environment: snapshot.environment,
+      latestOrderId: snapshot.latestOrderId,
+      linkedPurchaseToken: snapshot.linkedPurchaseToken,
+      expiresAt: snapshot.expiresAt,
+      regionCode: cleanText(subscription.regionCode),
+      lastReconciledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+    if (ownsCurrentEntitlement) {
+      transaction.set(userRef, {
+        accessLevel: snapshot.entitled ? "premium" : "free",
+        subscriptionStatus: snapshot.subscriptionStatus,
+        subscriptionProvider: GOOGLE_PLAY_PROVIDER,
+        subscriptionReference: snapshot.latestOrderId || tokenHash,
+        ...(snapshot.expiresAt ? {
+          subscriptionExpiresAt: snapshot.expiresAt,
+        } : {}),
+        googlePlayLatestOrderId: snapshot.latestOrderId,
+        googlePlaySubscriptionState: snapshot.state,
+        googlePlayAutoRenewing: snapshot.autoRenewing,
+        googlePlayEnvironment: snapshot.environment,
+        googlePlayLastReconciledAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
+
+    result = {
+      userEmail,
+      active: snapshot.entitled,
+      subscriptionStatus: snapshot.subscriptionStatus,
+      ignored: !ownsCurrentEntitlement,
+      ...(ownsCurrentEntitlement ? {} : {reason: "superseded_entitlement"}),
+    };
+  });
+
+  return result;
+}
+
 function lifecycleStatus(state, unexpired) {
   if (!unexpired || state === "SUBSCRIPTION_STATE_EXPIRED") return "expired";
   return switchState(state, {
@@ -609,6 +764,7 @@ module.exports = {
   activateGooglePlaySubscription,
   createAndroidPublisherAuth,
   createGooglePlayRtdnHandler,
+  createGooglePlayReconciliationHandler,
   createVerifyGooglePlayPurchaseHandler,
   decodeGooglePlayRtdn,
   googleAccessToken,
@@ -616,5 +772,6 @@ module.exports = {
   googlePlayLifecycleSnapshot,
   purchaseTokenHash,
   syncGooglePlaySubscriptionNotification,
+  syncGooglePlaySubscriptionReconciliation,
   validateGooglePlaySubscription,
 };

@@ -7,6 +7,7 @@ const {
   activateGooglePlaySubscription,
   createAndroidPublisherAuth,
   createGooglePlayRtdnHandler,
+  createGooglePlayReconciliationHandler,
   createVerifyGooglePlayPurchaseHandler,
   decodeGooglePlayRtdn,
   googleAccessToken,
@@ -504,4 +505,76 @@ test("RTDN safely records a purchase that has not reached the app yet", async ()
       firestore.documents.has("users/reader@example.com"),
       false,
   );
+});
+
+test("scheduled reconciliation refreshes renewal and expiry without Pub/Sub", async () => {
+  const firestore = createFirestore();
+  const renewalToken = "scheduled-renewal-token";
+  const expiryToken = "scheduled-expiry-token";
+
+  for (const [email, token] of [
+    ["renewal@example.com", renewalToken],
+    ["expiry@example.com", expiryToken],
+  ]) {
+    const initial = activeSubscription();
+    await activateGooglePlaySubscription({
+      firestore,
+      userEmail: email,
+      userUid: "firebase-user-1",
+      purchaseToken: token,
+      productId: PREMIUM_YEARLY_PRODUCT_ID,
+      subscription: initial,
+      verified: validateGooglePlaySubscription(initial, {
+        expectedAccountId: googlePlayAccountId("firebase-user-1"),
+      }),
+      source: "purchase",
+    });
+  }
+
+  const purchases = [renewalToken, expiryToken].map((token) => ({
+    data: () => firestore.documents.get(
+        `google_play_subscription_purchases/${purchaseTokenHash(token)}`,
+    ),
+  }));
+  const handler = createGooglePlayReconciliationHandler({
+    firestore,
+    loadPurchases: async () => purchases,
+    fetchSubscription: async ({purchaseToken}) => purchaseToken === renewalToken ?
+      activeSubscription({
+        overrides: {
+          lineItems: [{
+            productId: PREMIUM_YEARLY_PRODUCT_ID,
+            expiryTime: "2028-07-23T00:00:00Z",
+            autoRenewingPlan: {autoRenewEnabled: true},
+          }],
+        },
+      }) :
+      activeSubscription({
+        overrides: {
+          subscriptionState: "SUBSCRIPTION_STATE_EXPIRED",
+          lineItems: [{
+            productId: PREMIUM_YEARLY_PRODUCT_ID,
+            expiryTime: "2026-07-22T00:00:00Z",
+          }],
+        },
+      }),
+  });
+
+  const result = await handler();
+  const renewedUser = firestore.documents.get("users/renewal@example.com");
+  const expiredUser = firestore.documents.get("users/expiry@example.com");
+  assert.deepEqual(result, {
+    checkedCount: 2,
+    updatedCount: 2,
+    activeCount: 1,
+    inactiveCount: 1,
+    skippedCount: 0,
+    failedCount: 0,
+  });
+  assert.equal(
+      renewedUser.subscriptionExpiresAt.toISOString(),
+      "2028-07-23T00:00:00.000Z",
+  );
+  assert.equal(expiredUser.accessLevel, "free");
+  assert.equal(expiredUser.subscriptionStatus, "expired");
 });

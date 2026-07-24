@@ -1,7 +1,6 @@
 const {setGlobalOptions} = require("firebase-functions");
 const {onCall, onRequest} = require("firebase-functions/v2/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
-const {onMessagePublished} = require("firebase-functions/v2/pubsub");
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
 const {
@@ -40,7 +39,7 @@ const {
   createVerifyApplePurchaseHandler,
 } = require("./apple_subscription");
 const {
-  createGooglePlayRtdnHandler,
+  createGooglePlayReconciliationHandler,
   createVerifyGooglePlayPurchaseHandler,
 } = require("./google_play_subscription");
 
@@ -214,15 +213,16 @@ exports.verifyGooglePlayPurchase = onRequest(
     createVerifyGooglePlayPurchaseHandler({firestore}),
 );
 
-exports.googlePlaySubscriptionNotifications = onMessagePublished(
+exports.reconcileGooglePlaySubscriptions = onSchedule(
     {
-      topic: "google-play-rtdn",
+      schedule: "every 15 minutes",
+      timeZone: "Africa/Accra",
       region: "us-central1",
-      maxInstances: 5,
-      retry: true,
-      timeoutSeconds: 60,
+      maxInstances: 1,
+      retryCount: 3,
+      timeoutSeconds: 300,
     },
-    createGooglePlayRtdnHandler({firestore}),
+    createGooglePlayReconciliationHandler({firestore}),
 );
 
 exports.searchVaultDocuments = onRequest(
