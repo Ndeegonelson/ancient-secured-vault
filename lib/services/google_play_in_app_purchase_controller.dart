@@ -11,6 +11,14 @@ const String googlePlayPremiumYearlyProductId =
 const String defaultGooglePlayPurchaseVerificationUrl =
     'https://us-central1-ancient--docs.cloudfunctions.net/verifyGooglePlayPurchase';
 
+bool isGooglePlayAlreadyOwnedError(Object? error) {
+  final normalized = error.toString().toLowerCase();
+  return normalized.contains('already subscribed') ||
+      normalized.contains('already owned') ||
+      normalized.contains('item_already_owned') ||
+      normalized.contains('billing_response_item_already_owned');
+}
+
 typedef GooglePlayPurchaseEventHandler =
     void Function(Map<String, dynamic> event);
 
@@ -133,14 +141,22 @@ class GooglePlayInAppPurchaseController {
     if (product == null) return;
 
     _emit('starting', message: 'Opening Google Play checkout…');
-    final launched = await _store.buyNonConsumable(
-      purchaseParam: PurchaseParam(
-        productDetails: product,
-        applicationUserName: _obfuscatedAccountId(_firebaseUid!),
-      ),
-    );
-    if (!launched) {
-      _emit('error', message: 'Google Play checkout could not start.');
+    try {
+      final launched = await _store.buyNonConsumable(
+        purchaseParam: PurchaseParam(
+          productDetails: product,
+          applicationUserName: _obfuscatedAccountId(_firebaseUid!),
+        ),
+      );
+      if (!launched) {
+        _emit('error', message: 'Google Play checkout could not start.');
+      }
+    } catch (error) {
+      if (isGooglePlayAlreadyOwnedError(error)) {
+        await _restoreAlreadyOwnedPurchase();
+        return;
+      }
+      _emit('error', message: 'Google Play checkout could not start: $error');
     }
   }
 
@@ -156,6 +172,15 @@ class GooglePlayInAppPurchaseController {
     await _store.restorePurchases();
   }
 
+  Future<void> _restoreAlreadyOwnedPurchase() async {
+    _emit(
+      'restoring',
+      message:
+          'Google Play already owns this subscription. Checking which Ancient Vault account it belongs to...',
+    );
+    await _store.restorePurchases();
+  }
+
   Future<void> _handlePurchaseUpdates(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
       if (purchase.productID != googlePlayPremiumYearlyProductId) continue;
@@ -168,6 +193,10 @@ class GooglePlayInAppPurchaseController {
           );
           break;
         case PurchaseStatus.error:
+          if (isGooglePlayAlreadyOwnedError(purchase.error)) {
+            await _restoreAlreadyOwnedPurchase();
+            break;
+          }
           _emit(
             'error',
             message:
@@ -242,6 +271,15 @@ class GooglePlayInAppPurchaseController {
         extra: decoded is Map<String, dynamic> ? decoded : null,
       );
     } catch (error) {
+      final message = error.toString();
+      if (message.toLowerCase().contains('belongs to another account')) {
+        _emit(
+          'ownershipConflict',
+          message:
+              'This Google Play subscription is linked to another Ancient Vault account. Sign in to the original Ancient Vault account to restore it, or manage the subscription in Google Play before using a different account.',
+        );
+        return;
+      }
       _emit(
         'error',
         message:

@@ -1693,8 +1693,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextField(
                         controller: nameController,
                         textInputAction: TextInputAction.next,
+                        style: const TextStyle(color: Colors.white),
+                        cursorColor: Colors.greenAccent,
                         decoration: const InputDecoration(
                           hintText: 'Full Name',
+                          hintStyle: TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white10,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.all(Radius.circular(18)),
                           ),
@@ -2348,6 +2353,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (type == 'cancelled') {
       googlePlayPurchaseInteractionActive = false;
     }
+    if (type == 'ownershipConflict') {
+      googlePlayPurchaseInteractionActive = false;
+      unawaited(showGooglePlayOwnershipConflictDialog(message));
+      return;
+    }
     if (type == 'error' || type == 'unavailable') {
       googlePlayPurchaseInteractionActive = false;
       showDashboardMessage(message, color: Colors.redAccent);
@@ -2402,6 +2412,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (uid != null) 'firebaseUid': uid,
       }),
     ]);
+  }
+
+  Future<void> showGooglePlayOwnershipConflictDialog(String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => PointerInterceptor(
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF0F1117),
+          title: const Text(
+            'Subscription already belongs to an account',
+            style: TextStyle(color: Colors.greenAccent),
+          ),
+          content: Text(
+            message,
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text(
+                'Close',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                openGooglePlaySubscriptionManagement();
+              },
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Manage in Google Play'),
+              style: TextButton.styleFrom(foregroundColor: Colors.greenAccent),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> loadDashboardData() async {
