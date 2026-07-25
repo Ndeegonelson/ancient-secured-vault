@@ -22,6 +22,7 @@ class UserAccessState {
     this.paystackCustomerId = '',
     this.paystackReference = '',
     this.googlePlayLatestOrderId = '',
+    this.googlePlayAutoRenewing,
     this.manualPaymentReference = '',
     this.subscriptionExpiresAt,
   });
@@ -60,6 +61,9 @@ class UserAccessState {
                 ? data['subscriptionReference']
                 : null),
       ),
+      googlePlayAutoRenewing: _readNullableBool(
+        data?['googlePlayAutoRenewing'],
+      ),
       manualPaymentReference: _readIdentifier(data?['manualPaymentReference']),
       subscriptionExpiresAt: subscriptionExpiresAt,
     );
@@ -77,6 +81,7 @@ class UserAccessState {
   final String paystackCustomerId;
   final String paystackReference;
   final String googlePlayLatestOrderId;
+  final bool? googlePlayAutoRenewing;
   final String manualPaymentReference;
   final DateTime? subscriptionExpiresAt;
 
@@ -86,10 +91,25 @@ class UserAccessState {
 
   bool get canManageStripeBilling => subscriptionProvider == 'stripe';
 
+  bool get canManageGooglePlayBilling => switch (subscriptionProvider) {
+    'google_play' ||
+    'google-play' ||
+    'googleplay' ||
+    'play_store' ||
+    'play-store' => true,
+    _ => false,
+  };
+
   bool get canManageAppStoreBilling => switch (subscriptionProvider) {
     'app_store' || 'app-store' || 'appstore' || 'apple' || 'ios' => true,
     _ => false,
   };
+
+  bool get isGooglePlayCancellationScheduled =>
+      canManageGooglePlayBilling &&
+      googlePlayAutoRenewing == false &&
+      hasActiveSubscription &&
+      !isSubscriptionExpired;
 
   String get subscriptionProviderLabel {
     return switch (subscriptionProvider) {
@@ -267,6 +287,15 @@ class UserAccessState {
 
   static String _readIdentifier(dynamic value) {
     return value?.toString().trim() ?? '';
+  }
+
+  static bool? _readNullableBool(dynamic value) {
+    if (value is bool) return value;
+    return switch (value?.toString().trim().toLowerCase()) {
+      'true' || '1' => true,
+      'false' || '0' => false,
+      _ => null,
+    };
   }
 
   static DateTime? _readDateTime(dynamic value) {

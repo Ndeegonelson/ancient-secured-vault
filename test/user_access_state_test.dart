@@ -78,6 +78,7 @@ void main() {
       'accessLevel': 'premium',
       'subscriptionProvider': 'google_play',
       'googlePlayLatestOrderId': 'GPA.1234-5678-9012-34567',
+      'googlePlayAutoRenewing': true,
     });
 
     expect(access.subscriptionProviderLabel, 'Google Play');
@@ -87,7 +88,26 @@ void main() {
       'Google Play order: GPA.1234-5678-9012-34567',
     );
     expect(access.canManageStripeBilling, isFalse);
+    expect(access.canManageGooglePlayBilling, isTrue);
+    expect(access.googlePlayAutoRenewing, isTrue);
+    expect(access.isGooglePlayCancellationScheduled, isFalse);
     expect(access.isAdminManagedSubscription, isFalse);
+  });
+
+  test('cancelled Google Play renewal remains manageable until expiry', () {
+    final access = UserAccessState.fromFirestore({
+      'subscriptionStatus': 'active',
+      'accessLevel': 'premium',
+      'subscriptionProvider': 'google_play',
+      'googlePlayAutoRenewing': false,
+      'subscriptionExpiresAt': DateTime.now()
+          .add(const Duration(days: 7))
+          .toIso8601String(),
+    });
+
+    expect(access.canAccessMainVault, isTrue);
+    expect(access.canManageGooglePlayBilling, isTrue);
+    expect(access.isGooglePlayCancellationScheduled, isTrue);
   });
 
   test('Paystack subscriptions expose provider and reference details', () {

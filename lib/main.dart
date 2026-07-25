@@ -77,6 +77,10 @@ const UserDeviceAuthorizationMode readerDeviceAuthorizationMode =
 const MethodChannel readerScreenSecurityChannel = MethodChannel(
   'ancient_secure_docs/screen_security',
 );
+const String googlePlayPremiumSubscriptionManagementUrl =
+    'https://play.google.com/store/account/subscriptions?sku='
+    'tech.ancientsociety.vault.premium.yearly&package='
+    'tech.ancientsociety.vault';
 
 bool get isIosAppShell {
   return html.window.navigator.userAgent.toLowerCase().contains(
@@ -8987,8 +8991,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   bool canOpenReaderSubscriptionAction() {
-    if (userAccess.canManageStripeBilling &&
-        userAccess.stripeAttentionLabel != null) {
+    if (userAccess.canManageStripeBilling ||
+        userAccess.canManageGooglePlayBilling ||
+        userAccess.canManageAppStoreBilling) {
       return true;
     }
 
@@ -8998,9 +9003,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
   VoidCallback? readerSubscriptionAction() {
     if (!canOpenReaderSubscriptionAction()) return null;
 
-    return userAccess.canManageStripeBilling
-        ? showManageStripeSubscriptionDialog
-        : showSubscriptionRequestDialog;
+    if (userAccess.canManageStripeBilling) {
+      return showManageStripeSubscriptionDialog;
+    }
+    if (userAccess.canManageGooglePlayBilling) {
+      return openGooglePlaySubscriptionManagement;
+    }
+    if (userAccess.canManageAppStoreBilling) {
+      return openAppStoreSubscriptionManagement;
+    }
+    return showSubscriptionRequestDialog;
+  }
+
+  void openGooglePlaySubscriptionManagement() {
+    html.window.location.assign(googlePlayPremiumSubscriptionManagementUrl);
   }
 
   void openAppStoreSubscriptionManagement() {
@@ -9008,6 +9024,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String readerSubscriptionActionLabel() {
+    if (userAccess.canManageStripeBilling ||
+        userAccess.canManageGooglePlayBilling ||
+        userAccess.canManageAppStoreBilling) {
+      return 'Manage';
+    }
     if (canOpenReaderSubscriptionAction()) return 'Subscription';
     return 'Active';
   }
@@ -11360,9 +11381,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child: const Text('Privacy Policy'),
                             ),
                             TextButton(
-                              onPressed: () => html.window.location.assign(
-                                'https://play.google.com/store/account/subscriptions',
-                              ),
+                              onPressed: openGooglePlaySubscriptionManagement,
                               child: const Text('Manage subscriptions'),
                             ),
                           ],
@@ -12007,6 +12026,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 subtitle:
                                     'Manage renewal or cancellation with your Apple Account.',
                                 onTap: openAppStoreSubscriptionManagement,
+                              ),
+                            if (userAccess.canManageGooglePlayBilling)
+                              buildReaderDashboardItem(
+                                icon: Icons.play_circle_outline,
+                                title: 'Google Play subscription',
+                                subtitle:
+                                    userAccess.isGooglePlayCancellationScheduled
+                                    ? 'Renewal cancelled. Premium access remains available until the displayed expiry time.'
+                                    : 'Manage renewal, payment method, or cancel in Google Play.',
+                                onTap: openGooglePlaySubscriptionManagement,
                               ),
                             ...overview.subscriptionRequests.take(4).map((
                               request,
