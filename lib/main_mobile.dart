@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -261,10 +263,20 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     try {
       final payload = jsonDecode(message.message);
       if (payload is! Map<String, dynamic>) return;
-      final keepAwake = payload['keepAwake'] == true;
-      await _readerScreenChannel.invokeMethod<void>(
-        keepAwake ? 'enableReaderStayAwake' : 'disableReaderStayAwake',
-      );
+
+      if (payload.containsKey('keepAwake')) {
+        final keepAwake = payload['keepAwake'] == true;
+        await _readerScreenChannel.invokeMethod<void>(
+          keepAwake ? 'enableReaderStayAwake' : 'disableReaderStayAwake',
+        );
+      }
+
+      if (payload.containsKey('secureScreen')) {
+        final secureScreen = payload['secureScreen'] == true;
+        await _readerScreenChannel.invokeMethod<void>(
+          secureScreen ? 'enableSecureScreen' : 'disableSecureScreen',
+        );
+      }
     } on PlatformException {
       // The protected reader remains usable if a device rejects the flag.
     } on FormatException {
@@ -519,7 +531,16 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
       child: Scaffold(
         body: Stack(
           children: [
-            WebViewWidget(controller: controller),
+            WebViewWidget(
+              controller: controller,
+              gestureRecognizers: Platform.isAndroid
+                  ? {
+                      Factory<OneSequenceGestureRecognizer>(
+                        EagerGestureRecognizer.new,
+                      ),
+                    }
+                  : const <Factory<OneSequenceGestureRecognizer>>{},
+            ),
             if (showLaunchSplash) const _VaultLaunchSplash(),
             if (loadProgress < 100 && !showLaunchSplash)
               LinearProgressIndicator(

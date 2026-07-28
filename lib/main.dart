@@ -12517,88 +12517,90 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           )
                         else
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: filteredFreePdfFiles.length,
-                            itemBuilder: (context, index) {
-                              final pdfFile = filteredFreePdfFiles[index];
+                          Column(
+                            children: List<Widget>.generate(
+                              filteredFreePdfFiles.length,
+                              (index) {
+                                final pdfFile = filteredFreePdfFiles[index];
 
-                              return Card(
-                                color: Colors.orange.withValues(alpha: 0.12),
-                                child: ListTile(
-                                  leading: const Icon(
-                                    Icons.picture_as_pdf,
-                                    color: Colors.orangeAccent,
-                                  ),
-                                  title: Text(
-                                    pdfFile['name'],
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                  subtitle: Text(
-                                    vaultDocumentListSubtitle(
-                                      pdfFile,
-                                      accessLabel: 'Free Access PDF',
+                                return Card(
+                                  color: Colors.orange.withValues(alpha: 0.12),
+                                  child: ListTile(
+                                    leading: const Icon(
+                                      Icons.picture_as_pdf,
+                                      color: Colors.orangeAccent,
                                     ),
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                  trailing: userAccess.canManageVault
-                                      ? IconButton(
-                                          tooltip: 'Manage document',
-                                          icon: const Icon(
-                                            Icons.admin_panel_settings,
-                                          ),
-                                          color: Colors.orangeAccent,
-                                          onPressed: () {
-                                            showVaultDocumentAdminDialog(
-                                              pdfFile,
-                                              accessLabel: 'Free Access PDF',
-                                            );
-                                          },
-                                        )
-                                      : null,
-                                  onTap: () async {
-                                    final pdfUrl =
-                                        await resolveSearchResultPdfUrl(
-                                          pdfFile,
-                                        );
-
-                                    if (pdfUrl == null) return;
-
-                                    if (!context.mounted) return;
-
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => PDFViewerScreen(
-                                          pdfUrl: pdfUrl,
-                                          title: pdfFile['name'],
-                                          accessLevel:
-                                              pdfFile['accessLevel']
-                                                  ?.toString() ??
-                                              'free',
-                                          readerMode:
-                                              pdfFile['readerMode']
-                                                  ?.toString() ??
-                                              '',
-                                          protectionMode:
-                                              pdfFile['protectionMode']
-                                                  ?.toString() ??
-                                              '',
-                                          openSource: 'free_dashboard',
-                                          storagePath:
-                                              pdfFile['storagePath']
-                                                  ?.toString() ??
-                                              '',
-                                        ),
+                                    title: Text(
+                                      pdfFile['name'],
+                                      style: const TextStyle(
+                                        color: Colors.white,
                                       ),
-                                    );
-                                  },
-                                ),
-                              );
-                            },
+                                    ),
+                                    subtitle: Text(
+                                      vaultDocumentListSubtitle(
+                                        pdfFile,
+                                        accessLabel: 'Free Access PDF',
+                                      ),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    trailing: userAccess.canManageVault
+                                        ? IconButton(
+                                            tooltip: 'Manage document',
+                                            icon: const Icon(
+                                              Icons.admin_panel_settings,
+                                            ),
+                                            color: Colors.orangeAccent,
+                                            onPressed: () {
+                                              showVaultDocumentAdminDialog(
+                                                pdfFile,
+                                                accessLabel: 'Free Access PDF',
+                                              );
+                                            },
+                                          )
+                                        : null,
+                                    onTap: () async {
+                                      final pdfUrl =
+                                          await resolveSearchResultPdfUrl(
+                                            pdfFile,
+                                          );
+
+                                      if (pdfUrl == null) return;
+
+                                      if (!context.mounted) return;
+
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => PDFViewerScreen(
+                                            pdfUrl: pdfUrl,
+                                            title: pdfFile['name'],
+                                            accessLevel:
+                                                pdfFile['accessLevel']
+                                                    ?.toString() ??
+                                                'free',
+                                            readerMode:
+                                                pdfFile['readerMode']
+                                                    ?.toString() ??
+                                                '',
+                                            protectionMode:
+                                                pdfFile['protectionMode']
+                                                    ?.toString() ??
+                                                '',
+                                            openSource: 'free_dashboard',
+                                            storagePath:
+                                                pdfFile['storagePath']
+                                                    ?.toString() ??
+                                                '',
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
                           ),
 
                         const SizedBox(height: 30),
@@ -12653,96 +12655,99 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             )
                           else
-                            ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: filteredPremiumPdfFiles.length,
-                              itemBuilder: (context, index) {
-                                final pdfFile = filteredPremiumPdfFiles[index];
+                            Column(
+                              children: List<Widget>.generate(
+                                filteredPremiumPdfFiles.length,
+                                (index) {
+                                  final pdfFile =
+                                      filteredPremiumPdfFiles[index];
 
-                                return Card(
-                                  color: Colors.green.withValues(alpha: 0.12),
+                                  return Card(
+                                    color: Colors.green.withValues(alpha: 0.12),
 
-                                  child: ListTile(
-                                    leading: const Icon(
-                                      Icons.picture_as_pdf,
-                                      color: Colors.greenAccent,
-                                    ),
-
-                                    title: Text(
-                                      pdfFile['name'],
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                    child: ListTile(
+                                      leading: const Icon(
+                                        Icons.picture_as_pdf,
+                                        color: Colors.greenAccent,
                                       ),
-                                    ),
 
-                                    subtitle: Text(
-                                      vaultDocumentListSubtitle(
-                                        pdfFile,
-                                        accessLabel: 'Protected PDF',
-                                      ),
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-
-                                    trailing: userAccess.canManageVault
-                                        ? IconButton(
-                                            tooltip: 'Manage document',
-                                            icon: const Icon(
-                                              Icons.admin_panel_settings,
-                                            ),
-                                            color: Colors.greenAccent,
-                                            onPressed: () {
-                                              showVaultDocumentAdminDialog(
-                                                pdfFile,
-                                                accessLabel: 'Protected PDF',
-                                              );
-                                            },
-                                          )
-                                        : null,
-
-                                    onTap: () async {
-                                      final pdfUrl =
-                                          await resolveSearchResultPdfUrl(
-                                            pdfFile,
-                                          );
-
-                                      if (pdfUrl == null) return;
-
-                                      if (!context.mounted) return;
-
-                                      Navigator.push(
-                                        context,
-
-                                        MaterialPageRoute(
-                                          builder: (context) => PDFViewerScreen(
-                                            pdfUrl: pdfUrl,
-                                            title: pdfFile['name'],
-                                            accessLevel:
-                                                pdfFile['accessLevel']
-                                                    ?.toString() ??
-                                                'premium',
-                                            readerMode:
-                                                pdfFile['readerMode']
-                                                    ?.toString() ??
-                                                '',
-                                            protectionMode:
-                                                pdfFile['protectionMode']
-                                                    ?.toString() ??
-                                                '',
-                                            openSource: 'premium_dashboard',
-                                            storagePath:
-                                                pdfFile['storagePath']
-                                                    ?.toString() ??
-                                                '',
-                                          ),
+                                      title: Text(
+                                        pdfFile['name'],
+                                        style: const TextStyle(
+                                          color: Colors.white,
                                         ),
-                                      );
-                                    },
-                                  ),
-                                );
-                              },
+                                      ),
+
+                                      subtitle: Text(
+                                        vaultDocumentListSubtitle(
+                                          pdfFile,
+                                          accessLabel: 'Protected PDF',
+                                        ),
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+
+                                      trailing: userAccess.canManageVault
+                                          ? IconButton(
+                                              tooltip: 'Manage document',
+                                              icon: const Icon(
+                                                Icons.admin_panel_settings,
+                                              ),
+                                              color: Colors.greenAccent,
+                                              onPressed: () {
+                                                showVaultDocumentAdminDialog(
+                                                  pdfFile,
+                                                  accessLabel: 'Protected PDF',
+                                                );
+                                              },
+                                            )
+                                          : null,
+
+                                      onTap: () async {
+                                        final pdfUrl =
+                                            await resolveSearchResultPdfUrl(
+                                              pdfFile,
+                                            );
+
+                                        if (pdfUrl == null) return;
+
+                                        if (!context.mounted) return;
+
+                                        Navigator.push(
+                                          context,
+
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                PDFViewerScreen(
+                                                  pdfUrl: pdfUrl,
+                                                  title: pdfFile['name'],
+                                                  accessLevel:
+                                                      pdfFile['accessLevel']
+                                                          ?.toString() ??
+                                                      'premium',
+                                                  readerMode:
+                                                      pdfFile['readerMode']
+                                                          ?.toString() ??
+                                                      '',
+                                                  protectionMode:
+                                                      pdfFile['protectionMode']
+                                                          ?.toString() ??
+                                                      '',
+                                                  openSource:
+                                                      'premium_dashboard',
+                                                  storagePath:
+                                                      pdfFile['storagePath']
+                                                          ?.toString() ??
+                                                      '',
+                                                ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                         ],
                       ],
@@ -13744,7 +13749,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ..style.padding = '12px 0 112px'
           ..style.boxSizing = 'border-box'
           ..style.userSelect = 'none'
-          ..style.setProperty('touch-action', 'pan-x pan-y');
+          // Let the browser/WebView own one-finger vertical scrolling so it
+          // can provide native kinetic flings. Two-finger gestures continue
+          // through the protected-reader pinch handler below.
+          ..style.setProperty('touch-action', 'pan-x pan-y pinch-zoom');
 
         container.children.add(
           html.DivElement()
@@ -14541,9 +14549,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         final renderTask = js_util.callMethod<Object>(page, 'render', [
           renderContext,
         ]);
-        await js_util
-            .promiseToFuture<Object>(
-              js_util.getProperty<Object>(renderTask, 'promise'),
+        // PDF.js resolves a successful render with JavaScript `undefined`.
+        // Keep the completion value nullable; casting it to `Object` makes a
+        // successful Android/WebView render fail at runtime after minification.
+        await pdf_js_util
+            .promiseToFuture<Object?>(
+              pdf_js_util.getRawProperty(renderTask, 'promise'),
             )
             .timeout(const Duration(seconds: 20));
       }
@@ -14682,26 +14693,21 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final startDistance = protectedPdfPinchStartDistance;
     final distance = protectedPdfPinchDistanceForEvent(event);
     if (startDistance == null || distance == null || startDistance <= 0) {
-      final container = protectedPdfImageContainer;
       final touch = protectedPdfTouchAt(event, 0);
       final x = protectedPdfTouchCoordinate(touch, 'clientX');
       final y = protectedPdfTouchCoordinate(touch, 'clientY');
       final lastX = protectedPdfPanLastX;
       final lastY = protectedPdfPanLastY;
-      if (container == null ||
-          x == null ||
-          y == null ||
-          lastX == null ||
-          lastY == null) {
+      if (x == null || y == null || lastX == null || lastY == null) {
         return;
       }
 
       final deltaX = lastX - x;
       final deltaY = lastY - y;
-      if (deltaX.abs() >= 1 || deltaY.abs() >= 1) {
-        event.preventDefault();
-        container.scrollLeft += deltaX.round();
-        container.scrollTop += deltaY.round();
+      if (deltaX.abs() >= 3 || deltaY.abs() >= 3) {
+        // Observe the drag only to suppress double-tap handling. Do not
+        // preventDefault or manually mutate scrollTop: doing so discards the
+        // WebView's velocity tracking and is the source of jerky scrolling.
         protectedPdfDidPan = true;
       }
       protectedPdfPanLastX = x;
@@ -14790,14 +14796,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerPageChangedSinceOpen = true;
     scheduleAutomaticReadingPositionSave(visiblePage);
     preloadNarrationTextForPage(visiblePage);
-    unawaited(
-      renderProtectedPdfPagesAroundPage(
-        visiblePage,
-        renderGeneration: protectedPdfRenderGeneration,
-        radius: 2,
-      ),
+    // Rendering canvases is expensive on mobile. Wait until the current fling
+    // settles instead of starting render work in the scroll callback.
+    scheduleProtectedPdfPreloadAroundPage(
+      visiblePage,
+      radius: 2,
+      delay: const Duration(milliseconds: 180),
     );
-    scheduleProtectedPdfPreloadAroundPage(visiblePage);
   }
 
   void scrollProtectedPdfImageReaderToPage(int pageNumber) {
@@ -15094,7 +15099,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Future<void> enableReaderScreenSecurity() async {
-    if (kIsWeb) return;
+    if (kIsWeb) {
+      try {
+        final bridge = js_util.getProperty<Object?>(
+          html.window,
+          'AncientVaultReader',
+        );
+        if (bridge != null) {
+          js_util.callMethod<void>(bridge, 'postMessage', [
+            '{"secureScreen":true}',
+          ]);
+        }
+      } catch (_) {
+        // A normal browser has no native screen-security bridge.
+      }
+      return;
+    }
 
     try {
       await readerScreenSecurityChannel.invokeMethod<void>(
@@ -15187,7 +15207,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Future<void> disableReaderScreenSecurity() async {
-    if (kIsWeb) return;
+    if (kIsWeb) {
+      try {
+        final bridge = js_util.getProperty<Object?>(
+          html.window,
+          'AncientVaultReader',
+        );
+        if (bridge != null) {
+          js_util.callMethod<void>(bridge, 'postMessage', [
+            '{"secureScreen":false}',
+          ]);
+        }
+      } catch (_) {
+        // A normal browser has no native screen-security bridge.
+      }
+      return;
+    }
 
     try {
       await readerScreenSecurityChannel.invokeMethod<void>(
