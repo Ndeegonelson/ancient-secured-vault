@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -108,10 +108,11 @@ class AncientVaultScrollBehavior extends MaterialScrollBehavior {
 
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
-    // The Android app hosts the web build inside a WebView. Clamping physics
-    // gives long vault pages direct, responsive Android-style flings instead
-    // of the slower iOS-style bounce applied previously.
-    return const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+    // Do not force every scrollable to claim a gesture. That creates avoidable
+    // competition between long dashboard lists, dialogs, and the Android
+    // WebView which hosts this build. The primary scrollable decides whether
+    // its content can actually move.
+    return const ClampingScrollPhysics();
   }
 }
 
@@ -2117,6 +2118,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String premiumDocumentCategoryFilter = '';
   final TextEditingController dashboardDocumentSearchController =
       TextEditingController();
+  final ScrollController dashboardScrollController = ScrollController();
+  Object? dashboardNativeScrollEventHandler;
   List<Map<String, dynamic>> userNotes = [];
   final ReaderAnnouncementRepository readerAnnouncementRepository =
       ReaderAnnouncementRepository();
@@ -2185,6 +2188,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     registerIosPurchaseBridge();
     registerGooglePlayPurchaseBridge();
+    registerDashboardNativeScrollBridge();
     readerDashboardFuture = loadReaderDashboardOverview();
     loadDashboardData();
   }
@@ -2690,6 +2694,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
+  void registerDashboardNativeScrollBridge() {
+    if (!isAndroidAppShell) return;
+
+    final handler = js_util.allowInterop((Object event) {
+      final rawDetail = js_util.getProperty<Object?>(event, 'detail');
+      if (rawDetail == null || !dashboardScrollController.hasClients) return;
+      try {
+        final decoded = jsonDecode(rawDetail.toString());
+        if (decoded is! Map<String, dynamic>) return;
+        final action = decoded['action']?.toString();
+        final position = dashboardScrollController.position;
+        if (action == 'cancel') {
+          dashboardScrollController.jumpTo(position.pixels);
+          return;
+        }
+        if (action == 'drag') {
+          final delta = (decoded['delta'] as num?)?.toDouble() ?? 0;
+          final target = (position.pixels - delta).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          );
+          if (target != position.pixels) {
+            dashboardScrollController.jumpTo(target.toDouble());
+          }
+          return;
+        }
+        if (action != 'fling') return;
+
+        final velocity = (decoded['velocity'] as num?)?.toDouble() ?? 0;
+        if (velocity.abs() < 180) return;
+        final projectedDistance = (-velocity * 0.11).clamp(-620.0, 620.0);
+        final target = (position.pixels + projectedDistance).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        );
+        final distance = (target - position.pixels).abs();
+        if (distance < 1) return;
+        final durationMs = (160 + distance * 0.2).round().clamp(160, 290);
+        unawaited(
+          dashboardScrollController.animateTo(
+            target.toDouble(),
+            duration: Duration(milliseconds: durationMs),
+            curve: Curves.easeOutCubic,
+          ),
+        );
+      } catch (_) {}
+    });
+    dashboardNativeScrollEventHandler = handler;
+    js_util.callMethod<void>(html.window, 'addEventListener', [
+      'ancientVaultDashboardScroll',
+      handler,
+    ]);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifyNativeDashboardScroll(enabled: true);
+    });
+  }
+
+  void notifyNativeDashboardScroll({required bool enabled}) {
+    if (!isAndroidAppShell) return;
+    final bridge = js_util.getProperty<Object?>(
+      html.window,
+      'AncientVaultReader',
+    );
+    if (bridge == null) return;
+    js_util.callMethod<void>(bridge, 'postMessage', [
+      jsonEncode({'dashboardScroll': enabled}),
+    ]);
+  }
+
   @override
   void dispose() {
     final purchaseHandler = iosPurchaseEventHandler;
@@ -2706,7 +2779,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         googlePlayHandler,
       ]);
     }
+    final nativeScrollHandler = dashboardNativeScrollEventHandler;
+    if (nativeScrollHandler != null) {
+      js_util.callMethod<void>(html.window, 'removeEventListener', [
+        'ancientVaultDashboardScroll',
+        nativeScrollHandler,
+      ]);
+    }
+    notifyNativeDashboardScroll(enabled: false);
     dashboardDocumentSearchController.dispose();
+    dashboardScrollController.dispose();
     super.dispose();
   }
 
@@ -6621,7 +6703,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                         resultContext,
                                                       );
 
-                                                      Navigator.push(
+                                                      notifyNativeDashboardScroll(
+                                                        enabled: false,
+                                                      );
+                                                      await Navigator.push(
                                                         this.context,
                                                         MaterialPageRoute(
                                                           builder: (context) => PDFViewerScreen(
@@ -6652,6 +6737,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                           ),
                                                         ),
                                                       );
+                                                      if (mounted) {
+                                                        notifyNativeDashboardScroll(
+                                                          enabled: true,
+                                                        );
+                                                      }
                                                     },
                                                   ),
                                                 );
@@ -8224,450 +8314,453 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final overviewFuture = adminOverviewFuture ??= loadDashboardAdminOverview();
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF111722),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.28)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    return RepaintBoundary(
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111722),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.28)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Admin command center',
+                        style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Manage documents, members, devices, and reader activity from one place.',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh admin overview',
+                  onPressed: refreshDashboardAdminOverview,
+                  icon: const Icon(Icons.refresh, color: Colors.greenAccent),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                buildAdminMetricTile(
+                  icon: Icons.folder_copy_outlined,
+                  label: 'Vault documents',
+                  value: inventory.totalCount.toString(),
+                  detail:
+                      '${inventory.freeCount} free | ${inventory.premiumCount} protected',
+                  color: Colors.greenAccent,
+                ),
+                buildAdminMetricTile(
+                  icon: Icons.category_outlined,
+                  label: 'Categories',
+                  value: inventory.categoryCounts.length.toString(),
+                  detail: inventory.latestDocument == null
+                      ? 'No recent document yet'
+                      : 'Latest: ${inventory.latestDocument!.name}',
+                  color: Colors.orangeAccent,
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    return buildAdminMetricTile(
+                      icon: Icons.people_alt_outlined,
+                      label: 'Members',
+                      value: overview?.users.totalCount.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading access summary'
+                          : '${overview.users.adminCount} admins | ${overview.users.premiumCount} premium | ${overview.users.freeCount} free',
+                      color: Colors.lightBlueAccent,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    return buildAdminMetricTile(
+                      icon: Icons.devices_other_outlined,
+                      label: 'Devices',
+                      value: overview?.devices.totalCount.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading device summary'
+                          : '${overview.devices.pendingCount} pending | ${overview.devices.trustedCount} trusted | ${overview.devices.blockedCount} blocked',
+                      color: Colors.pinkAccent,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    return buildAdminMetricTile(
+                      icon: Icons.insights_outlined,
+                      label: 'Reader events',
+                      value:
+                          overview?.activity.totalEventCount.toString() ??
+                          '...',
+                      detail: overview == null
+                          ? 'Loading reader activity'
+                          : '${overview.activity.uniqueReaderCount} readers | ${overview.activity.blockedAccessCount} blocked',
+                      color: Colors.cyanAccent,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    final count = overview?.manualProofReviewCount;
+                    return buildAdminMetricTile(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'Payment proofs',
+                      value: count?.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading payment proof manager'
+                          : count == 0
+                          ? 'All payment records ready'
+                          : '$count manual pending approval',
+                      color: count == null || count == 0
+                          ? Colors.white54
+                          : Colors.orangeAccent,
+                      onTap: showSubscriptionRequestInbox,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    final issueCount = overview?.webhookIssueCount;
+                    final processingCount = overview?.webhookProcessingCount;
+                    return buildAdminMetricTile(
+                      icon: Icons.webhook_outlined,
+                      label: 'Webhooks',
+                      value: overview?.webhookEvents.length.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading webhook audit'
+                          : issueCount! > 0
+                          ? '$issueCount failed event${issueCount == 1 ? '' : 's'}'
+                          : processingCount! > 0
+                          ? '$processingCount processing'
+                          : 'Stripe and Paystack clear',
+                      color: overview == null
+                          ? Colors.white54
+                          : issueCount! > 0
+                          ? Colors.redAccent
+                          : processingCount! > 0
+                          ? Colors.orangeAccent
+                          : Colors.cyanAccent,
+                      onTap: showPaymentWebhookAudit,
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            buildAdminVaultHealth(inventory),
+            const SizedBox(height: 18),
+            FutureBuilder<_DashboardAdminOverview>(
+              future: overviewFuture,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      buildAdminAttentionPanel(inventory: inventory),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Member, device, and reader activity checks could not load right now.',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                      ),
+                    ],
+                  );
+                }
+
+                return buildAdminAttentionPanel(
+                  inventory: inventory,
+                  overview: snapshot.data,
+                  isLoading: !snapshot.hasData,
+                );
+              },
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                buildAdminActionButton(
+                  icon: Icons.upload_file,
+                  label: 'Upload PDF',
+                  detail: 'Add a profiled document',
+                  onPressed: uploadPDF,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.manage_search,
+                  label: 'Refresh index',
+                  detail: 'Rebuild searchable text',
+                  onPressed: indexVaultPdfsFromAdminPanel,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.inventory_2_outlined,
+                  label: 'Inventory',
+                  detail: 'Open vault breakdown',
+                  onPressed: showVaultInventory,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.manage_accounts_outlined,
+                  label: 'User access',
+                  detail: 'Review plans and roles',
+                  onPressed: showUserAccessOverview,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.important_devices_outlined,
+                  label: 'Devices',
+                  detail: 'Trust or block devices',
+                  onPressed: showDeviceAuthorizationOverview,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.insights_outlined,
+                  label: 'Analytics',
+                  detail: 'Reader activity report',
+                  onPressed: showReaderAnalytics,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.campaign_outlined,
+                  label: 'Post update',
+                  detail: 'Notify reader dashboards',
+                  onPressed: showReaderAnnouncementComposer,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.lightbulb_outline,
+                  label: 'Suggestions',
+                  detail: 'Review reader ideas',
+                  onPressed: showReaderSuggestionInbox,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.workspace_premium_outlined,
+                  label: 'Requests',
+                  detail: 'Review subscription asks',
+                  onPressed: showSubscriptionRequestInbox,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.webhook_outlined,
+                  label: 'Webhooks',
+                  detail: 'Payment event audit',
+                  onPressed: showPaymentWebhookAudit,
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final panelWidth = constraints.maxWidth > 1060
+                    ? (constraints.maxWidth - 28) / 3
+                    : constraints.maxWidth > 760
+                    ? (constraints.maxWidth - 14) / 2
+                    : constraints.maxWidth;
+                return Wrap(
+                  spacing: 14,
+                  runSpacing: 14,
                   children: [
-                    Text(
-                      'Admin command center',
-                      style: TextStyle(
-                        color: Colors.greenAccent,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
+                    SizedBox(
+                      width: panelWidth,
+                      child: buildAdminDocumentMixPanel(inventory),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: FutureBuilder<_DashboardAdminOverview>(
+                        future: overviewFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return const Text(
+                              'Member mix could not load right now.',
+                              style: TextStyle(color: Colors.redAccent),
+                            );
+                          }
+
+                          if (!snapshot.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: LinearProgressIndicator(
+                                color: Colors.greenAccent,
+                                backgroundColor: Colors.white10,
+                              ),
+                            );
+                          }
+
+                          return buildAdminMemberMixPanel(snapshot.data!.users);
+                        },
                       ),
                     ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Manage documents, members, devices, and reader activity from one place.',
-                      style: TextStyle(color: Colors.white54),
+                    SizedBox(
+                      width: panelWidth,
+                      child: FutureBuilder<_DashboardAdminOverview>(
+                        future: overviewFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return const Text(
+                              'Device trust mix could not load right now.',
+                              style: TextStyle(color: Colors.redAccent),
+                            );
+                          }
+
+                          if (!snapshot.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: LinearProgressIndicator(
+                                color: Colors.greenAccent,
+                                backgroundColor: Colors.white10,
+                              ),
+                            );
+                          }
+
+                          return buildAdminDeviceTrustPanel(
+                            snapshot.data!.devices,
+                          );
+                        },
+                      ),
                     ),
-                  ],
-                ),
-              ),
-              IconButton(
-                tooltip: 'Refresh admin overview',
-                onPressed: refreshDashboardAdminOverview,
-                icon: const Icon(Icons.refresh, color: Colors.greenAccent),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              buildAdminMetricTile(
-                icon: Icons.folder_copy_outlined,
-                label: 'Vault documents',
-                value: inventory.totalCount.toString(),
-                detail:
-                    '${inventory.freeCount} free | ${inventory.premiumCount} protected',
-                color: Colors.greenAccent,
-              ),
-              buildAdminMetricTile(
-                icon: Icons.category_outlined,
-                label: 'Categories',
-                value: inventory.categoryCounts.length.toString(),
-                detail: inventory.latestDocument == null
-                    ? 'No recent document yet'
-                    : 'Latest: ${inventory.latestDocument!.name}',
-                color: Colors.orangeAccent,
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  return buildAdminMetricTile(
-                    icon: Icons.people_alt_outlined,
-                    label: 'Members',
-                    value: overview?.users.totalCount.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading access summary'
-                        : '${overview.users.adminCount} admins | ${overview.users.premiumCount} premium | ${overview.users.freeCount} free',
-                    color: Colors.lightBlueAccent,
-                  );
-                },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  return buildAdminMetricTile(
-                    icon: Icons.devices_other_outlined,
-                    label: 'Devices',
-                    value: overview?.devices.totalCount.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading device summary'
-                        : '${overview.devices.pendingCount} pending | ${overview.devices.trustedCount} trusted | ${overview.devices.blockedCount} blocked',
-                    color: Colors.pinkAccent,
-                  );
-                },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  return buildAdminMetricTile(
-                    icon: Icons.insights_outlined,
-                    label: 'Reader events',
-                    value:
-                        overview?.activity.totalEventCount.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading reader activity'
-                        : '${overview.activity.uniqueReaderCount} readers | ${overview.activity.blockedAccessCount} blocked',
-                    color: Colors.cyanAccent,
-                  );
-                },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  final count = overview?.manualProofReviewCount;
-                  return buildAdminMetricTile(
-                    icon: Icons.receipt_long_outlined,
-                    label: 'Payment proofs',
-                    value: count?.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading payment proof manager'
-                        : count == 0
-                        ? 'All payment records ready'
-                        : '$count manual pending approval',
-                    color: count == null || count == 0
-                        ? Colors.white54
-                        : Colors.orangeAccent,
-                    onTap: showSubscriptionRequestInbox,
-                  );
-                },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  final issueCount = overview?.webhookIssueCount;
-                  final processingCount = overview?.webhookProcessingCount;
-                  return buildAdminMetricTile(
-                    icon: Icons.webhook_outlined,
-                    label: 'Webhooks',
-                    value: overview?.webhookEvents.length.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading webhook audit'
-                        : issueCount! > 0
-                        ? '$issueCount failed event${issueCount == 1 ? '' : 's'}'
-                        : processingCount! > 0
-                        ? '$processingCount processing'
-                        : 'Stripe and Paystack clear',
-                    color: overview == null
-                        ? Colors.white54
-                        : issueCount! > 0
-                        ? Colors.redAccent
-                        : processingCount! > 0
-                        ? Colors.orangeAccent
-                        : Colors.cyanAccent,
-                    onTap: showPaymentWebhookAudit,
-                  );
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          buildAdminVaultHealth(inventory),
-          const SizedBox(height: 18),
-          FutureBuilder<_DashboardAdminOverview>(
-            future: overviewFuture,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    buildAdminAttentionPanel(inventory: inventory),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Member, device, and reader activity checks could not load right now.',
-                      style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Documents by category',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          buildAdminCategoryBars(inventory),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Most active documents',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          FutureBuilder<_DashboardAdminOverview>(
+                            future: overviewFuture,
+                            builder: (context, snapshot) {
+                              if (snapshot.hasError) {
+                                return const Text(
+                                  'Document activity could not load right now.',
+                                  style: TextStyle(color: Colors.redAccent),
+                                );
+                              }
+
+                              if (!snapshot.hasData) {
+                                return const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  child: LinearProgressIndicator(
+                                    color: Colors.greenAccent,
+                                    backgroundColor: Colors.white10,
+                                  ),
+                                );
+                              }
+
+                              return buildAdminTopDocumentsList(
+                                snapshot.data!.activity,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Recent document updates',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          buildAdminRecentDocuments(inventory),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Recent reader activity',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          FutureBuilder<_DashboardAdminOverview>(
+                            future: overviewFuture,
+                            builder: (context, snapshot) {
+                              if (snapshot.hasError) {
+                                return const Text(
+                                  'Admin activity could not load right now.',
+                                  style: TextStyle(color: Colors.redAccent),
+                                );
+                              }
+
+                              if (!snapshot.hasData) {
+                                return const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  child: LinearProgressIndicator(
+                                    color: Colors.greenAccent,
+                                    backgroundColor: Colors.white10,
+                                  ),
+                                );
+                              }
+
+                              return buildAdminActivityList(
+                                snapshot.data!.activity,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 );
-              }
-
-              return buildAdminAttentionPanel(
-                inventory: inventory,
-                overview: snapshot.data,
-                isLoading: !snapshot.hasData,
-              );
-            },
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              buildAdminActionButton(
-                icon: Icons.upload_file,
-                label: 'Upload PDF',
-                detail: 'Add a profiled document',
-                onPressed: uploadPDF,
-              ),
-              buildAdminActionButton(
-                icon: Icons.manage_search,
-                label: 'Refresh index',
-                detail: 'Rebuild searchable text',
-                onPressed: indexVaultPdfsFromAdminPanel,
-              ),
-              buildAdminActionButton(
-                icon: Icons.inventory_2_outlined,
-                label: 'Inventory',
-                detail: 'Open vault breakdown',
-                onPressed: showVaultInventory,
-              ),
-              buildAdminActionButton(
-                icon: Icons.manage_accounts_outlined,
-                label: 'User access',
-                detail: 'Review plans and roles',
-                onPressed: showUserAccessOverview,
-              ),
-              buildAdminActionButton(
-                icon: Icons.important_devices_outlined,
-                label: 'Devices',
-                detail: 'Trust or block devices',
-                onPressed: showDeviceAuthorizationOverview,
-              ),
-              buildAdminActionButton(
-                icon: Icons.insights_outlined,
-                label: 'Analytics',
-                detail: 'Reader activity report',
-                onPressed: showReaderAnalytics,
-              ),
-              buildAdminActionButton(
-                icon: Icons.campaign_outlined,
-                label: 'Post update',
-                detail: 'Notify reader dashboards',
-                onPressed: showReaderAnnouncementComposer,
-              ),
-              buildAdminActionButton(
-                icon: Icons.lightbulb_outline,
-                label: 'Suggestions',
-                detail: 'Review reader ideas',
-                onPressed: showReaderSuggestionInbox,
-              ),
-              buildAdminActionButton(
-                icon: Icons.workspace_premium_outlined,
-                label: 'Requests',
-                detail: 'Review subscription asks',
-                onPressed: showSubscriptionRequestInbox,
-              ),
-              buildAdminActionButton(
-                icon: Icons.webhook_outlined,
-                label: 'Webhooks',
-                detail: 'Payment event audit',
-                onPressed: showPaymentWebhookAudit,
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final panelWidth = constraints.maxWidth > 1060
-                  ? (constraints.maxWidth - 28) / 3
-                  : constraints.maxWidth > 760
-                  ? (constraints.maxWidth - 14) / 2
-                  : constraints.maxWidth;
-              return Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  SizedBox(
-                    width: panelWidth,
-                    child: buildAdminDocumentMixPanel(inventory),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: FutureBuilder<_DashboardAdminOverview>(
-                      future: overviewFuture,
-                      builder: (context, snapshot) {
-                        if (snapshot.hasError) {
-                          return const Text(
-                            'Member mix could not load right now.',
-                            style: TextStyle(color: Colors.redAccent),
-                          );
-                        }
-
-                        if (!snapshot.hasData) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: LinearProgressIndicator(
-                              color: Colors.greenAccent,
-                              backgroundColor: Colors.white10,
-                            ),
-                          );
-                        }
-
-                        return buildAdminMemberMixPanel(snapshot.data!.users);
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: FutureBuilder<_DashboardAdminOverview>(
-                      future: overviewFuture,
-                      builder: (context, snapshot) {
-                        if (snapshot.hasError) {
-                          return const Text(
-                            'Device trust mix could not load right now.',
-                            style: TextStyle(color: Colors.redAccent),
-                          );
-                        }
-
-                        if (!snapshot.hasData) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: LinearProgressIndicator(
-                              color: Colors.greenAccent,
-                              backgroundColor: Colors.white10,
-                            ),
-                          );
-                        }
-
-                        return buildAdminDeviceTrustPanel(
-                          snapshot.data!.devices,
-                        );
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Documents by category',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        buildAdminCategoryBars(inventory),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Most active documents',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        FutureBuilder<_DashboardAdminOverview>(
-                          future: overviewFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return const Text(
-                                'Document activity could not load right now.',
-                                style: TextStyle(color: Colors.redAccent),
-                              );
-                            }
-
-                            if (!snapshot.hasData) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: LinearProgressIndicator(
-                                  color: Colors.greenAccent,
-                                  backgroundColor: Colors.white10,
-                                ),
-                              );
-                            }
-
-                            return buildAdminTopDocumentsList(
-                              snapshot.data!.activity,
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Recent document updates',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        buildAdminRecentDocuments(inventory),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Recent reader activity',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        FutureBuilder<_DashboardAdminOverview>(
-                          future: overviewFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return const Text(
-                                'Admin activity could not load right now.',
-                                style: TextStyle(color: Colors.redAccent),
-                              );
-                            }
-
-                            if (!snapshot.hasData) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: LinearProgressIndicator(
-                                  color: Colors.greenAccent,
-                                  backgroundColor: Colors.white10,
-                                ),
-                              );
-                            }
-
-                            return buildAdminActivityList(
-                              snapshot.data!.activity,
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ],
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -12370,114 +12463,258 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   )
-                : SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          canAccessMainVault
-                              ? 'Main Vault Access: Active'
-                              : 'Free Zone Only - Subscribe to unlock the Main Vault',
-                          style: const TextStyle(
-                            color: Colors.greenAccent,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
+                : ListView(
+                    controller: dashboardScrollController,
+                    primary: false,
+                    physics: isAndroidAppShell
+                        ? const NeverScrollableScrollPhysics()
+                        : const ClampingScrollPhysics(),
+                    dragStartBehavior: DragStartBehavior.down,
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    children: [
+                      Text(
+                        canAccessMainVault
+                            ? 'Main Vault Access: Active'
+                            : 'Free Zone Only - Subscribe to unlock the Main Vault',
+                        style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 30),
+
+                      if (pdfLoadError != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.redAccent),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                color: Colors.redAccent,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  pdfLoadError!,
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: loadPDFs,
+                                child: const Text(
+                                  'Retry',
+                                  style: TextStyle(color: Colors.greenAccent),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
+                        const SizedBox(height: 20),
+                      ],
 
-                        const SizedBox(height: 30),
+                      if (userAccess.isAdmin) ...[
+                        buildAdminCommandCenter(vaultInventory),
+                        const SizedBox(height: 24),
+                      ],
 
-                        if (pdfLoadError != null) ...[
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.redAccent.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.redAccent),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.error_outline,
-                                  color: Colors.redAccent,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    pdfLoadError!,
+                      FutureBuilder<_ReaderDashboardOverview>(
+                        future: readerOverviewFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.redAccent),
+                              ),
+                              child: const Text(
+                                'My dashboard could not load right now.',
+                                style: TextStyle(color: Colors.redAccent),
+                              ),
+                            );
+                          }
+
+                          if (!snapshot.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: LinearProgressIndicator(
+                                color: Colors.greenAccent,
+                                backgroundColor: Colors.white10,
+                              ),
+                            );
+                          }
+
+                          return buildReaderDashboardPreview(snapshot.data!);
+                        },
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      buildDashboardDocumentSearch(),
+                      buildDashboardActiveFilterBar(dashboardFilterLabels),
+
+                      const SizedBox(height: 20),
+
+                      Text(
+                        vaultDocumentSectionTitle(
+                          title: 'FREE ACCESS ZONE',
+                          visibleCount: filteredFreePdfFiles.length,
+                          totalCount: freePdfFiles.length,
+                          hasActiveFilter: hasFreeDocumentFilter,
+                        ),
+                        style: const TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      buildDocumentCategoryFilter(
+                        filterId: 'free',
+                        documents: freePdfFiles,
+                        selectedCategory: freeDocumentCategoryFilter,
+                        onChanged: (category) {
+                          setState(() {
+                            freeDocumentCategoryFilter = category;
+                          });
+                        },
+                      ),
+
+                      if (isLoading && freePdfFiles.isEmpty)
+                        buildDocumentListLoading('Loading free PDFs...')
+                      else if (freePdfFiles.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'No free PDFs available yet.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        )
+                      else if (filteredFreePdfFiles.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            hasDashboardDocumentSearch
+                                ? 'No free PDFs match these filters.'
+                                : 'No free PDFs match this category.',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        )
+                      else
+                        Column(
+                          children: List<Widget>.generate(
+                            filteredFreePdfFiles.length,
+                            (index) {
+                              final pdfFile = filteredFreePdfFiles[index];
+
+                              return Card(
+                                color: Colors.orange.withValues(alpha: 0.12),
+                                child: ListTile(
+                                  leading: const Icon(
+                                    Icons.picture_as_pdf,
+                                    color: Colors.orangeAccent,
+                                  ),
+                                  title: Text(
+                                    pdfFile['name'],
                                     style: const TextStyle(color: Colors.white),
                                   ),
-                                ),
-                                TextButton(
-                                  onPressed: loadPDFs,
-                                  child: const Text(
-                                    'Retry',
-                                    style: TextStyle(color: Colors.greenAccent),
+                                  subtitle: Text(
+                                    vaultDocumentListSubtitle(
+                                      pdfFile,
+                                      accessLabel: 'Free Access PDF',
+                                    ),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
                                   ),
+                                  trailing: userAccess.canManageVault
+                                      ? IconButton(
+                                          tooltip: 'Manage document',
+                                          icon: const Icon(
+                                            Icons.admin_panel_settings,
+                                          ),
+                                          color: Colors.orangeAccent,
+                                          onPressed: () {
+                                            showVaultDocumentAdminDialog(
+                                              pdfFile,
+                                              accessLabel: 'Free Access PDF',
+                                            );
+                                          },
+                                        )
+                                      : null,
+                                  onTap: () async {
+                                    final pdfUrl =
+                                        await resolveSearchResultPdfUrl(
+                                          pdfFile,
+                                        );
+
+                                    if (pdfUrl == null) return;
+
+                                    if (!context.mounted) return;
+
+                                    notifyNativeDashboardScroll(enabled: false);
+                                    await Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => PDFViewerScreen(
+                                          pdfUrl: pdfUrl,
+                                          title: pdfFile['name'],
+                                          accessLevel:
+                                              pdfFile['accessLevel']
+                                                  ?.toString() ??
+                                              'free',
+                                          readerMode:
+                                              pdfFile['readerMode']
+                                                  ?.toString() ??
+                                              '',
+                                          protectionMode:
+                                              pdfFile['protectionMode']
+                                                  ?.toString() ??
+                                              '',
+                                          openSource: 'free_dashboard',
+                                          storagePath:
+                                              pdfFile['storagePath']
+                                                  ?.toString() ??
+                                              '',
+                                        ),
+                                      ),
+                                    );
+                                    if (mounted) {
+                                      notifyNativeDashboardScroll(
+                                        enabled: true,
+                                      );
+                                    }
+                                  },
                                 ),
-                              ],
-                            ),
+                              );
+                            },
                           ),
-                          const SizedBox(height: 20),
-                        ],
-
-                        if (userAccess.isAdmin) ...[
-                          buildAdminCommandCenter(vaultInventory),
-                          const SizedBox(height: 24),
-                        ],
-
-                        FutureBuilder<_ReaderDashboardOverview>(
-                          future: readerOverviewFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.redAccent.withValues(
-                                    alpha: 0.12,
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.redAccent),
-                                ),
-                                child: const Text(
-                                  'My dashboard could not load right now.',
-                                  style: TextStyle(color: Colors.redAccent),
-                                ),
-                              );
-                            }
-
-                            if (!snapshot.hasData) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: LinearProgressIndicator(
-                                  color: Colors.greenAccent,
-                                  backgroundColor: Colors.white10,
-                                ),
-                              );
-                            }
-
-                            return buildReaderDashboardPreview(snapshot.data!);
-                          },
                         ),
 
-                        const SizedBox(height: 24),
-
-                        buildDashboardDocumentSearch(),
-                        buildDashboardActiveFilterBar(dashboardFilterLabels),
-
-                        const SizedBox(height: 20),
-
+                      const SizedBox(height: 30),
+                      if (canAccessMainVault) ...[
                         Text(
                           vaultDocumentSectionTitle(
-                            title: 'FREE ACCESS ZONE',
-                            visibleCount: filteredFreePdfFiles.length,
-                            totalCount: freePdfFiles.length,
-                            hasActiveFilter: hasFreeDocumentFilter,
+                            title: 'MAIN VAULT PDFs',
+                            visibleCount: filteredPremiumPdfFiles.length,
+                            totalCount: premiumPdfFiles.length,
+                            hasActiveFilter: hasPremiumDocumentFilter,
                           ),
                           style: const TextStyle(
-                            color: Colors.orangeAccent,
+                            color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
@@ -12486,80 +12723,85 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: 15),
 
                         buildDocumentCategoryFilter(
-                          filterId: 'free',
-                          documents: freePdfFiles,
-                          selectedCategory: freeDocumentCategoryFilter,
+                          filterId: 'premium',
+                          documents: premiumPdfFiles,
+                          selectedCategory: premiumDocumentCategoryFilter,
                           onChanged: (category) {
                             setState(() {
-                              freeDocumentCategoryFilter = category;
+                              premiumDocumentCategoryFilter = category;
                             });
                           },
                         ),
 
-                        if (isLoading && freePdfFiles.isEmpty)
-                          buildDocumentListLoading('Loading free PDFs...')
-                        else if (freePdfFiles.isEmpty)
+                        if (isLoading && premiumPdfFiles.isEmpty)
+                          buildDocumentListLoading('Loading protected PDFs...')
+                        else if (premiumPdfFiles.isEmpty)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
                             child: Text(
-                              'No free PDFs available yet.',
+                              'No protected PDFs available yet.',
                               style: TextStyle(color: Colors.white70),
                             ),
                           )
-                        else if (filteredFreePdfFiles.isEmpty)
+                        else if (filteredPremiumPdfFiles.isEmpty)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(
                               hasDashboardDocumentSearch
-                                  ? 'No free PDFs match these filters.'
-                                  : 'No free PDFs match this category.',
+                                  ? 'No protected PDFs match these filters.'
+                                  : 'No protected PDFs match this category.',
                               style: const TextStyle(color: Colors.white70),
                             ),
                           )
                         else
                           Column(
                             children: List<Widget>.generate(
-                              filteredFreePdfFiles.length,
+                              filteredPremiumPdfFiles.length,
                               (index) {
-                                final pdfFile = filteredFreePdfFiles[index];
+                                final pdfFile = filteredPremiumPdfFiles[index];
 
                                 return Card(
-                                  color: Colors.orange.withValues(alpha: 0.12),
+                                  color: Colors.green.withValues(alpha: 0.12),
+
                                   child: ListTile(
                                     leading: const Icon(
                                       Icons.picture_as_pdf,
-                                      color: Colors.orangeAccent,
+                                      color: Colors.greenAccent,
                                     ),
+
                                     title: Text(
                                       pdfFile['name'],
                                       style: const TextStyle(
                                         color: Colors.white,
                                       ),
                                     ),
+
                                     subtitle: Text(
                                       vaultDocumentListSubtitle(
                                         pdfFile,
-                                        accessLabel: 'Free Access PDF',
+                                        accessLabel: 'Protected PDF',
                                       ),
                                       style: const TextStyle(
                                         color: Colors.white70,
                                       ),
                                     ),
+
                                     trailing: userAccess.canManageVault
                                         ? IconButton(
                                             tooltip: 'Manage document',
                                             icon: const Icon(
                                               Icons.admin_panel_settings,
                                             ),
-                                            color: Colors.orangeAccent,
+                                            color: Colors.greenAccent,
                                             onPressed: () {
                                               showVaultDocumentAdminDialog(
                                                 pdfFile,
-                                                accessLabel: 'Free Access PDF',
+                                                accessLabel: 'Protected PDF',
                                               );
                                             },
                                           )
                                         : null,
+
                                     onTap: () async {
                                       final pdfUrl =
                                           await resolveSearchResultPdfUrl(
@@ -12570,8 +12812,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                                       if (!context.mounted) return;
 
-                                      Navigator.push(
+                                      notifyNativeDashboardScroll(
+                                        enabled: false,
+                                      );
+                                      await Navigator.push(
                                         context,
+
                                         MaterialPageRoute(
                                           builder: (context) => PDFViewerScreen(
                                             pdfUrl: pdfUrl,
@@ -12579,7 +12825,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             accessLevel:
                                                 pdfFile['accessLevel']
                                                     ?.toString() ??
-                                                'free',
+                                                'premium',
                                             readerMode:
                                                 pdfFile['readerMode']
                                                     ?.toString() ??
@@ -12588,7 +12834,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                 pdfFile['protectionMode']
                                                     ?.toString() ??
                                                 '',
-                                            openSource: 'free_dashboard',
+                                            openSource: 'premium_dashboard',
                                             storagePath:
                                                 pdfFile['storagePath']
                                                     ?.toString() ??
@@ -12596,162 +12842,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           ),
                                         ),
                                       );
+                                      if (mounted) {
+                                        notifyNativeDashboardScroll(
+                                          enabled: true,
+                                        );
+                                      }
                                     },
                                   ),
                                 );
                               },
                             ),
                           ),
-
-                        const SizedBox(height: 30),
-                        if (canAccessMainVault) ...[
-                          Text(
-                            vaultDocumentSectionTitle(
-                              title: 'MAIN VAULT PDFs',
-                              visibleCount: filteredPremiumPdfFiles.length,
-                              totalCount: premiumPdfFiles.length,
-                              hasActiveFilter: hasPremiumDocumentFilter,
-                            ),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-
-                          const SizedBox(height: 15),
-
-                          buildDocumentCategoryFilter(
-                            filterId: 'premium',
-                            documents: premiumPdfFiles,
-                            selectedCategory: premiumDocumentCategoryFilter,
-                            onChanged: (category) {
-                              setState(() {
-                                premiumDocumentCategoryFilter = category;
-                              });
-                            },
-                          ),
-
-                          if (isLoading && premiumPdfFiles.isEmpty)
-                            buildDocumentListLoading(
-                              'Loading protected PDFs...',
-                            )
-                          else if (premiumPdfFiles.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Text(
-                                'No protected PDFs available yet.',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            )
-                          else if (filteredPremiumPdfFiles.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              child: Text(
-                                hasDashboardDocumentSearch
-                                    ? 'No protected PDFs match these filters.'
-                                    : 'No protected PDFs match this category.',
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                            )
-                          else
-                            Column(
-                              children: List<Widget>.generate(
-                                filteredPremiumPdfFiles.length,
-                                (index) {
-                                  final pdfFile =
-                                      filteredPremiumPdfFiles[index];
-
-                                  return Card(
-                                    color: Colors.green.withValues(alpha: 0.12),
-
-                                    child: ListTile(
-                                      leading: const Icon(
-                                        Icons.picture_as_pdf,
-                                        color: Colors.greenAccent,
-                                      ),
-
-                                      title: Text(
-                                        pdfFile['name'],
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                        ),
-                                      ),
-
-                                      subtitle: Text(
-                                        vaultDocumentListSubtitle(
-                                          pdfFile,
-                                          accessLabel: 'Protected PDF',
-                                        ),
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-
-                                      trailing: userAccess.canManageVault
-                                          ? IconButton(
-                                              tooltip: 'Manage document',
-                                              icon: const Icon(
-                                                Icons.admin_panel_settings,
-                                              ),
-                                              color: Colors.greenAccent,
-                                              onPressed: () {
-                                                showVaultDocumentAdminDialog(
-                                                  pdfFile,
-                                                  accessLabel: 'Protected PDF',
-                                                );
-                                              },
-                                            )
-                                          : null,
-
-                                      onTap: () async {
-                                        final pdfUrl =
-                                            await resolveSearchResultPdfUrl(
-                                              pdfFile,
-                                            );
-
-                                        if (pdfUrl == null) return;
-
-                                        if (!context.mounted) return;
-
-                                        Navigator.push(
-                                          context,
-
-                                          MaterialPageRoute(
-                                            builder: (context) =>
-                                                PDFViewerScreen(
-                                                  pdfUrl: pdfUrl,
-                                                  title: pdfFile['name'],
-                                                  accessLevel:
-                                                      pdfFile['accessLevel']
-                                                          ?.toString() ??
-                                                      'premium',
-                                                  readerMode:
-                                                      pdfFile['readerMode']
-                                                          ?.toString() ??
-                                                      '',
-                                                  protectionMode:
-                                                      pdfFile['protectionMode']
-                                                          ?.toString() ??
-                                                      '',
-                                                  openSource:
-                                                      'premium_dashboard',
-                                                  storagePath:
-                                                      pdfFile['storagePath']
-                                                          ?.toString() ??
-                                                      '',
-                                                ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                        ],
                       ],
-                    ),
+                    ],
                   ),
           ),
         ),

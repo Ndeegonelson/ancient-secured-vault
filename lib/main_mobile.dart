@@ -22,7 +22,17 @@ const _readerScreenChannel = MethodChannel(
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ),
+  );
   runApp(const AncientSecureVaultMobileApp());
 }
 
@@ -67,6 +77,14 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   Timer? estimatedProgressTimer;
   Timer? launchSplashTimer;
   bool showLaunchSplash = true;
+  bool dashboardNativeScrollEnabled = false;
+  int? dashboardNativeScrollPointer;
+  double? dashboardNativeScrollLastY;
+  double dashboardNativeScrollDistance = 0;
+  double dashboardNativeScrollPendingDelta = 0;
+  VelocityTracker? dashboardNativeScrollVelocityTracker;
+  Timer? dashboardNativeScrollBatchTimer;
+  Future<void> dashboardNativeScrollDispatch = Future<void>.value();
 
   @override
   void initState() {
@@ -127,8 +145,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
             });
           },
         ),
-      )
-      ..loadRequest(Uri.parse(_vaultUrl));
+      );
 
     if (isIos) {
       iosPurchases = IosInAppPurchaseController(onEvent: emitIosPurchaseEvent);
@@ -154,6 +171,18 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
       );
     }
     controller = webViewController;
+    unawaited(loadVaultPage());
+  }
+
+  Future<void> loadVaultPage() async {
+    final uri = Uri.parse(_vaultUrl);
+    // Local phone tests must always exercise the freshly compiled web bundle.
+    // Clearing the HTTP cache here does not remove Firebase login/local storage,
+    // and this branch is never used by the production vault URL.
+    if (uri.host == '127.0.0.1' || uri.host == 'localhost') {
+      await controller.clearCache();
+    }
+    await controller.loadRequest(uri);
   }
 
   Future<void> handleNativePdfMessage(JavaScriptMessage message) async {
@@ -276,6 +305,13 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
         await _readerScreenChannel.invokeMethod<void>(
           secureScreen ? 'enableSecureScreen' : 'disableSecureScreen',
         );
+      }
+
+      if (payload.containsKey('dashboardScroll')) {
+        dashboardNativeScrollEnabled = payload['dashboardScroll'] == true;
+        if (!dashboardNativeScrollEnabled) {
+          resetDashboardNativeScroll();
+        }
       }
     } on PlatformException {
       // The protected reader remains usable if a device rejects the flag.
@@ -523,38 +559,129 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     Navigator.of(context).maybePop();
   }
 
+  void handleDashboardNativeScrollDown(PointerDownEvent event) {
+    if (!Platform.isAndroid || !dashboardNativeScrollEnabled) return;
+    dashboardNativeScrollPointer = event.pointer;
+    dashboardNativeScrollLastY = event.position.dy;
+    dashboardNativeScrollDistance = 0;
+    dashboardNativeScrollVelocityTracker = VelocityTracker.withKind(event.kind)
+      ..addPosition(event.timeStamp, event.position);
+    enqueueDashboardNativeScroll({'action': 'cancel'});
+  }
+
+  void handleDashboardNativeScrollMove(PointerMoveEvent event) {
+    if (event.pointer != dashboardNativeScrollPointer) return;
+    final previousY = dashboardNativeScrollLastY;
+    if (previousY == null) return;
+    final delta = event.position.dy - previousY;
+    dashboardNativeScrollLastY = event.position.dy;
+    dashboardNativeScrollDistance += delta.abs();
+    dashboardNativeScrollPendingDelta += delta;
+    dashboardNativeScrollVelocityTracker?.addPosition(
+      event.timeStamp,
+      event.position,
+    );
+    dashboardNativeScrollBatchTimer ??= Timer(
+      const Duration(milliseconds: 16),
+      flushDashboardNativeScrollDelta,
+    );
+  }
+
+  void handleDashboardNativeScrollEnd(PointerEvent event) {
+    if (event.pointer != dashboardNativeScrollPointer) return;
+    dashboardNativeScrollVelocityTracker?.addPosition(
+      event.timeStamp,
+      event.position,
+    );
+    final velocity = dashboardNativeScrollVelocityTracker
+        ?.getVelocity()
+        .pixelsPerSecond
+        .dy;
+    flushDashboardNativeScrollDelta();
+    if (dashboardNativeScrollDistance >= 8 && velocity != null) {
+      enqueueDashboardNativeScroll({'action': 'fling', 'velocity': velocity});
+    }
+    resetDashboardNativeScroll();
+  }
+
+  void flushDashboardNativeScrollDelta() {
+    dashboardNativeScrollBatchTimer?.cancel();
+    dashboardNativeScrollBatchTimer = null;
+    final delta = dashboardNativeScrollPendingDelta;
+    dashboardNativeScrollPendingDelta = 0;
+    if (delta.abs() < 0.01) return;
+    enqueueDashboardNativeScroll({'action': 'drag', 'delta': delta});
+  }
+
+  void enqueueDashboardNativeScroll(Map<String, dynamic> event) {
+    dashboardNativeScrollDispatch = dashboardNativeScrollDispatch.then((_) {
+      return emitDashboardNativeScrollEvent(event);
+    });
+  }
+
+  Future<void> emitDashboardNativeScrollEvent(
+    Map<String, dynamic> event,
+  ) async {
+    final detail = jsonEncode(jsonEncode(event));
+    try {
+      await controller.runJavaScript(
+        "window.dispatchEvent(new CustomEvent('ancientVaultDashboardScroll', "
+        "{detail: $detail}));",
+      );
+    } catch (_) {}
+  }
+
+  void resetDashboardNativeScroll() {
+    dashboardNativeScrollBatchTimer?.cancel();
+    dashboardNativeScrollBatchTimer = null;
+    dashboardNativeScrollPointer = null;
+    dashboardNativeScrollLastY = null;
+    dashboardNativeScrollDistance = 0;
+    dashboardNativeScrollPendingDelta = 0;
+    dashboardNativeScrollVelocityTracker = null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (_, _) => handleBackNavigation(),
       child: Scaffold(
-        body: Stack(
-          children: [
-            WebViewWidget(
-              controller: controller,
-              gestureRecognizers: Platform.isAndroid
-                  ? {
-                      Factory<OneSequenceGestureRecognizer>(
-                        EagerGestureRecognizer.new,
-                      ),
-                    }
-                  : const <Factory<OneSequenceGestureRecognizer>>{},
-            ),
-            if (showLaunchSplash) const _VaultLaunchSplash(),
-            if (loadProgress < 100 && !showLaunchSplash)
-              LinearProgressIndicator(
-                value: loadProgress == 0 ? null : loadProgress / 100,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: handleDashboardNativeScrollDown,
+                onPointerMove: handleDashboardNativeScrollMove,
+                onPointerUp: handleDashboardNativeScrollEnd,
+                onPointerCancel: handleDashboardNativeScrollEnd,
+                child: WebViewWidget(
+                  controller: controller,
+                  gestureRecognizers: Platform.isAndroid
+                      ? <Factory<OneSequenceGestureRecognizer>>{
+                          Factory<EagerGestureRecognizer>(
+                            EagerGestureRecognizer.new,
+                          ),
+                        }
+                      : const <Factory<OneSequenceGestureRecognizer>>{},
+                ),
               ),
-            if (loadError != null)
-              _LoadErrorBanner(
-                message: loadError!,
-                onRetry: () {
-                  setState(() => loadError = null);
-                  controller.loadRequest(Uri.parse(_vaultUrl));
-                },
-              ),
-          ],
+              if (showLaunchSplash) const _VaultLaunchSplash(),
+              if (loadProgress < 100 && !showLaunchSplash)
+                LinearProgressIndicator(
+                  value: loadProgress == 0 ? null : loadProgress / 100,
+                ),
+              if (loadError != null)
+                _LoadErrorBanner(
+                  message: loadError!,
+                  onRetry: () {
+                    setState(() => loadError = null);
+                    controller.loadRequest(Uri.parse(_vaultUrl));
+                  },
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -563,6 +690,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   @override
   void dispose() {
     launchSplashTimer?.cancel();
+    dashboardNativeScrollBatchTimer?.cancel();
     estimatedProgressTimer?.cancel();
     nativeTts.stop();
     unawaited(disableReaderStayAwake());
