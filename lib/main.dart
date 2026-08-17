@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,7 +13,6 @@ import 'firebase_options.dart';
 import 'services/reader_tts_service.dart';
 import 'services/reader_narration_progress_repository.dart';
 import 'services/reader_narration_progress_controller.dart';
-import 'services/reader_narration_text_normalizer.dart';
 import 'services/reader_narration_navigator.dart';
 import 'services/reader_narration_preferences_repository.dart';
 import 'services/reader_narration_preferences_controller.dart';
@@ -62,9 +61,6 @@ import 'platform/browser_ui_web_stub.dart'
 import 'web_js_util_stub.dart'
     if (dart.library.js_interop) 'web_js_util.dart'
     as js_util;
-import 'web_js_util_stub.dart'
-    if (dart.library.js_interop) 'web_js_util.dart'
-    as pdf_js_util;
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
@@ -76,12 +72,6 @@ const UserDeviceAuthorizationMode readerDeviceAuthorizationMode =
 const MethodChannel readerScreenSecurityChannel = MethodChannel(
   'ancient_secure_docs/screen_security',
 );
-
-bool get isIosAppShell {
-  return html.window.navigator.userAgent.toLowerCase().contains(
-    'ancientsecurevaultiosapp',
-  );
-}
 
 class AncientVaultScrollBehavior extends MaterialScrollBehavior {
   const AncientVaultScrollBehavior();
@@ -97,10 +87,7 @@ class AncientVaultScrollBehavior extends MaterialScrollBehavior {
 
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) {
-    // The Android app hosts the web build inside a WebView. Clamping physics
-    // gives long vault pages direct, responsive Android-style flings instead
-    // of the slower iOS-style bounce applied previously.
-    return const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+    return const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
   }
 }
 
@@ -199,18 +186,18 @@ class _AncientSecureDocsBootstrapState
   }
 
   Future<void> initializeSecureServices() async {
-    if (Firebase.apps.isEmpty) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      ).timeout(
-        const Duration(seconds: 20),
-        onTimeout: () {
-          throw TimeoutException(
-            'Secure services took too long to start. Please retry.',
-          );
-        },
-      );
-    }
+    if (Firebase.apps.isNotEmpty) return;
+
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {
+        throw TimeoutException(
+          'Secure services took too long to start. Please retry.',
+        );
+      },
+    );
 
     // Web authentication should survive refreshes and app restarts. Firebase
     // uses local persistence by default, but making it explicit prevents a
@@ -1057,7 +1044,6 @@ class RegistrationCountryOption {
 }
 
 const List<RegistrationCountryOption> registrationCountryOptions = [
-  RegistrationCountryOption(name: "Ghana", code: "GH"),
   RegistrationCountryOption(name: "Afghanistan", code: "AF"),
   RegistrationCountryOption(name: "Albania", code: "AL"),
   RegistrationCountryOption(name: "Algeria", code: "DZ"),
@@ -1126,6 +1112,7 @@ const List<RegistrationCountryOption> registrationCountryOptions = [
   RegistrationCountryOption(name: "Gambia", code: "GM"),
   RegistrationCountryOption(name: "Georgia", code: "GE"),
   RegistrationCountryOption(name: "Germany", code: "DE"),
+  RegistrationCountryOption(name: "Ghana", code: "GH"),
   RegistrationCountryOption(name: "Greece", code: "GR"),
   RegistrationCountryOption(name: "Grenada", code: "GD"),
   RegistrationCountryOption(name: "Guatemala", code: "GT"),
@@ -1263,6 +1250,40 @@ const List<RegistrationCountryOption> registrationCountryOptions = [
   RegistrationCountryOption(name: "Other", code: "UN"),
 ];
 
+RegistrationCountryOption registrationCountryForLocale(Locale locale) {
+  final localeCountryCode = locale.countryCode?.trim().toUpperCase();
+  if (localeCountryCode != null && localeCountryCode.isNotEmpty) {
+    for (final country in registrationCountryOptions) {
+      if (country.code == localeCountryCode) return country;
+    }
+  }
+
+  return registrationCountryOptions.firstWhere(
+    (country) => country.code == 'UN',
+  );
+}
+
+RegistrationCountryOption registrationCountryForLocales(
+  Iterable<Locale> locales,
+) {
+  for (final locale in locales) {
+    final country = registrationCountryForLocale(locale);
+    if (country.code != 'UN') return country;
+  }
+  return registrationCountryForLocale(const Locale('und'));
+}
+
+RegistrationCountryOption registrationCountryForCode(String? countryCode) {
+  final normalized = countryCode?.trim().toUpperCase();
+  if (normalized == null || normalized.length != 2) {
+    return registrationCountryForLocale(const Locale('und'));
+  }
+  return registrationCountryOptions.firstWhere(
+    (country) => country.code == normalized,
+    orElse: () => registrationCountryForLocale(const Locale('und')),
+  );
+}
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, this.initialMode = AuthScreenMode.signIn});
 
@@ -1274,7 +1295,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final nameController = TextEditingController();
-  String selectedCountry = registrationCountryOptions.first.name;
+  late String selectedCountry;
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
@@ -1287,6 +1308,16 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     mode = widget.initialMode;
+    final deviceCountry = registrationCountryForCode(
+      Uri.base.queryParameters['deviceCountry'],
+    );
+    selectedCountry =
+        (deviceCountry.code != 'UN'
+                ? deviceCountry
+                : registrationCountryForLocales(
+                    WidgetsBinding.instance.platformDispatcher.locales,
+                  ))
+            .name;
   }
 
   @override
@@ -1307,9 +1338,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String get helperText => switch (mode) {
     AuthScreenMode.signIn => 'Login to continue into the secure ecosystem.',
     AuthScreenMode.signUp =>
-      isIosAppShell
-          ? 'Create a free account for testing, then upgrade with the App Store for \$120 per year.'
-          : 'Create a free account for testing, then upgrade through Stripe or Paystack when ready.',
+      'Create a free account for testing, then upgrade through Stripe or Paystack when ready.',
     AuthScreenMode.resetPassword =>
       'Enter your email address and we will send a secure reset link.',
   };
@@ -1438,7 +1467,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 keyboardDismissBehavior:
                                     ScrollViewKeyboardDismissBehavior.onDrag,
                                 itemCount: countries.length,
-                                separatorBuilder: (_, _) => const Divider(
+                                separatorBuilder: (_, __) => const Divider(
                                   height: 1,
                                   color: Colors.white10,
                                 ),
@@ -1451,7 +1480,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     dense: true,
                                     selected: isSelected,
                                     selectedTileColor: Colors.greenAccent
-                                        .withValues(alpha: 0.10),
+                                        .withOpacity(0.10),
                                     title: Text(
                                       country.label,
                                       style: TextStyle(
@@ -1532,10 +1561,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       if (mode == AuthScreenMode.signIn) {
-        final credential = await FirebaseAuth.instance
-            .signInWithEmailAndPassword(email: email, password: password);
-        await credential.user?.getIdToken();
-        closeAuthenticationScreen();
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        openDashboard();
         return;
       }
 
@@ -1548,8 +1578,7 @@ class _LoginScreenState extends State<LoginScreen> {
           displayName: displayName,
           country: country,
         );
-        await credential.user?.getIdToken();
-        closeAuthenticationScreen();
+        openDashboard();
         return;
       }
 
@@ -1593,13 +1622,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void closeAuthenticationScreen() {
+  void openDashboard() {
     if (!mounted) return;
 
-    // The persistent auth gate owns the dashboard. Closing the login route
-    // avoids stacking a second dashboard above it, which made Back expose the
-    // old public route and look like an unexpected logout.
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const DashboardScreen()),
+    );
   }
 
   void showAuthMessage(String message) {
@@ -1682,9 +1711,26 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextField(
                         controller: nameController,
                         textInputAction: TextInputAction.next,
+                        cursorColor: Colors.greenAccent,
+                        style: const TextStyle(
+                          color: Color(0xFFF7F8FA),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                         decoration: const InputDecoration(
                           hintText: 'Full Name',
-                          border: OutlineInputBorder(
+                          hintStyle: TextStyle(color: Color(0xFF9EA3AE)),
+                          filled: true,
+                          fillColor: Color(0xFF24262D),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF737984)),
+                            borderRadius: BorderRadius.all(Radius.circular(18)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(
+                              color: Colors.greenAccent,
+                              width: 1.6,
+                            ),
                             borderRadius: BorderRadius.all(Radius.circular(18)),
                           ),
                         ),
@@ -1697,9 +1743,22 @@ class _LoginScreenState extends State<LoginScreen> {
                           decoration: const InputDecoration(
                             labelText: 'Country',
                             labelStyle: TextStyle(color: Colors.white70),
+                            helperText:
+                                'Detected from this device • Tap to change',
+                            helperStyle: TextStyle(color: Color(0xFF9EA3AE)),
                             filled: true,
-                            fillColor: Colors.white10,
-                            border: OutlineInputBorder(
+                            fillColor: Color(0xFF24262D),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF737984)),
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(18),
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderSide: BorderSide(
+                                color: Colors.greenAccent,
+                                width: 1.6,
+                              ),
                               borderRadius: BorderRadius.all(
                                 Radius.circular(18),
                               ),
@@ -2090,8 +2149,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> freePdfFiles = [];
   List<Map<String, dynamic>> premiumPdfFiles = [];
 
-  bool isLoading = true;
-  bool isDashboardBootstrapping = false;
+  bool isLoading = false;
+  bool isDashboardBootstrapping = true;
   UserAccessState userAccess = const UserAccessState();
   String? pdfLoadError;
   String searchMode = 'all';
@@ -2155,130 +2214,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<_DashboardAdminOverview>? adminOverviewFuture;
   Future<_ReaderDashboardOverview>? readerDashboardFuture;
   bool handledSubscriptionReturn = false;
-  Object? iosPurchaseEventHandler;
-  String iosSubscriptionPrice = '';
-  String iosSubscriptionTitle = 'Premium Yearly';
-  bool iosPurchaseInteractionActive = false;
+  bool adminCommandCenterExpanded = false;
+  bool readerDashboardPreviewExpanded = false;
 
   @override
   void initState() {
     super.initState();
-    registerIosPurchaseBridge();
-    readerDashboardFuture = loadReaderDashboardOverview();
     loadDashboardData();
-  }
-
-  void registerIosPurchaseBridge() {
-    if (!isIosAppShell) return;
-
-    final handler = js_util.allowInterop((Object event) {
-      final rawDetail = js_util.getProperty<Object?>(event, 'detail');
-      if (rawDetail == null) return;
-      try {
-        final decoded = jsonDecode(rawDetail.toString());
-        if (decoded is Map<String, dynamic>) {
-          handleIosPurchaseEvent(decoded);
-        }
-      } catch (_) {}
-    });
-    iosPurchaseEventHandler = handler;
-    js_util.callMethod<void>(html.window, 'addEventListener', [
-      'ancientVaultIap',
-      handler,
-    ]);
-    unawaited(requestIosPurchaseAction('status', requireAuthentication: false));
-  }
-
-  void handleIosPurchaseEvent(Map<String, dynamic> event) {
-    if (!mounted) return;
-
-    final type = event['type']?.toString() ?? '';
-    final message = event['message']?.toString() ?? '';
-    if ((type == 'error' || type == 'unavailable') &&
-        (event['silent'] == true || !iosPurchaseInteractionActive)) {
-      return;
-    }
-    if (type == 'ready') {
-      setState(() {
-        iosSubscriptionPrice = event['price']?.toString().trim() ?? '';
-        iosSubscriptionTitle =
-            event['title']?.toString().trim().isNotEmpty == true
-            ? event['title'].toString().trim()
-            : 'Premium Yearly';
-      });
-      return;
-    }
-
-    if (type == 'success') {
-      iosPurchaseInteractionActive = false;
-      showDashboardMessage(message, color: Colors.greenAccent);
-      unawaited(refreshAccessAfterIosPurchase());
-      return;
-    }
-    if (type == 'simulatorSuccess') {
-      iosPurchaseInteractionActive = false;
-      showDashboardMessage(message, color: Colors.greenAccent);
-      return;
-    }
-    if (type == 'cancelled') {
-      iosPurchaseInteractionActive = false;
-    }
-    if (type == 'error' || type == 'unavailable') {
-      showDashboardMessage(message, color: Colors.redAccent);
-      return;
-    }
-    if (message.isNotEmpty) {
-      showDashboardMessage(message, color: Colors.orangeAccent);
-    }
-  }
-
-  Future<void> refreshAccessAfterIosPurchase() async {
-    await waitForStripeSubscriptionAccess();
-    if (!mounted) return;
-
-    refreshReaderDashboard();
-    if (userAccess.canAccessMainVault) {
-      showSubscriptionActivatedDialog();
-    }
-  }
-
-  Future<void> requestIosPurchaseAction(
-    String action, {
-    bool requireAuthentication = true,
-  }) async {
-    if (!isIosAppShell) {
-      throw StateError(
-        'App Store purchases are available only in the iOS app.',
-      );
-    }
-
-    String? idToken;
-    if (requireAuthentication) {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        throw StateError('Sign in before using App Store purchases.');
-      }
-      idToken = await user.getIdToken(true);
-      if (idToken == null || idToken.trim().isEmpty) {
-        throw StateError('Could not authorize the App Store purchase.');
-      }
-    }
-
-    final bridge = js_util.getProperty<Object?>(html.window, 'AncientVaultIap');
-    if (bridge == null) {
-      throw StateError('The native App Store purchase bridge is unavailable.');
-    }
-
-    if (action == 'purchase' || action == 'restore') {
-      iosPurchaseInteractionActive = true;
-    }
-
-    js_util.callMethod<void>(bridge, 'postMessage', [
-      jsonEncode({
-        'action': action,
-        if (idToken != null) 'firebaseIdToken': idToken,
-      }),
-    ]);
   }
 
   Future<void> loadDashboardData() async {
@@ -2286,11 +2228,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await handleSubscriptionReturn();
     if (!mounted) return;
 
-    if (userAccess.canAccessMainVault || userAccess.isAdmin) {
-      setState(() {
-        readerDashboardFuture = loadReaderDashboardOverview();
-      });
-    }
+    setState(() {
+      isDashboardBootstrapping = false;
+    });
     unawaited(loadPDFs());
   }
 
@@ -2452,45 +2392,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
-    var userRecords = <ReaderActivityRecord>[];
-    var savedPositions = <ReaderSavedPosition>[];
-    var bookmarks = <ReaderBookmark>[];
-    var notes = <ReaderNote>[];
-    var highlights = <ReaderHighlight>[];
-    var announcements = <ReaderAnnouncement>[];
-    var suggestions = <ReaderSuggestion>[];
-    var devices = <UserDeviceRecord>[];
-    var subscriptionRequests = <UserSubscriptionRequest>[];
+    final userRecords = await readerActivityRepository.listRecentRecordsForUser(
+      userEmail: userEmail,
+      limit: 80,
+    );
 
-    await Future.wait<void>([
-      readerActivityRepository
-          .listRecentRecordsForUser(userEmail: userEmail, limit: 80)
-          .then((value) => userRecords = value),
-      savedPositionRepository
-          .listForUser(userEmail: userEmail, limit: 8)
-          .then((value) => savedPositions = value),
-      readerBookmarkRepository
-          .listForUser(userEmail: userEmail, limit: 8)
-          .then((value) => bookmarks = value),
-      readerNoteRepository
-          .listForUser(userEmail: userEmail, limit: 8)
-          .then((value) => notes = value),
-      readerHighlightRepository
-          .listForUser(userEmail: userEmail, limit: 8)
-          .then((value) => highlights = value),
-      readerAnnouncementRepository
-          .listForUser(access: userAccess, limit: 20)
-          .then((value) => announcements = value),
-      readerSuggestionRepository
-          .listForUser(userEmail: userEmail, limit: 8)
-          .then((value) => suggestions = value),
-      deviceAuthorizationRepository
-          .listForUser(userEmail: userEmail, limit: 8)
-          .then((value) => devices = value),
-      subscriptionRequestRepository
-          .listForUser(userEmail: userEmail, limit: 6)
-          .then((value) => subscriptionRequests = value),
-    ]);
+    final savedPositions = await savedPositionRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final bookmarks = await readerBookmarkRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final notes = await readerNoteRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final highlights = await readerHighlightRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final announcements = await readerAnnouncementRepository.listForUser(
+      access: userAccess,
+      limit: 20,
+    );
+    final suggestions = await readerSuggestionRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final devices = await deviceAuthorizationRepository.listForUser(
+      userEmail: userEmail,
+      limit: 8,
+    );
+    final subscriptionRequests = await subscriptionRequestRepository
+        .listForUser(userEmail: userEmail, limit: 6);
 
     return _ReaderDashboardOverview(
       activity: const ReaderActivityAnalytics().summarize(userRecords),
@@ -2521,13 +2457,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    final purchaseHandler = iosPurchaseEventHandler;
-    if (purchaseHandler != null) {
-      js_util.callMethod<void>(html.window, 'removeEventListener', [
-        'ancientVaultIap',
-        purchaseHandler,
-      ]);
-    }
     dashboardDocumentSearchController.dispose();
     super.dispose();
   }
@@ -2852,7 +2781,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       )
                     else
                       ...summary.categoryCounts.map(
-                        (categoryCount) => ListTile(
+                        (count) => ListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
                           hoverColor: Colors.greenAccent.withValues(
@@ -2863,19 +2792,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             color: Colors.greenAccent,
                           ),
                           title: Text(
-                            categoryCount.category,
+                            count.category,
                             style: const TextStyle(color: Colors.white70),
                           ),
                           subtitle: Text(
-                            '${categoryCount.freeCount} free | '
-                            '${categoryCount.premiumCount} premium',
+                            '${count.freeCount} free | '
+                            '${count.premiumCount} premium',
                             style: const TextStyle(color: Colors.white38),
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                categoryCount.totalCount.toString(),
+                                count.totalCount.toString(),
                                 style: const TextStyle(
                                   color: Colors.greenAccent,
                                   fontWeight: FontWeight.bold,
@@ -2891,10 +2820,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           onTap: () {
                             setState(() {
-                              freeDocumentCategoryFilter =
-                                  categoryCount.category;
-                              premiumDocumentCategoryFilter =
-                                  categoryCount.category;
+                              freeDocumentCategoryFilter = count.category;
+                              premiumDocumentCategoryFilter = count.category;
                             });
                             Navigator.pop(context);
                           },
@@ -6788,27 +6715,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     final largestCount = inventory.categoryCounts
-        .map((categoryCount) => categoryCount.totalCount)
+        .map((count) => count.totalCount)
         .fold<int>(1, math.max);
 
     return Column(
-      children: inventory.categoryCounts.take(6).map((categoryCount) {
-        final progress = categoryCount.totalCount / largestCount;
+      children: inventory.categoryCounts.take(6).map((count) {
+        final progress = count.totalCount / largestCount;
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () {
               setState(() {
-                freeDocumentCategoryFilter = categoryCount.category;
-                premiumDocumentCategoryFilter = categoryCount.category;
+                freeDocumentCategoryFilter = count.category;
+                premiumDocumentCategoryFilter = count.category;
               });
               ScaffoldMessenger.of(context).hideCurrentSnackBar();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(
-                    'Dashboard filtered to ${categoryCount.category}.',
-                  ),
+                  content: Text('Dashboard filtered to ${count.category}.'),
                 ),
               );
             },
@@ -6821,12 +6746,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          categoryCount.category,
+                          count.category,
                           style: const TextStyle(color: Colors.white70),
                         ),
                       ),
                       Text(
-                        '${categoryCount.totalCount}',
+                        '${count.totalCount}',
                         style: const TextStyle(color: Colors.white54),
                       ),
                       const SizedBox(width: 8),
@@ -8084,411 +8009,430 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onPressed: refreshDashboardAdminOverview,
                 icon: const Icon(Icons.refresh, color: Colors.greenAccent),
               ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              buildAdminMetricTile(
-                icon: Icons.folder_copy_outlined,
-                label: 'Vault documents',
-                value: inventory.totalCount.toString(),
-                detail:
-                    '${inventory.freeCount} free | ${inventory.premiumCount} protected',
-                color: Colors.greenAccent,
-              ),
-              buildAdminMetricTile(
-                icon: Icons.category_outlined,
-                label: 'Categories',
-                value: inventory.categoryCounts.length.toString(),
-                detail: inventory.latestDocument == null
-                    ? 'No recent document yet'
-                    : 'Latest: ${inventory.latestDocument!.name}',
-                color: Colors.orangeAccent,
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  return buildAdminMetricTile(
-                    icon: Icons.people_alt_outlined,
-                    label: 'Members',
-                    value: overview?.users.totalCount.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading access summary'
-                        : '${overview.users.adminCount} admins | ${overview.users.premiumCount} premium | ${overview.users.freeCount} free',
-                    color: Colors.lightBlueAccent,
-                  );
+              IconButton(
+                tooltip: adminCommandCenterExpanded
+                    ? 'Collapse admin command center'
+                    : 'Expand admin command center',
+                onPressed: () {
+                  setState(() {
+                    adminCommandCenterExpanded = !adminCommandCenterExpanded;
+                  });
                 },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  return buildAdminMetricTile(
-                    icon: Icons.devices_other_outlined,
-                    label: 'Devices',
-                    value: overview?.devices.totalCount.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading device summary'
-                        : '${overview.devices.pendingCount} pending | ${overview.devices.trustedCount} trusted | ${overview.devices.blockedCount} blocked',
-                    color: Colors.pinkAccent,
-                  );
-                },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  return buildAdminMetricTile(
-                    icon: Icons.insights_outlined,
-                    label: 'Reader events',
-                    value:
-                        overview?.activity.totalEventCount.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading reader activity'
-                        : '${overview.activity.uniqueReaderCount} readers | ${overview.activity.blockedAccessCount} blocked',
-                    color: Colors.cyanAccent,
-                  );
-                },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  final count = overview?.manualProofReviewCount;
-                  return buildAdminMetricTile(
-                    icon: Icons.receipt_long_outlined,
-                    label: 'Payment proofs',
-                    value: count?.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading payment proof manager'
-                        : count == 0
-                        ? 'All payment records ready'
-                        : '$count manual pending approval',
-                    color: count == null || count == 0
-                        ? Colors.white54
-                        : Colors.orangeAccent,
-                    onTap: showSubscriptionRequestInbox,
-                  );
-                },
-              ),
-              FutureBuilder<_DashboardAdminOverview>(
-                future: overviewFuture,
-                builder: (context, snapshot) {
-                  final overview = snapshot.data;
-                  final issueCount = overview?.webhookIssueCount;
-                  final processingCount = overview?.webhookProcessingCount;
-                  return buildAdminMetricTile(
-                    icon: Icons.webhook_outlined,
-                    label: 'Webhooks',
-                    value: overview?.webhookEvents.length.toString() ?? '...',
-                    detail: overview == null
-                        ? 'Loading webhook audit'
-                        : issueCount! > 0
-                        ? '$issueCount failed event${issueCount == 1 ? '' : 's'}'
-                        : processingCount! > 0
-                        ? '$processingCount processing'
-                        : 'Stripe and Paystack clear',
-                    color: overview == null
-                        ? Colors.white54
-                        : issueCount! > 0
-                        ? Colors.redAccent
-                        : processingCount! > 0
-                        ? Colors.orangeAccent
-                        : Colors.cyanAccent,
-                    onTap: showPaymentWebhookAudit,
-                  );
-                },
+                icon: Icon(
+                  adminCommandCenterExpanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  color: Colors.greenAccent,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          buildAdminVaultHealth(inventory),
-          const SizedBox(height: 18),
-          FutureBuilder<_DashboardAdminOverview>(
-            future: overviewFuture,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          if (adminCommandCenterExpanded) ...[
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                buildAdminMetricTile(
+                  icon: Icons.folder_copy_outlined,
+                  label: 'Vault documents',
+                  value: inventory.totalCount.toString(),
+                  detail:
+                      '${inventory.freeCount} free | ${inventory.premiumCount} protected',
+                  color: Colors.greenAccent,
+                ),
+                buildAdminMetricTile(
+                  icon: Icons.category_outlined,
+                  label: 'Categories',
+                  value: inventory.categoryCounts.length.toString(),
+                  detail: inventory.latestDocument == null
+                      ? 'No recent document yet'
+                      : 'Latest: ${inventory.latestDocument!.name}',
+                  color: Colors.orangeAccent,
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    return buildAdminMetricTile(
+                      icon: Icons.people_alt_outlined,
+                      label: 'Members',
+                      value: overview?.users.totalCount.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading access summary'
+                          : '${overview.users.adminCount} admins | ${overview.users.premiumCount} premium | ${overview.users.freeCount} free',
+                      color: Colors.lightBlueAccent,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    return buildAdminMetricTile(
+                      icon: Icons.devices_other_outlined,
+                      label: 'Devices',
+                      value: overview?.devices.totalCount.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading device summary'
+                          : '${overview.devices.pendingCount} pending | ${overview.devices.trustedCount} trusted | ${overview.devices.blockedCount} blocked',
+                      color: Colors.pinkAccent,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    return buildAdminMetricTile(
+                      icon: Icons.insights_outlined,
+                      label: 'Reader events',
+                      value:
+                          overview?.activity.totalEventCount.toString() ??
+                          '...',
+                      detail: overview == null
+                          ? 'Loading reader activity'
+                          : '${overview.activity.uniqueReaderCount} readers | ${overview.activity.blockedAccessCount} blocked',
+                      color: Colors.cyanAccent,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    final count = overview?.manualProofReviewCount;
+                    return buildAdminMetricTile(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'Payment proofs',
+                      value: count?.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading payment proof manager'
+                          : count == 0
+                          ? 'All payment records ready'
+                          : '$count manual pending approval',
+                      color: count == null || count == 0
+                          ? Colors.white54
+                          : Colors.orangeAccent,
+                      onTap: showSubscriptionRequestInbox,
+                    );
+                  },
+                ),
+                FutureBuilder<_DashboardAdminOverview>(
+                  future: overviewFuture,
+                  builder: (context, snapshot) {
+                    final overview = snapshot.data;
+                    final issueCount = overview?.webhookIssueCount;
+                    final processingCount = overview?.webhookProcessingCount;
+                    return buildAdminMetricTile(
+                      icon: Icons.webhook_outlined,
+                      label: 'Webhooks',
+                      value: overview?.webhookEvents.length.toString() ?? '...',
+                      detail: overview == null
+                          ? 'Loading webhook audit'
+                          : issueCount! > 0
+                          ? '$issueCount failed event${issueCount == 1 ? '' : 's'}'
+                          : processingCount! > 0
+                          ? '$processingCount processing'
+                          : 'Stripe and Paystack clear',
+                      color: overview == null
+                          ? Colors.white54
+                          : issueCount! > 0
+                          ? Colors.redAccent
+                          : processingCount! > 0
+                          ? Colors.orangeAccent
+                          : Colors.cyanAccent,
+                      onTap: showPaymentWebhookAudit,
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            buildAdminVaultHealth(inventory),
+            const SizedBox(height: 18),
+            FutureBuilder<_DashboardAdminOverview>(
+              future: overviewFuture,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      buildAdminAttentionPanel(inventory: inventory),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Member, device, and reader activity checks could not load right now.',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                      ),
+                    ],
+                  );
+                }
+
+                return buildAdminAttentionPanel(
+                  inventory: inventory,
+                  overview: snapshot.data,
+                  isLoading: !snapshot.hasData,
+                );
+              },
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                buildAdminActionButton(
+                  icon: Icons.upload_file,
+                  label: 'Upload PDF',
+                  detail: 'Add a profiled document',
+                  onPressed: uploadPDF,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.manage_search,
+                  label: 'Refresh index',
+                  detail: 'Rebuild searchable text',
+                  onPressed: indexVaultPdfsFromAdminPanel,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.inventory_2_outlined,
+                  label: 'Inventory',
+                  detail: 'Open vault breakdown',
+                  onPressed: showVaultInventory,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.manage_accounts_outlined,
+                  label: 'User access',
+                  detail: 'Review plans and roles',
+                  onPressed: showUserAccessOverview,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.important_devices_outlined,
+                  label: 'Devices',
+                  detail: 'Trust or block devices',
+                  onPressed: showDeviceAuthorizationOverview,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.insights_outlined,
+                  label: 'Analytics',
+                  detail: 'Reader activity report',
+                  onPressed: showReaderAnalytics,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.campaign_outlined,
+                  label: 'Post update',
+                  detail: 'Notify reader dashboards',
+                  onPressed: showReaderAnnouncementComposer,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.lightbulb_outline,
+                  label: 'Suggestions',
+                  detail: 'Review reader ideas',
+                  onPressed: showReaderSuggestionInbox,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.workspace_premium_outlined,
+                  label: 'Requests',
+                  detail: 'Review subscription asks',
+                  onPressed: showSubscriptionRequestInbox,
+                ),
+                buildAdminActionButton(
+                  icon: Icons.webhook_outlined,
+                  label: 'Webhooks',
+                  detail: 'Payment event audit',
+                  onPressed: showPaymentWebhookAudit,
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final panelWidth = constraints.maxWidth > 1060
+                    ? (constraints.maxWidth - 28) / 3
+                    : constraints.maxWidth > 760
+                    ? (constraints.maxWidth - 14) / 2
+                    : constraints.maxWidth;
+                return Wrap(
+                  spacing: 14,
+                  runSpacing: 14,
                   children: [
-                    buildAdminAttentionPanel(inventory: inventory),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Member, device, and reader activity checks could not load right now.',
-                      style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                    SizedBox(
+                      width: panelWidth,
+                      child: buildAdminDocumentMixPanel(inventory),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: FutureBuilder<_DashboardAdminOverview>(
+                        future: overviewFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return const Text(
+                              'Member mix could not load right now.',
+                              style: TextStyle(color: Colors.redAccent),
+                            );
+                          }
+
+                          if (!snapshot.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: LinearProgressIndicator(
+                                color: Colors.greenAccent,
+                                backgroundColor: Colors.white10,
+                              ),
+                            );
+                          }
+
+                          return buildAdminMemberMixPanel(snapshot.data!.users);
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: FutureBuilder<_DashboardAdminOverview>(
+                        future: overviewFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return const Text(
+                              'Device trust mix could not load right now.',
+                              style: TextStyle(color: Colors.redAccent),
+                            );
+                          }
+
+                          if (!snapshot.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: LinearProgressIndicator(
+                                color: Colors.greenAccent,
+                                backgroundColor: Colors.white10,
+                              ),
+                            );
+                          }
+
+                          return buildAdminDeviceTrustPanel(
+                            snapshot.data!.devices,
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Documents by category',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          buildAdminCategoryBars(inventory),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Most active documents',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          FutureBuilder<_DashboardAdminOverview>(
+                            future: overviewFuture,
+                            builder: (context, snapshot) {
+                              if (snapshot.hasError) {
+                                return const Text(
+                                  'Document activity could not load right now.',
+                                  style: TextStyle(color: Colors.redAccent),
+                                );
+                              }
+
+                              if (!snapshot.hasData) {
+                                return const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  child: LinearProgressIndicator(
+                                    color: Colors.greenAccent,
+                                    backgroundColor: Colors.white10,
+                                  ),
+                                );
+                              }
+
+                              return buildAdminTopDocumentsList(
+                                snapshot.data!.activity,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Recent document updates',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          buildAdminRecentDocuments(inventory),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Recent reader activity',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          FutureBuilder<_DashboardAdminOverview>(
+                            future: overviewFuture,
+                            builder: (context, snapshot) {
+                              if (snapshot.hasError) {
+                                return const Text(
+                                  'Admin activity could not load right now.',
+                                  style: TextStyle(color: Colors.redAccent),
+                                );
+                              }
+
+                              if (!snapshot.hasData) {
+                                return const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  child: LinearProgressIndicator(
+                                    color: Colors.greenAccent,
+                                    backgroundColor: Colors.white10,
+                                  ),
+                                );
+                              }
+
+                              return buildAdminActivityList(
+                                snapshot.data!.activity,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 );
-              }
-
-              return buildAdminAttentionPanel(
-                inventory: inventory,
-                overview: snapshot.data,
-                isLoading: !snapshot.hasData,
-              );
-            },
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              buildAdminActionButton(
-                icon: Icons.upload_file,
-                label: 'Upload PDF',
-                detail: 'Add a profiled document',
-                onPressed: uploadPDF,
-              ),
-              buildAdminActionButton(
-                icon: Icons.manage_search,
-                label: 'Refresh index',
-                detail: 'Rebuild searchable text',
-                onPressed: indexVaultPdfsFromAdminPanel,
-              ),
-              buildAdminActionButton(
-                icon: Icons.inventory_2_outlined,
-                label: 'Inventory',
-                detail: 'Open vault breakdown',
-                onPressed: showVaultInventory,
-              ),
-              buildAdminActionButton(
-                icon: Icons.manage_accounts_outlined,
-                label: 'User access',
-                detail: 'Review plans and roles',
-                onPressed: showUserAccessOverview,
-              ),
-              buildAdminActionButton(
-                icon: Icons.important_devices_outlined,
-                label: 'Devices',
-                detail: 'Trust or block devices',
-                onPressed: showDeviceAuthorizationOverview,
-              ),
-              buildAdminActionButton(
-                icon: Icons.insights_outlined,
-                label: 'Analytics',
-                detail: 'Reader activity report',
-                onPressed: showReaderAnalytics,
-              ),
-              buildAdminActionButton(
-                icon: Icons.campaign_outlined,
-                label: 'Post update',
-                detail: 'Notify reader dashboards',
-                onPressed: showReaderAnnouncementComposer,
-              ),
-              buildAdminActionButton(
-                icon: Icons.lightbulb_outline,
-                label: 'Suggestions',
-                detail: 'Review reader ideas',
-                onPressed: showReaderSuggestionInbox,
-              ),
-              buildAdminActionButton(
-                icon: Icons.workspace_premium_outlined,
-                label: 'Requests',
-                detail: 'Review subscription asks',
-                onPressed: showSubscriptionRequestInbox,
-              ),
-              buildAdminActionButton(
-                icon: Icons.webhook_outlined,
-                label: 'Webhooks',
-                detail: 'Payment event audit',
-                onPressed: showPaymentWebhookAudit,
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final panelWidth = constraints.maxWidth > 1060
-                  ? (constraints.maxWidth - 28) / 3
-                  : constraints.maxWidth > 760
-                  ? (constraints.maxWidth - 14) / 2
-                  : constraints.maxWidth;
-              return Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  SizedBox(
-                    width: panelWidth,
-                    child: buildAdminDocumentMixPanel(inventory),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: FutureBuilder<_DashboardAdminOverview>(
-                      future: overviewFuture,
-                      builder: (context, snapshot) {
-                        if (snapshot.hasError) {
-                          return const Text(
-                            'Member mix could not load right now.',
-                            style: TextStyle(color: Colors.redAccent),
-                          );
-                        }
-
-                        if (!snapshot.hasData) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: LinearProgressIndicator(
-                              color: Colors.greenAccent,
-                              backgroundColor: Colors.white10,
-                            ),
-                          );
-                        }
-
-                        return buildAdminMemberMixPanel(snapshot.data!.users);
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: FutureBuilder<_DashboardAdminOverview>(
-                      future: overviewFuture,
-                      builder: (context, snapshot) {
-                        if (snapshot.hasError) {
-                          return const Text(
-                            'Device trust mix could not load right now.',
-                            style: TextStyle(color: Colors.redAccent),
-                          );
-                        }
-
-                        if (!snapshot.hasData) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: LinearProgressIndicator(
-                              color: Colors.greenAccent,
-                              backgroundColor: Colors.white10,
-                            ),
-                          );
-                        }
-
-                        return buildAdminDeviceTrustPanel(
-                          snapshot.data!.devices,
-                        );
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Documents by category',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        buildAdminCategoryBars(inventory),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Most active documents',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        FutureBuilder<_DashboardAdminOverview>(
-                          future: overviewFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return const Text(
-                                'Document activity could not load right now.',
-                                style: TextStyle(color: Colors.redAccent),
-                              );
-                            }
-
-                            if (!snapshot.hasData) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: LinearProgressIndicator(
-                                  color: Colors.greenAccent,
-                                  backgroundColor: Colors.white10,
-                                ),
-                              );
-                            }
-
-                            return buildAdminTopDocumentsList(
-                              snapshot.data!.activity,
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Recent document updates',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        buildAdminRecentDocuments(inventory),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: panelWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Recent reader activity',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        FutureBuilder<_DashboardAdminOverview>(
-                          future: overviewFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return const Text(
-                                'Admin activity could not load right now.',
-                                style: TextStyle(color: Colors.redAccent),
-                              );
-                            }
-
-                            if (!snapshot.hasData) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: LinearProgressIndicator(
-                                  color: Colors.greenAccent,
-                                  backgroundColor: Colors.white10,
-                                ),
-                              );
-                            }
-
-                            return buildAdminActivityList(
-                              snapshot.data!.activity,
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -8634,54 +8578,74 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   visualDensity: VisualDensity.compact,
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              buildReaderDashboardMetric(
-                icon: Icons.verified_user_outlined,
-                label: 'Account',
-                value: userAccess.planLabel,
-                detail: readerAccountName(),
-                onTap: showReaderDashboard,
-              ),
-              buildReaderDashboardMetric(
-                icon: Icons.history_outlined,
-                label: 'Activity',
-                value: overview.activity.totalEventCount.toString(),
-                detail: '${overview.activity.uniqueDocumentCount} documents',
-                color: Colors.lightBlueAccent,
-                onTap: showReaderDashboard,
-              ),
-              buildReaderDashboardMetric(
-                icon: Icons.bookmark_border,
-                label: 'Favourites',
-                value: overview.bookmarks.length.toString(),
-                detail: 'Saved reading points',
-                color: Colors.orangeAccent,
-                onTap: showReaderDashboard,
-              ),
-              buildReaderDashboardMetric(
-                icon: Icons.security_outlined,
-                label: 'Security',
-                value: readerSecurityValue(overview),
-                detail: readerSecurityDetail(overview),
-                color: readerSecurityColor(overview),
-                onTap: showReaderDashboard,
-              ),
-              buildReaderDashboardMetric(
-                icon: Icons.emoji_events_outlined,
-                label: 'Milestones',
-                value: overview.milestoneCount.toString(),
-                detail: 'Reader progress badges',
-                color: Colors.cyanAccent,
-                onTap: showReaderDashboard,
+              IconButton(
+                tooltip: readerDashboardPreviewExpanded
+                    ? 'Collapse dashboard preview'
+                    : 'Expand dashboard preview',
+                visualDensity: VisualDensity.compact,
+                onPressed: () {
+                  setState(() {
+                    readerDashboardPreviewExpanded =
+                        !readerDashboardPreviewExpanded;
+                  });
+                },
+                icon: Icon(
+                  readerDashboardPreviewExpanded
+                      ? Icons.expand_less
+                      : Icons.expand_more,
+                  color: Colors.greenAccent,
+                ),
               ),
             ],
           ),
+          if (readerDashboardPreviewExpanded) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                buildReaderDashboardMetric(
+                  icon: Icons.verified_user_outlined,
+                  label: 'Account',
+                  value: userAccess.planLabel,
+                  detail: readerAccountName(),
+                  onTap: showReaderDashboard,
+                ),
+                buildReaderDashboardMetric(
+                  icon: Icons.history_outlined,
+                  label: 'Activity',
+                  value: overview.activity.totalEventCount.toString(),
+                  detail: '${overview.activity.uniqueDocumentCount} documents',
+                  color: Colors.lightBlueAccent,
+                  onTap: showReaderDashboard,
+                ),
+                buildReaderDashboardMetric(
+                  icon: Icons.bookmark_border,
+                  label: 'Favourites',
+                  value: overview.bookmarks.length.toString(),
+                  detail: 'Saved reading points',
+                  color: Colors.orangeAccent,
+                  onTap: showReaderDashboard,
+                ),
+                buildReaderDashboardMetric(
+                  icon: Icons.security_outlined,
+                  label: 'Security',
+                  value: readerSecurityValue(overview),
+                  detail: readerSecurityDetail(overview),
+                  color: readerSecurityColor(overview),
+                  onTap: showReaderDashboard,
+                ),
+                buildReaderDashboardMetric(
+                  icon: Icons.emoji_events_outlined,
+                  label: 'Milestones',
+                  value: overview.milestoneCount.toString(),
+                  detail: 'Reader progress badges',
+                  color: Colors.cyanAccent,
+                  onTap: showReaderDashboard,
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -8870,10 +8834,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return userAccess.canManageStripeBilling
         ? showManageStripeSubscriptionDialog
         : showSubscriptionRequestDialog;
-  }
-
-  void openAppStoreSubscriptionManagement() {
-    html.window.location.assign('https://apps.apple.com/account/subscriptions');
   }
 
   String readerSubscriptionActionLabel() {
@@ -10181,20 +10141,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 maxLines: 1,
                               ),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => showRequestReviewDetails(request),
-                                  icon: const Icon(Icons.open_in_new, size: 16),
-                                  label: const Text('Review details'),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: Colors.lightBlueAccent,
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                ),
-                              ),
                               if (isManualReviewPending) ...[
                                 const SizedBox(height: 10),
                                 Row(
@@ -10869,11 +10815,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
-    if (paymentMethod == UserSubscriptionPaymentMethod.appStore) {
-      await requestIosPurchaseAction('purchase');
-      return;
-    }
-
     if (paymentMethod == UserSubscriptionPaymentMethod.stripe) {
       final currentUrl = Uri.base;
       final checkout = await subscriptionCheckoutClient
@@ -10976,17 +10917,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> showSubscriptionRequestDialog() async {
     final controller = TextEditingController();
     final referenceController = TextEditingController();
-    var paymentMethod = isIosAppShell
-        ? UserSubscriptionPaymentMethod.appStore
-        : UserSubscriptionPaymentMethod.stripe;
+    var paymentMethod = UserSubscriptionPaymentMethod.stripe;
     String? checkoutErrorMessage;
-    final selectablePaymentMethods = isIosAppShell
-        ? const [UserSubscriptionPaymentMethod.appStore]
-        : const [
-            UserSubscriptionPaymentMethod.stripe,
-            UserSubscriptionPaymentMethod.paystack,
-            UserSubscriptionPaymentMethod.manual,
-          ];
+    const selectablePaymentMethods = [
+      UserSubscriptionPaymentMethod.stripe,
+      UserSubscriptionPaymentMethod.paystack,
+      UserSubscriptionPaymentMethod.manual,
+    ];
 
     await showDialog<void>(
       context: context,
@@ -11011,9 +10948,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         userAccess.canAccessMainVault
                             ? 'Ask administration about renewal, account status, or subscription support.'
                             : paymentMethod ==
-                                  UserSubscriptionPaymentMethod.appStore
-                            ? 'Subscribe securely with your Apple Account to unlock the protected vault.'
-                            : paymentMethod ==
                                   UserSubscriptionPaymentMethod.stripe
                             ? 'Continue to secure Stripe checkout to unlock the protected vault.'
                             : paymentMethod ==
@@ -11026,84 +10960,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: const TextStyle(color: Colors.white70),
                       ),
                       const SizedBox(height: 12),
-                      if (isIosAppShell)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.04),
-                            border: Border.all(color: Colors.white24),
-                            borderRadius: BorderRadius.circular(8),
+                      DropdownButtonFormField<UserSubscriptionPaymentMethod>(
+                        initialValue: paymentMethod,
+                        dropdownColor: const Color(0xFF1A1D25),
+                        iconEnabledColor: Colors.greenAccent,
+                        style: const TextStyle(color: Colors.white70),
+                        decoration: const InputDecoration(
+                          labelText: 'Preferred payment method',
+                          labelStyle: TextStyle(color: Colors.white70),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
                           ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.apple,
-                                color: Colors.white,
-                                size: 28,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      iosSubscriptionTitle,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      iosSubscriptionPrice.isEmpty
-                                          ? '\$120 per year, auto-renewable'
-                                          : '$iosSubscriptionPrice per year, auto-renewable',
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
                           ),
-                        )
-                      else
-                        DropdownButtonFormField<UserSubscriptionPaymentMethod>(
-                          initialValue: paymentMethod,
-                          dropdownColor: const Color(0xFF1A1D25),
-                          iconEnabledColor: Colors.greenAccent,
-                          style: const TextStyle(color: Colors.white70),
-                          decoration: const InputDecoration(
-                            labelText: 'Preferred payment method',
-                            labelStyle: TextStyle(color: Colors.white70),
-                            enabledBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white24),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.greenAccent),
-                            ),
-                          ),
-                          items: selectablePaymentMethods
-                              .map((method) {
-                                return DropdownMenuItem(
-                                  value: method,
-                                  child: Text(
-                                    userSubscriptionPaymentMethodLabel(method),
-                                  ),
-                                );
-                              })
-                              .toList(growable: false),
-                          onChanged: (value) {
-                            setDialogState(() {
-                              paymentMethod =
-                                  value ??
-                                  UserSubscriptionPaymentMethod.paystack;
-                              checkoutErrorMessage = null;
-                            });
-                          },
                         ),
+                        items: selectablePaymentMethods
+                            .map((method) {
+                              return DropdownMenuItem(
+                                value: method,
+                                child: Text(
+                                  userSubscriptionPaymentMethodLabel(method),
+                                ),
+                              );
+                            })
+                            .toList(growable: false),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            paymentMethod =
+                                value ?? UserSubscriptionPaymentMethod.paystack;
+                            checkoutErrorMessage = null;
+                          });
+                        },
+                      ),
                       if (paymentMethod ==
                           UserSubscriptionPaymentMethod.manual) ...[
                         const SizedBox(height: 12),
@@ -11128,30 +11017,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const Text(
                           'Admin will review the proof before premium access is activated.',
                           style: TextStyle(color: Colors.white54),
-                        ),
-                      ] else if (paymentMethod ==
-                          UserSubscriptionPaymentMethod.appStore) ...[
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Payment is charged to your Apple Account. The subscription renews automatically unless cancelled at least 24 hours before the current period ends. You can restore purchases at any time.',
-                          style: TextStyle(color: Colors.white54, height: 1.35),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            TextButton(
-                              onPressed: () =>
-                                  html.window.location.assign('/privacy.html'),
-                              child: const Text('Privacy Policy'),
-                            ),
-                            TextButton(
-                              onPressed: () => html.window.location.assign(
-                                'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/',
-                              ),
-                              child: const Text('Terms of Use'),
-                            ),
-                          ],
                         ),
                       ] else if (paymentMethod ==
                           UserSubscriptionPaymentMethod.stripe) ...[
@@ -11183,46 +11048,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                         ),
                       ],
-                      if (!isIosAppShell) ...[
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: controller,
-                          maxLines: 4,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: const InputDecoration(
-                            hintText:
-                                'Optional note for administration, payment reference, or access reason...',
-                            hintStyle: TextStyle(color: Colors.white38),
-                            enabledBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.white24),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.greenAccent),
-                            ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controller,
+                        maxLines: 4,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          hintText:
+                              'Optional note for administration, payment reference, or access reason...',
+                          hintStyle: TextStyle(color: Colors.white38),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Colors.greenAccent),
                           ),
                         ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
                 actions: [
-                  if (isIosAppShell)
-                    TextButton(
-                      onPressed: isSending
-                          ? null
-                          : () async {
-                              try {
-                                await requestIosPurchaseAction('restore');
-                              } catch (error) {
-                                if (!context.mounted) return;
-                                setDialogState(() {
-                                  checkoutErrorMessage =
-                                      'Purchases could not be restored: $error';
-                                });
-                              }
-                            },
-                      child: const Text('Restore Purchases'),
-                    ),
                   TextButton(
                     onPressed: isSending ? null : () => Navigator.pop(context),
                     child: const Text(
@@ -11245,13 +11091,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 paymentReference: referenceController.text,
                               );
                               if (paymentMethod ==
-                                  UserSubscriptionPaymentMethod.appStore) {
-                                if (context.mounted) {
-                                  setDialogState(() => isSending = false);
-                                }
-                                return;
-                              }
-                              if (paymentMethod ==
                                       UserSubscriptionPaymentMethod.stripe ||
                                   paymentMethod ==
                                       UserSubscriptionPaymentMethod.paystack) {
@@ -11267,10 +11106,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 isSending = false;
                                 checkoutErrorMessage =
                                     paymentMethod ==
-                                        UserSubscriptionPaymentMethod.appStore
-                                    ? 'App Store purchase could not start: $error'
-                                    : paymentMethod ==
-                                          UserSubscriptionPaymentMethod.stripe
+                                        UserSubscriptionPaymentMethod.stripe
                                     ? 'Stripe checkout could not start: $error'
                                     : paymentMethod ==
                                           UserSubscriptionPaymentMethod.paystack
@@ -11281,12 +11117,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 SnackBar(
                                   content: Text(
                                     paymentMethod ==
-                                            UserSubscriptionPaymentMethod
-                                                .appStore
-                                        ? 'App Store purchase could not start: $error'
-                                        : paymentMethod ==
-                                              UserSubscriptionPaymentMethod
-                                                  .stripe
+                                            UserSubscriptionPaymentMethod.stripe
                                         ? 'Stripe checkout could not start: $error'
                                         : paymentMethod ==
                                               UserSubscriptionPaymentMethod
@@ -11312,10 +11143,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             size: 16,
                           ),
                     label: Text(
-                      paymentMethod == UserSubscriptionPaymentMethod.appStore
-                          ? 'Subscribe with Apple'
-                          : paymentMethod ==
-                                UserSubscriptionPaymentMethod.stripe
+                      paymentMethod == UserSubscriptionPaymentMethod.stripe
                           ? 'Continue to Stripe'
                           : paymentMethod ==
                                 UserSubscriptionPaymentMethod.paystack
@@ -11766,14 +11594,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     'Manage payment method, invoices, and renewal in Stripe.',
                                 onTap: showManageStripeSubscriptionDialog,
                               ),
-                            if (userAccess.canManageAppStoreBilling)
-                              buildReaderDashboardItem(
-                                icon: Icons.apple,
-                                title: 'App Store subscription',
-                                subtitle:
-                                    'Manage renewal or cancellation with your Apple Account.',
-                                onTap: openAppStoreSubscriptionManagement,
-                              ),
                             ...overview.subscriptionRequests.take(4).map((
                               request,
                             ) {
@@ -12036,7 +11856,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
               if (!context.mounted) return;
-              Navigator.of(context).popUntil((route) => route.isFirst);
+              Navigator.pop(context);
             },
           ),
         ],
@@ -12059,114 +11879,233 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   )
-                : SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          canAccessMainVault
-                              ? 'Main Vault Access: Active'
-                              : 'Free Zone Only - Subscribe to unlock the Main Vault',
-                          style: const TextStyle(
-                            color: Colors.greenAccent,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
+                : ListView(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    children: [
+                      Text(
+                        canAccessMainVault
+                            ? 'Main Vault Access: Active'
+                            : 'Free Zone Only - Subscribe to unlock the Main Vault',
+                        style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
                         ),
+                      ),
 
-                        const SizedBox(height: 30),
+                      const SizedBox(height: 30),
 
-                        if (pdfLoadError != null) ...[
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.redAccent.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.redAccent),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.error_outline,
-                                  color: Colors.redAccent,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    pdfLoadError!,
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: loadPDFs,
-                                  child: const Text(
-                                    'Retry',
-                                    style: TextStyle(color: Colors.greenAccent),
-                                  ),
-                                ),
-                              ],
-                            ),
+                      if (pdfLoadError != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.redAccent),
                           ),
-                          const SizedBox(height: 20),
-                        ],
-
-                        if (userAccess.isAdmin) ...[
-                          buildAdminCommandCenter(vaultInventory),
-                          const SizedBox(height: 24),
-                        ],
-
-                        FutureBuilder<_ReaderDashboardOverview>(
-                          future: readerOverviewFuture,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.redAccent.withValues(
-                                    alpha: 0.12,
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.redAccent),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                color: Colors.redAccent,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  pdfLoadError!,
+                                  style: const TextStyle(color: Colors.white),
                                 ),
+                              ),
+                              TextButton(
+                                onPressed: loadPDFs,
                                 child: const Text(
-                                  'My dashboard could not load right now.',
-                                  style: TextStyle(color: Colors.redAccent),
+                                  'Retry',
+                                  style: TextStyle(color: Colors.greenAccent),
                                 ),
-                              );
-                            }
-
-                            if (!snapshot.hasData) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: LinearProgressIndicator(
-                                  color: Colors.greenAccent,
-                                  backgroundColor: Colors.white10,
-                                ),
-                              );
-                            }
-
-                            return buildReaderDashboardPreview(snapshot.data!);
-                          },
+                              ),
+                            ],
+                          ),
                         ),
-
-                        const SizedBox(height: 24),
-
-                        buildDashboardDocumentSearch(),
-                        buildDashboardActiveFilterBar(dashboardFilterLabels),
-
                         const SizedBox(height: 20),
+                      ],
 
+                      if (userAccess.isAdmin) ...[
+                        buildAdminCommandCenter(vaultInventory),
+                        const SizedBox(height: 24),
+                      ],
+
+                      FutureBuilder<_ReaderDashboardOverview>(
+                        future: readerOverviewFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.redAccent),
+                              ),
+                              child: const Text(
+                                'My dashboard could not load right now.',
+                                style: TextStyle(color: Colors.redAccent),
+                              ),
+                            );
+                          }
+
+                          if (!snapshot.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: LinearProgressIndicator(
+                                color: Colors.greenAccent,
+                                backgroundColor: Colors.white10,
+                              ),
+                            );
+                          }
+
+                          return buildReaderDashboardPreview(snapshot.data!);
+                        },
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      buildDashboardDocumentSearch(),
+                      buildDashboardActiveFilterBar(dashboardFilterLabels),
+
+                      const SizedBox(height: 20),
+
+                      Text(
+                        vaultDocumentSectionTitle(
+                          title: 'FREE ACCESS ZONE',
+                          visibleCount: filteredFreePdfFiles.length,
+                          totalCount: freePdfFiles.length,
+                          hasActiveFilter: hasFreeDocumentFilter,
+                        ),
+                        style: const TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      buildDocumentCategoryFilter(
+                        filterId: 'free',
+                        documents: freePdfFiles,
+                        selectedCategory: freeDocumentCategoryFilter,
+                        onChanged: (category) {
+                          setState(() {
+                            freeDocumentCategoryFilter = category;
+                          });
+                        },
+                      ),
+
+                      if (isLoading && freePdfFiles.isEmpty)
+                        buildDocumentListLoading('Loading free PDFs...')
+                      else if (freePdfFiles.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'No free PDFs available yet.',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        )
+                      else if (filteredFreePdfFiles.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            hasDashboardDocumentSearch
+                                ? 'No free PDFs match these filters.'
+                                : 'No free PDFs match this category.',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        )
+                      else
+                        ...filteredFreePdfFiles.map((pdfFile) {
+                          return Card(
+                            color: Colors.orange.withValues(alpha: 0.12),
+                            child: ListTile(
+                              leading: const Icon(
+                                Icons.picture_as_pdf,
+                                color: Colors.orangeAccent,
+                              ),
+                              title: Text(
+                                pdfFile['name'],
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              subtitle: Text(
+                                vaultDocumentListSubtitle(
+                                  pdfFile,
+                                  accessLabel: 'Free Access PDF',
+                                ),
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              trailing: userAccess.canManageVault
+                                  ? IconButton(
+                                      tooltip: 'Manage document',
+                                      icon: const Icon(
+                                        Icons.admin_panel_settings,
+                                      ),
+                                      color: Colors.orangeAccent,
+                                      onPressed: () {
+                                        showVaultDocumentAdminDialog(
+                                          pdfFile,
+                                          accessLabel: 'Free Access PDF',
+                                        );
+                                      },
+                                    )
+                                  : null,
+                              onTap: () async {
+                                final pdfUrl = await resolveSearchResultPdfUrl(
+                                  pdfFile,
+                                );
+
+                                if (pdfUrl == null) return;
+
+                                if (!context.mounted) return;
+
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => PDFViewerScreen(
+                                      pdfUrl: pdfUrl,
+                                      title: pdfFile['name'],
+                                      accessLevel:
+                                          pdfFile['accessLevel']?.toString() ??
+                                          'free',
+                                      readerMode:
+                                          pdfFile['readerMode']?.toString() ??
+                                          '',
+                                      protectionMode:
+                                          pdfFile['protectionMode']
+                                              ?.toString() ??
+                                          '',
+                                      openSource: 'free_dashboard',
+                                      storagePath:
+                                          pdfFile['storagePath']?.toString() ??
+                                          '',
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        }),
+
+                      const SizedBox(height: 30),
+                      if (canAccessMainVault) ...[
                         Text(
                           vaultDocumentSectionTitle(
-                            title: 'FREE ACCESS ZONE',
-                            visibleCount: filteredFreePdfFiles.length,
-                            totalCount: freePdfFiles.length,
-                            hasActiveFilter: hasFreeDocumentFilter,
+                            title: 'MAIN VAULT PDFs',
+                            visibleCount: filteredPremiumPdfFiles.length,
+                            totalCount: premiumPdfFiles.length,
+                            hasActiveFilter: hasPremiumDocumentFilter,
                           ),
                           style: const TextStyle(
-                            color: Colors.orangeAccent,
+                            color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
@@ -12175,267 +12114,116 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: 15),
 
                         buildDocumentCategoryFilter(
-                          filterId: 'free',
-                          documents: freePdfFiles,
-                          selectedCategory: freeDocumentCategoryFilter,
+                          filterId: 'premium',
+                          documents: premiumPdfFiles,
+                          selectedCategory: premiumDocumentCategoryFilter,
                           onChanged: (category) {
                             setState(() {
-                              freeDocumentCategoryFilter = category;
+                              premiumDocumentCategoryFilter = category;
                             });
                           },
                         ),
 
-                        if (isLoading && freePdfFiles.isEmpty)
-                          buildDocumentListLoading('Loading free PDFs...')
-                        else if (freePdfFiles.isEmpty)
+                        if (isLoading && premiumPdfFiles.isEmpty)
+                          buildDocumentListLoading('Loading protected PDFs...')
+                        else if (premiumPdfFiles.isEmpty)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
                             child: Text(
-                              'No free PDFs available yet.',
+                              'No protected PDFs available yet.',
                               style: TextStyle(color: Colors.white70),
                             ),
                           )
-                        else if (filteredFreePdfFiles.isEmpty)
+                        else if (filteredPremiumPdfFiles.isEmpty)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(
                               hasDashboardDocumentSearch
-                                  ? 'No free PDFs match these filters.'
-                                  : 'No free PDFs match this category.',
+                                  ? 'No protected PDFs match these filters.'
+                                  : 'No protected PDFs match this category.',
                               style: const TextStyle(color: Colors.white70),
                             ),
                           )
                         else
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: filteredFreePdfFiles.length,
-                            itemBuilder: (context, index) {
-                              final pdfFile = filteredFreePdfFiles[index];
+                          ...filteredPremiumPdfFiles.map((pdfFile) {
+                            return Card(
+                              color: Colors.green.withValues(alpha: 0.12),
 
-                              return Card(
-                                color: Colors.orange.withValues(alpha: 0.12),
-                                child: ListTile(
-                                  leading: const Icon(
-                                    Icons.picture_as_pdf,
-                                    color: Colors.orangeAccent,
-                                  ),
-                                  title: Text(
-                                    pdfFile['name'],
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                  subtitle: Text(
-                                    vaultDocumentListSubtitle(
-                                      pdfFile,
-                                      accessLabel: 'Free Access PDF',
-                                    ),
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                  trailing: userAccess.canManageVault
-                                      ? IconButton(
-                                          tooltip: 'Manage document',
-                                          icon: const Icon(
-                                            Icons.admin_panel_settings,
-                                          ),
-                                          color: Colors.orangeAccent,
-                                          onPressed: () {
-                                            showVaultDocumentAdminDialog(
-                                              pdfFile,
-                                              accessLabel: 'Free Access PDF',
-                                            );
-                                          },
-                                        )
-                                      : null,
-                                  onTap: () async {
-                                    final pdfUrl =
-                                        await resolveSearchResultPdfUrl(
-                                          pdfFile,
-                                        );
-
-                                    if (pdfUrl == null) return;
-
-                                    if (!context.mounted) return;
-
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => PDFViewerScreen(
-                                          pdfUrl: pdfUrl,
-                                          title: pdfFile['name'],
-                                          accessLevel:
-                                              pdfFile['accessLevel']
-                                                  ?.toString() ??
-                                              'free',
-                                          readerMode:
-                                              pdfFile['readerMode']
-                                                  ?.toString() ??
-                                              '',
-                                          protectionMode:
-                                              pdfFile['protectionMode']
-                                                  ?.toString() ??
-                                              '',
-                                          openSource: 'free_dashboard',
-                                          storagePath:
-                                              pdfFile['storagePath']
-                                                  ?.toString() ??
-                                              '',
-                                        ),
-                                      ),
-                                    );
-                                  },
+                              child: ListTile(
+                                leading: const Icon(
+                                  Icons.picture_as_pdf,
+                                  color: Colors.greenAccent,
                                 ),
-                              );
-                            },
-                          ),
 
-                        const SizedBox(height: 30),
-                        if (canAccessMainVault) ...[
-                          Text(
-                            vaultDocumentSectionTitle(
-                              title: 'MAIN VAULT PDFs',
-                              visibleCount: filteredPremiumPdfFiles.length,
-                              totalCount: premiumPdfFiles.length,
-                              hasActiveFilter: hasPremiumDocumentFilter,
-                            ),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                                title: Text(
+                                  pdfFile['name'],
+                                  style: const TextStyle(color: Colors.white),
+                                ),
 
-                          const SizedBox(height: 15),
-
-                          buildDocumentCategoryFilter(
-                            filterId: 'premium',
-                            documents: premiumPdfFiles,
-                            selectedCategory: premiumDocumentCategoryFilter,
-                            onChanged: (category) {
-                              setState(() {
-                                premiumDocumentCategoryFilter = category;
-                              });
-                            },
-                          ),
-
-                          if (isLoading && premiumPdfFiles.isEmpty)
-                            buildDocumentListLoading(
-                              'Loading protected PDFs...',
-                            )
-                          else if (premiumPdfFiles.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Text(
-                                'No protected PDFs available yet.',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            )
-                          else if (filteredPremiumPdfFiles.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              child: Text(
-                                hasDashboardDocumentSearch
-                                    ? 'No protected PDFs match these filters.'
-                                    : 'No protected PDFs match this category.',
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                            )
-                          else
-                            ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: filteredPremiumPdfFiles.length,
-                              itemBuilder: (context, index) {
-                                final pdfFile = filteredPremiumPdfFiles[index];
-
-                                return Card(
-                                  color: Colors.green.withValues(alpha: 0.12),
-
-                                  child: ListTile(
-                                    leading: const Icon(
-                                      Icons.picture_as_pdf,
-                                      color: Colors.greenAccent,
-                                    ),
-
-                                    title: Text(
-                                      pdfFile['name'],
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                    ),
-
-                                    subtitle: Text(
-                                      vaultDocumentListSubtitle(
-                                        pdfFile,
-                                        accessLabel: 'Protected PDF',
-                                      ),
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-
-                                    trailing: userAccess.canManageVault
-                                        ? IconButton(
-                                            tooltip: 'Manage document',
-                                            icon: const Icon(
-                                              Icons.admin_panel_settings,
-                                            ),
-                                            color: Colors.greenAccent,
-                                            onPressed: () {
-                                              showVaultDocumentAdminDialog(
-                                                pdfFile,
-                                                accessLabel: 'Protected PDF',
-                                              );
-                                            },
-                                          )
-                                        : null,
-
-                                    onTap: () async {
-                                      final pdfUrl =
-                                          await resolveSearchResultPdfUrl(
-                                            pdfFile,
-                                          );
-
-                                      if (pdfUrl == null) return;
-
-                                      if (!context.mounted) return;
-
-                                      Navigator.push(
-                                        context,
-
-                                        MaterialPageRoute(
-                                          builder: (context) => PDFViewerScreen(
-                                            pdfUrl: pdfUrl,
-                                            title: pdfFile['name'],
-                                            accessLevel:
-                                                pdfFile['accessLevel']
-                                                    ?.toString() ??
-                                                'premium',
-                                            readerMode:
-                                                pdfFile['readerMode']
-                                                    ?.toString() ??
-                                                '',
-                                            protectionMode:
-                                                pdfFile['protectionMode']
-                                                    ?.toString() ??
-                                                '',
-                                            openSource: 'premium_dashboard',
-                                            storagePath:
-                                                pdfFile['storagePath']
-                                                    ?.toString() ??
-                                                '',
-                                          ),
-                                        ),
-                                      );
-                                    },
+                                subtitle: Text(
+                                  vaultDocumentListSubtitle(
+                                    pdfFile,
+                                    accessLabel: 'Protected PDF',
                                   ),
-                                );
-                              },
-                            ),
-                        ],
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+
+                                trailing: userAccess.canManageVault
+                                    ? IconButton(
+                                        tooltip: 'Manage document',
+                                        icon: const Icon(
+                                          Icons.admin_panel_settings,
+                                        ),
+                                        color: Colors.greenAccent,
+                                        onPressed: () {
+                                          showVaultDocumentAdminDialog(
+                                            pdfFile,
+                                            accessLabel: 'Protected PDF',
+                                          );
+                                        },
+                                      )
+                                    : null,
+
+                                onTap: () async {
+                                  final pdfUrl =
+                                      await resolveSearchResultPdfUrl(pdfFile);
+
+                                  if (pdfUrl == null) return;
+
+                                  if (!context.mounted) return;
+
+                                  Navigator.push(
+                                    context,
+
+                                    MaterialPageRoute(
+                                      builder: (context) => PDFViewerScreen(
+                                        pdfUrl: pdfUrl,
+                                        title: pdfFile['name'],
+                                        accessLevel:
+                                            pdfFile['accessLevel']
+                                                ?.toString() ??
+                                            'premium',
+                                        readerMode:
+                                            pdfFile['readerMode']?.toString() ??
+                                            '',
+                                        protectionMode:
+                                            pdfFile['protectionMode']
+                                                ?.toString() ??
+                                            '',
+                                        openSource: 'premium_dashboard',
+                                        storagePath:
+                                            pdfFile['storagePath']
+                                                ?.toString() ??
+                                            '',
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          }),
                       ],
-                    ),
+                    ],
                   ),
           ),
         ),
@@ -12565,8 +12353,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   Timer? standardPdfLoadTimer;
   Timer? protectedPdfPreloadTimer;
   Timer? protectedPageJumpTimer;
-  Timer? readingPositionSaveTimer;
-  Timer? narrationTextPreloadTimer;
   int currentPdfPage = 1;
   int? pdfPageCount;
   String currentSearchQuery = '';
@@ -12574,11 +12360,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool canViewDocument = false;
   bool isStandardPdfLoading = false;
   bool standardPdfLoadTimedOut = false;
-  bool nativePdfDocumentLoaded = false;
-  bool readingPositionRestoreCompleted = false;
-  bool readerPageChangedSinceOpen = false;
-  int? pendingNativePdfPage;
-  int? lastPersistedReadingPage;
   bool isProtectedPageJumping = false;
   int? protectedPageJumpTarget;
   UserAccessState readerUserAccess = const UserAccessState();
@@ -12590,9 +12371,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   double? protectedPdfPinchStartDistance;
   double protectedPdfPinchStartZoomScale = 1;
   double? protectedPdfPendingPinchZoomScale;
-  double? protectedPdfPanLastX;
-  double? protectedPdfPanLastY;
-  bool protectedPdfDidPan = false;
   DateTime? protectedPdfLastTapAt;
   DateTime? readerSessionStartedAt;
   StreamSubscription<html.Event>? readerVisibilitySubscription;
@@ -12602,6 +12380,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   StreamSubscription<html.MouseEvent>? readerPdfContextMenuSubscription;
   StreamSubscription<html.MouseEvent>? readerPdfMouseDownSubscription;
   StreamSubscription<html.Event>? protectedPdfScrollSubscription;
+  Timer? protectedPdfScrollUpdateTimer;
   StreamSubscription<html.Event>? protectedPdfTouchStartSubscription;
   StreamSubscription<html.Event>? protectedPdfTouchMoveSubscription;
   StreamSubscription<html.Event>? protectedPdfTouchEndSubscription;
@@ -12702,13 +12481,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         userAgent.contains('; wv)');
   }
 
-  bool get isIosWebViewReader {
-    final userAgent = (html.window.navigator.userAgent).toLowerCase();
-    return userAgent.contains('ancientsecurevaultiosapp');
-  }
-
   bool get usesImagePdfReader {
-    return isAndroidWebViewReader || isIosWebViewReader;
+    return isAndroidWebViewReader;
   }
 
   bool get shouldShowReaderPrivacyShield {
@@ -12903,11 +12677,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         key: ValueKey('native-pdf-${widget.pdfUrl}'),
         controller: nativePdfViewerController,
         initialPageNumber: initialPage,
-        // The draggable edge scroll-head competes with normal vertical swipes on
-        // narrow phones and can turn a small gesture into a large page jump.
-        // The reader already provides an explicit, reliable page-jump control.
-        canShowScrollHead: false,
-        canShowScrollStatus: false,
+        canShowScrollHead: true,
+        canShowScrollStatus: true,
         canShowPageLoadingIndicator: true,
         enableDoubleTapZooming: true,
         interactionMode: pdf_viewer.PdfInteractionMode.pan,
@@ -12918,16 +12689,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             pdfPageCount = details.document.pages.count;
             isStandardPdfLoading = false;
             standardPdfLoadTimedOut = false;
-            nativePdfDocumentLoaded = true;
           });
-          final pendingPage = pendingNativePdfPage ?? currentPdfPage;
-          pendingNativePdfPage = null;
-          if (pendingPage > 1) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted || !nativePdfDocumentLoaded) return;
-              nativePdfViewerController.jumpToPage(pendingPage);
-            });
-          }
         },
         onDocumentLoadFailed: (details) {
           if (!mounted) return;
@@ -12948,8 +12710,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           setState(() {
             currentPdfPage = details.newPageNumber;
           });
-          readerPageChangedSinceOpen = true;
-          scheduleAutomaticReadingPositionSave(details.newPageNumber);
           preloadNarrationTextForPage(details.newPageNumber);
         },
       ),
@@ -13341,70 +13101,21 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final userEmail = user?.email;
     if (userEmail == null || userEmail.isEmpty) return;
 
-    try {
-      final position = await savedPositionRepository.loadLatest(
-        userEmail: userEmail,
-        pdfTitle: widget.title,
-        documentKey: readerDocumentKey,
-      );
+    final position = await savedPositionRepository.loadLatest(
+      userEmail: userEmail,
+      pdfTitle: widget.title,
+    );
 
-      if (position != null) {
-        latestReadingPosition = position;
-        lastPersistedReadingPage = position.pageNumber;
+    if (position != null) {
+      latestReadingPosition = position;
 
-        if (!readerPageChangedSinceOpen &&
-            ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
-              initialPage: widget.initialPage,
-              initialSearchQuery: widget.initialSearchQuery,
-              openSource: widget.openSource,
-            )) {
-          openPdfPage(position.pageNumber, source: 'latest_saved_position');
-        }
+      if (ReaderSavedPositionResumePolicy.shouldApplySavedPosition(
+        initialPage: widget.initialPage,
+        initialSearchQuery: widget.initialSearchQuery,
+        openSource: widget.openSource,
+      )) {
+        openPdfPage(position.pageNumber, source: 'latest_saved_position');
       }
-    } catch (error) {
-      await logReaderAction(
-        action: 'load_reading_position_failed',
-        details: {'error': error.toString()},
-      );
-    } finally {
-      readingPositionRestoreCompleted = true;
-      if (readerPageChangedSinceOpen) {
-        scheduleAutomaticReadingPositionSave(currentPdfPage);
-      }
-    }
-  }
-
-  void scheduleAutomaticReadingPositionSave(int pageNumber) {
-    if (!readingPositionRestoreCompleted || pageNumber < 1) return;
-    if (lastPersistedReadingPage == pageNumber) return;
-
-    readingPositionSaveTimer?.cancel();
-    readingPositionSaveTimer = Timer(const Duration(milliseconds: 900), () {
-      unawaited(persistLatestReadingPosition(pageNumber));
-    });
-  }
-
-  Future<void> persistLatestReadingPosition(int pageNumber) async {
-    final userEmail = FirebaseAuth.instance.currentUser?.email?.trim() ?? '';
-    if (userEmail.isEmpty || pageNumber < 1) return;
-    if (lastPersistedReadingPage == pageNumber) return;
-
-    try {
-      await savedPositionRepository.saveLatest(
-        ReaderSavedPositionDraft(
-          userEmail: userEmail,
-          pdfTitle: widget.title,
-          documentKey: readerDocumentKey,
-          storagePath: normalizedReaderStoragePath,
-          pageNumber: pageNumber,
-        ),
-      );
-      lastPersistedReadingPage = pageNumber;
-    } catch (error) {
-      await logReaderAction(
-        action: 'auto_save_reading_position_failed',
-        details: {'pageNumber': pageNumber, 'error': error.toString()},
-      );
     }
   }
 
@@ -13427,12 +13138,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           ..style.height = '100%'
           ..style.overflowY = 'auto'
           ..style.overflowX = 'auto'
-          ..style.setProperty('-webkit-overflow-scrolling', 'touch')
-          ..style.setProperty('overscroll-behavior', 'contain')
           ..style.background = '#202124'
-          ..style.padding = '12px 0 112px'
+          ..style.padding = '18px 0 96px'
           ..style.boxSizing = 'border-box'
           ..style.userSelect = 'none'
+          ..style.setProperty('overscroll-behavior', 'contain')
+          ..style.setProperty('-webkit-overflow-scrolling', 'touch')
           ..style.setProperty('touch-action', 'pan-x pan-y');
 
         container.children.add(
@@ -13466,20 +13177,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         protectedPdfScrollSubscription = container.onScroll.listen(
           handleProtectedPdfImageScroll,
         );
-        if (!isIosWebViewReader) {
-          protectedPdfTouchStartSubscription = container.onTouchStart.listen(
-            handleProtectedPdfTouchStart,
-          );
-          protectedPdfTouchMoveSubscription = container.onTouchMove.listen(
-            handleProtectedPdfTouchMove,
-          );
-          protectedPdfTouchEndSubscription = container.onTouchEnd.listen(
-            handleProtectedPdfTouchEnd,
-          );
-          protectedPdfTouchCancelSubscription = container.onTouchCancel.listen(
-            handleProtectedPdfTouchEnd,
-          );
-        }
+        protectedPdfTouchStartSubscription = container.onTouchStart.listen(
+          handleProtectedPdfTouchStart,
+        );
+        protectedPdfTouchMoveSubscription = container.onTouchMove.listen(
+          handleProtectedPdfTouchMove,
+        );
+        protectedPdfTouchEndSubscription = container.onTouchEnd.listen(
+          handleProtectedPdfTouchEnd,
+        );
+        protectedPdfTouchCancelSubscription = container.onTouchCancel.listen(
+          handleProtectedPdfTouchEnd,
+        );
 
         pdfIframe = null;
         protectedPdfImageContainer = container;
@@ -13643,7 +13352,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final completer = Completer<void>();
     _pdfJsReady = completer.future;
 
-    if (pdf_js_util.getRawProperty(html.window, 'pdfjsLib') != null) {
+    if (js_util.getProperty<Object?>(html.window, 'pdfjsLib') != null) {
       configurePdfJsWorker();
       completer.complete();
       return completer.future;
@@ -13651,7 +13360,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
     // PDF.js is shipped with the app and loaded by web/index.html. Depending
     // on a third-party CDN here caused the protected reader to wait forever in
-    // mobile WebViews when that host was slow or blocked.
+    // Android WebViews when that host was slow or blocked.
     _pdfJsReady = null;
     completer.completeError(
       StateError('The bundled protected PDF renderer is unavailable.'),
@@ -13660,10 +13369,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   void configurePdfJsWorker() {
-    final pdfJs = pdf_js_util.getRawProperty(html.window, 'pdfjsLib');
+    final pdfJs = js_util.getProperty<Object?>(html.window, 'pdfjsLib');
     if (pdfJs == null) return;
 
-    final workerOptions = pdf_js_util.getProperty<Object>(
+    final workerOptions = js_util.getProperty<Object>(
       pdfJs,
       'GlobalWorkerOptions',
     );
@@ -13690,20 +13399,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   Future<Uint8List> fetchProtectedPdfImageBytes() async {
     final storagePath = normalizedReaderStoragePath;
     Object? storageError;
-
-    if (isIosWebViewReader) {
-      final nativeBridge = js_util.getProperty<Object?>(
-        html.window,
-        'AncientVaultPdf',
-      );
-      final nativePdfUri = Uri.tryParse(widget.pdfUrl.trim());
-      if (nativeBridge != null &&
-          nativePdfUri != null &&
-          (nativePdfUri.scheme == 'https' || nativePdfUri.scheme == 'http')) {
-        setProtectedPdfLoadingMessage('Downloading protected PDF on iOS...');
-        return loadProtectedPdfImageBytesFromIosBridge(nativeBridge);
-      }
-    }
 
     if (storagePath.isNotEmpty) {
       try {
@@ -13733,109 +13428,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
   }
 
-  Future<Uint8List> loadProtectedPdfImageBytesFromIosBridge(
-    Object nativeBridge,
-  ) async {
-    final requestId =
-        'ios-pdf-${DateTime.now().microsecondsSinceEpoch}-${widget.pdfUrl.hashCode}';
-    final completer = Completer<Uint8List>();
-    final bytes = <int>[];
-
-    late final Object handler;
-    handler = js_util.allowInterop((Object event) {
-      if (completer.isCompleted) return;
-
-      final rawDetail = js_util.getProperty<Object?>(event, 'detail');
-      if (rawDetail == null) return;
-      try {
-        final decoded = jsonDecode(rawDetail.toString());
-        if (decoded is! Map<String, dynamic> ||
-            decoded['requestId']?.toString() != requestId) {
-          return;
-        }
-
-        switch (decoded['type']?.toString()) {
-          case 'started':
-            setProtectedPdfLoadingMessage('Connecting to protected PDF...');
-            return;
-          case 'response':
-            final contentLength = decoded['contentLength'];
-            setProtectedPdfLoadingMessage(
-              contentLength is num && contentLength > 0
-                  ? 'Downloading protected PDF '
-                        '(${(contentLength / (1024 * 1024)).toStringAsFixed(1)} MB)...'
-                  : 'Downloading protected PDF...',
-            );
-            return;
-          case 'chunk':
-            final encodedChunk = decoded['data']?.toString() ?? '';
-            if (encodedChunk.isNotEmpty) {
-              bytes.addAll(base64Decode(encodedChunk));
-            }
-            if (bytes.length > _maximumProtectedPdfImageBytes) {
-              completer.completeError(
-                StateError('The PDF is too large for protected rendering.'),
-              );
-            }
-            return;
-          case 'complete':
-            if (bytes.isEmpty) {
-              completer.completeError(
-                StateError('The native PDF download returned no data.'),
-              );
-            } else {
-              setProtectedPdfLoadingMessage('Preparing PDF pages...');
-              completer.complete(Uint8List.fromList(bytes));
-            }
-            return;
-          case 'error':
-            completer.completeError(
-              StateError(
-                decoded['message']?.toString() ??
-                    'The native PDF download failed.',
-              ),
-            );
-            return;
-        }
-      } catch (error) {
-        if (!completer.isCompleted) completer.completeError(error);
-      }
-    });
-
-    js_util.callMethod<void>(html.window, 'addEventListener', [
-      'ancientVaultPdfFetch',
-      handler,
-    ]);
-
-    try {
-      js_util.callMethod<void>(nativeBridge, 'postMessage', [
-        jsonEncode({
-          'action': 'fetch',
-          'requestId': requestId,
-          'url': widget.pdfUrl,
-        }),
-      ]);
-      return await completer.future.timeout(
-        const Duration(seconds: 45),
-        onTimeout: () => throw TimeoutException(
-          'The iOS PDF download bridge did not respond.',
-        ),
-      );
-    } finally {
-      js_util.callMethod<void>(html.window, 'removeEventListener', [
-        'ancientVaultPdfFetch',
-        handler,
-      ]);
-    }
-  }
-
-  void setProtectedPdfLoadingMessage(String message) {
-    final container = protectedPdfImageContainer;
-    if (container == null || container.children.isEmpty) return;
-    final firstChild = container.children.first;
-    if (firstChild is html.DivElement) firstChild.text = message;
-  }
-
   Future<Uint8List> loadProtectedPdfImageBytesFromUrl() async {
     final response = await http
         .get(Uri.parse(widget.pdfUrl))
@@ -13856,15 +13448,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     final renderGeneration = ++protectedPdfRenderGeneration;
 
     try {
-      setProtectedPdfLoadingMessage('Loading protected PDF renderer...');
       await ensurePdfJsReady().timeout(const Duration(seconds: 12));
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      final pdfJs = pdf_js_util.getProperty<Object>(html.window, 'pdfjsLib');
+      final pdfJs = js_util.getProperty<Object>(html.window, 'pdfjsLib');
       final pdfBytes = await loadProtectedPdfImageBytes();
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      setProtectedPdfLoadingMessage('Opening protected PDF pages...');
       final documentOptions = js_util.newObject();
       js_util.setProperty(
         documentOptions,
@@ -13881,7 +13471,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           .timeout(const Duration(seconds: 30));
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      final pageCount = (pdf_js_util.getProperty<num>(
+      final pageCount = (js_util.getProperty<num>(
         document,
         'numPages',
       )).toInt();
@@ -13905,14 +13495,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           js_util.jsify({'scale': 1}),
         ],
       );
-      final baseWidth = pdf_js_util.getProperty<num>(baseViewport, 'width');
-      final containerWidth = await waitForProtectedPdfContainerWidth(
-        container,
-        renderGeneration: renderGeneration,
-      );
-      if (renderGeneration != protectedPdfRenderGeneration) return;
-      final availableWidth = math.max(240, containerWidth - 24);
-      final displayScale = (availableWidth / baseWidth).clamp(0.2, 1.5);
+      final baseWidth = js_util.getProperty<num>(baseViewport, 'width');
+      final containerWidth = container.clientWidth == 0
+          ? 900
+          : container.clientWidth;
+      final availableWidth = math.max(320, containerWidth - 48);
+      final displayScale = (availableWidth / baseWidth).clamp(0.35, 1.8);
       final targetPixelRatio = pageCount <= 12
           ? _protectedPdfShortDocumentPixelRatio
           : pageCount <= 60
@@ -13925,22 +13513,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final renderScale = displayScale * pixelRatio;
       final zoomedDisplayScale = displayScale * readerZoomScale;
       final zoomedRenderScale = renderScale * readerZoomScale;
-      final displayViewportOptions = pdf_js_util.newObject();
-      pdf_js_util.setProperty(
-        displayViewportOptions,
-        'scale',
-        zoomedDisplayScale,
-      );
-      final zoomedDisplayViewport = pdf_js_util.callMethod<Object>(
+      final zoomedDisplayViewport = js_util.callMethod<Object>(
         firstPage,
         'getViewport',
-        [displayViewportOptions],
+        [
+          js_util.jsify({'scale': zoomedDisplayScale}),
+        ],
       );
-      final zoomedDisplayWidth = pdf_js_util.getProperty<num>(
+      final zoomedDisplayWidth = js_util.getProperty<num>(
         zoomedDisplayViewport,
         'width',
       );
-      final zoomedDisplayHeight = pdf_js_util.getProperty<num>(
+      final zoomedDisplayHeight = js_util.getProperty<num>(
         zoomedDisplayViewport,
         'height',
       );
@@ -14082,22 +13666,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     return rawMessage;
   }
 
-  Future<double> waitForProtectedPdfContainerWidth(
-    html.DivElement container, {
-    required int renderGeneration,
-  }) async {
-    for (var attempt = 0; attempt < 30; attempt++) {
-      if (renderGeneration != protectedPdfRenderGeneration) return 0;
-
-      final width = container.clientWidth;
-      if (width >= 240) return width.toDouble();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    }
-
-    final viewportWidth = html.document.documentElement?.clientWidth ?? 390;
-    return math.max(240, viewportWidth).toDouble();
-  }
-
   Future<void> renderProtectedPdfPagesAroundPage(
     int pageNumber, {
     required int renderGeneration,
@@ -14168,32 +13736,21 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }) async {
     job.isRendering = true;
     try {
-      final page = await pdf_js_util.promiseToFuture<Object>(
-        pdf_js_util.callMethod<Object>(job.document, 'getPage', [
-          job.pageNumber,
-        ]),
+      final page = await js_util.promiseToFuture<Object>(
+        js_util.callMethod<Object>(job.document, 'getPage', [job.pageNumber]),
       );
       if (renderGeneration != protectedPdfRenderGeneration) return;
 
-      final renderViewportOptions = pdf_js_util.newObject();
-      pdf_js_util.setProperty(renderViewportOptions, 'scale', job.renderScale);
-      final renderViewport = pdf_js_util.callMethod<Object>(
-        page,
-        'getViewport',
-        [renderViewportOptions],
-      );
-      final renderWidth = pdf_js_util.getProperty<num>(renderViewport, 'width');
-      final renderHeight = pdf_js_util.getProperty<num>(
-        renderViewport,
-        'height',
-      );
+      final renderViewport = js_util.callMethod<Object>(page, 'getViewport', [
+        js_util.jsify({'scale': job.renderScale}),
+      ]);
+      final renderWidth = js_util.getProperty<num>(renderViewport, 'width');
+      final renderHeight = js_util.getProperty<num>(renderViewport, 'height');
       final canvas =
           html.CanvasElement(
               width: renderWidth.ceil(),
               height: renderHeight.ceil(),
             )
-            ..id =
-                'ancient-vault-pdf-$renderGeneration-${job.pageNumber}-${DateTime.now().microsecondsSinceEpoch}'
             ..style.width = '${job.displayWidth}px'
             ..style.height = '${job.displayHeight}px'
             ..style.display = 'block'
@@ -14210,32 +13767,20 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       job.wrapper.children.add(canvas);
       job.canvas = canvas;
 
-      if (isIosWebViewReader) {
-        final renderTask = pdf_js_util.callMethod<Object>(
-          html.window,
-          '__ancientVaultRenderPdfPage',
-          [page, canvas.id, job.renderScale],
-        );
-        // PDF.js resolves a successful render with JavaScript `undefined`.
-        await pdf_js_util
-            .promiseToFuture<Object?>(renderTask)
-            .timeout(const Duration(seconds: 20));
-      } else {
-        final context = canvas.context2D;
-        js_util.setProperty(context, 'imageSmoothingEnabled', true);
-        js_util.setProperty(context, 'imageSmoothingQuality', 'high');
-        final renderContext = js_util.newObject();
-        js_util.setProperty(renderContext, 'canvasContext', context);
-        js_util.setProperty(renderContext, 'viewport', renderViewport);
-        final renderTask = js_util.callMethod<Object>(page, 'render', [
-          renderContext,
-        ]);
-        await js_util
-            .promiseToFuture<Object>(
-              js_util.getProperty<Object>(renderTask, 'promise'),
-            )
-            .timeout(const Duration(seconds: 20));
-      }
+      final context = canvas.context2D;
+      js_util.setProperty(context, 'imageSmoothingEnabled', true);
+      js_util.setProperty(context, 'imageSmoothingQuality', 'high');
+      final renderContext = js_util.newObject();
+      js_util.setProperty(renderContext, 'canvasContext', context);
+      js_util.setProperty(renderContext, 'viewport', renderViewport);
+      final renderTask = js_util.callMethod<Object>(page, 'render', [
+        renderContext,
+      ]);
+      await js_util
+          .promiseToFuture<Object?>(
+            js_util.getProperty<Object>(renderTask, 'promise'),
+          )
+          .timeout(const Duration(seconds: 20));
 
       if (renderGeneration != protectedPdfRenderGeneration) {
         canvas.remove();
@@ -14249,13 +13794,20 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       job.isRendered = true;
     } catch (error) {
       if (renderGeneration == protectedPdfRenderGeneration) {
+        final errorMessage = describeProtectedPdfRenderError(error);
+        final console = js_util.getProperty<Object?>(html.window, 'console');
+        if (console != null) {
+          js_util.callMethod<void>(console, 'error', [
+            'Protected PDF page ${job.pageNumber} failed: $errorMessage',
+          ]);
+        }
         job.canvas?.remove();
         job.canvas = null;
         job.isRendered = false;
         job.placeholder
           ..text =
               'Protected page ${job.pageNumber} could not render. '
-              '${describeProtectedPdfRenderError(error)}'
+              'Reason: $errorMessage'
           ..style.color = '#FF8A80';
         if (!job.wrapper.children.contains(job.placeholder)) {
           job.wrapper.children.add(job.placeholder);
@@ -14336,33 +13888,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
   }
 
-  Object? protectedPdfTouchAt(html.Event event, int index) {
-    final touches = js_util.getProperty<Object?>(event, 'touches');
-    if (touches == null) return null;
-
-    final lengthValue = js_util.getProperty<Object?>(touches, 'length');
-    final length = lengthValue is num
-        ? lengthValue.toInt()
-        : int.tryParse('$lengthValue') ?? 0;
-    if (index < 0 || index >= length) return null;
-
-    return js_util.callMethod<Object?>(touches, 'item', [index]) ??
-        js_util.getProperty<Object?>(touches, '$index');
-  }
-
   void handleProtectedPdfTouchStart(html.Event event) {
     final distance = protectedPdfPinchDistanceForEvent(event);
-    if (distance == null) {
-      final touch = protectedPdfTouchAt(event, 0);
-      protectedPdfPanLastX = protectedPdfTouchCoordinate(touch, 'clientX');
-      protectedPdfPanLastY = protectedPdfTouchCoordinate(touch, 'clientY');
-      protectedPdfDidPan = false;
-      return;
-    }
+    if (distance == null) return;
 
     event.preventDefault();
-    protectedPdfPanLastX = null;
-    protectedPdfPanLastY = null;
     protectedPdfPinchStartDistance = distance;
     protectedPdfPinchStartZoomScale = readerZoomScale;
   }
@@ -14370,33 +13900,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   void handleProtectedPdfTouchMove(html.Event event) {
     final startDistance = protectedPdfPinchStartDistance;
     final distance = protectedPdfPinchDistanceForEvent(event);
-    if (startDistance == null || distance == null || startDistance <= 0) {
-      final container = protectedPdfImageContainer;
-      final touch = protectedPdfTouchAt(event, 0);
-      final x = protectedPdfTouchCoordinate(touch, 'clientX');
-      final y = protectedPdfTouchCoordinate(touch, 'clientY');
-      final lastX = protectedPdfPanLastX;
-      final lastY = protectedPdfPanLastY;
-      if (container == null ||
-          x == null ||
-          y == null ||
-          lastX == null ||
-          lastY == null) {
-        return;
-      }
-
-      final deltaX = lastX - x;
-      final deltaY = lastY - y;
-      if (deltaX.abs() >= 1 || deltaY.abs() >= 1) {
-        event.preventDefault();
-        container.scrollLeft += deltaX.round();
-        container.scrollTop += deltaY.round();
-        protectedPdfDidPan = true;
-      }
-      protectedPdfPanLastX = x;
-      protectedPdfPanLastY = y;
-      return;
-    }
+    if (startDistance == null || distance == null || startDistance <= 0) return;
 
     event.preventDefault();
     protectedPdfPendingPinchZoomScale = normalizeReaderZoomScale(
@@ -14411,8 +13915,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     protectedPdfPinchStartDistance = null;
     protectedPdfPendingPinchZoomScale = null;
     protectedPdfPinchStartZoomScale = readerZoomScale;
-    protectedPdfPanLastX = null;
-    protectedPdfPanLastY = null;
 
     if (pendingZoom != null && (pendingZoom - readerZoomScale).abs() >= 0.02) {
       event.preventDefault();
@@ -14421,10 +13923,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
 
     if (wasPinching) return;
-    if (protectedPdfDidPan) {
-      protectedPdfDidPan = false;
-      return;
-    }
 
     final now = DateTime.now();
     final lastTap = protectedPdfLastTapAt;
@@ -14446,6 +13944,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   void handleProtectedPdfImageScroll(html.Event event) {
+    protectedPdfScrollUpdateTimer?.cancel();
+    protectedPdfScrollUpdateTimer = Timer(
+      const Duration(milliseconds: 60),
+      updateProtectedPdfPageFromScroll,
+    );
+  }
+
+  void updateProtectedPdfPageFromScroll() {
     final container = protectedPdfImageContainer;
     if (container == null || pdfPageCount == null) return;
 
@@ -14454,7 +13960,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     var visiblePage = currentPdfPage;
 
     for (final child in container.children) {
-      final pageElement = child;
+      final pageElement = child as html.HtmlElement;
       final pageNumber = int.tryParse(
         pageElement.dataset['readerPageNumber'] ?? '',
       );
@@ -14476,8 +13982,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     } else {
       currentPdfPage = visiblePage;
     }
-    readerPageChangedSinceOpen = true;
-    scheduleAutomaticReadingPositionSave(visiblePage);
     preloadNarrationTextForPage(visiblePage);
     unawaited(
       renderProtectedPdfPagesAroundPage(
@@ -14995,9 +14499,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }) {
     final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
     final nextSearchQuery = searchQuery ?? currentSearchQuery;
-    if (source != 'latest_saved_position') {
-      readerPageChangedSinceOpen = true;
-    }
 
     if (mounted) {
       setState(() {
@@ -15019,12 +14520,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     );
 
     if (!kIsWeb) {
-      if (nativePdfDocumentLoaded) {
-        nativePdfViewerController.jumpToPage(safePageNumber);
-      } else {
-        pendingNativePdfPage = safePageNumber;
-      }
-      scheduleAutomaticReadingPositionSave(safePageNumber);
+      nativePdfViewerController.jumpToPage(safePageNumber);
       preloadNarrationTextForPage(safePageNumber);
       return;
     }
@@ -15039,7 +14535,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         forceReload: forceReload,
       );
     }
-    scheduleAutomaticReadingPositionSave(safePageNumber);
     preloadNarrationTextForPage(safePageNumber);
   }
 
@@ -15773,33 +15268,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   void preloadNarrationTextForPage(int pageNumber) {
     final safePageNumber = pageNumber < 1 ? 1 : pageNumber;
-    narrationTextPreloadTimer?.cancel();
-
-    // PDF text extraction is intentionally delayed until the swipe settles.
-    // Starting multiple full-document parses during a fast fling can contend
-    // with the native PDF renderer and make page scrolling feel erratic.
-    narrationTextPreloadTimer = Timer(const Duration(milliseconds: 450), () {
-      unawaited(_preloadNarrationTextAroundPage(safePageNumber));
-    });
-  }
-
-  Future<void> _preloadNarrationTextAroundPage(int pageNumber) async {
-    final lastPage = pdfPageCount;
-    final pages = [
-      pageNumber,
-      if (lastPage == null || pageNumber < lastPage) pageNumber + 1,
-    ];
-
-    // Load sequentially so the current and next-page parsers never compete for
-    // memory or CPU. Narration itself still reads directly from this same cache.
-    for (final page in pages) {
-      if (!mounted) return;
+    for (final page in [safePageNumber, safePageNumber + 1]) {
       if (narrationPageTextCache.containsKey(page)) continue;
-      try {
-        await loadNarrationTextForPage(page);
-      } catch (_) {
-        // Preloading is best-effort. Playback surfaces any actionable error.
-      }
+      loadNarrationTextForPage(page).catchError((_) => '');
     }
   }
 
@@ -15865,14 +15336,12 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       pdfPageCount = pageCount;
 
       final extractor = PdfTextExtractor(document);
-      final text = normalizeNarrationText(
-        extractor
-            .extractText(
-              startPageIndex: safePageNumber - 1,
-              endPageIndex: safePageNumber - 1,
-            )
-            .trim(),
-      );
+      final text = extractor
+          .extractText(
+            startPageIndex: safePageNumber - 1,
+            endPageIndex: safePageNumber - 1,
+          )
+          .trim();
 
       narrationPageTextCache[safePageNumber] = text;
       narrationPageTextFutureCache.remove(safePageNumber);
@@ -19112,7 +18581,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     readerActivityRepository = ReaderActivityRepository();
     readerDeviceIdentity = ReaderDeviceIdentityResolver(
       storage: const HtmlDeviceIdentityStorage(),
-      platformProvider: () => html.window.navigator.userAgent,
+      platformProvider: () => html.window.navigator.platform ?? '',
       deviceIdFactory: createReaderDeviceId,
     ).resolve();
     readerDeviceAuthorizationRepository = UserDeviceAuthorizationRepository();
@@ -19178,14 +18647,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     standardPdfLoadTimer?.cancel();
     protectedPdfPreloadTimer?.cancel();
     protectedPageJumpTimer?.cancel();
-    readingPositionSaveTimer?.cancel();
-    narrationTextPreloadTimer?.cancel();
     readerWindowBlurSubscription?.cancel();
     readerWindowFocusSubscription?.cancel();
     readerContextMenuSubscription?.cancel();
     readerPdfContextMenuSubscription?.cancel();
     readerPdfMouseDownSubscription?.cancel();
     protectedPdfScrollSubscription?.cancel();
+    protectedPdfScrollUpdateTimer?.cancel();
     protectedPdfTouchStartSubscription?.cancel();
     protectedPdfTouchMoveSubscription?.cancel();
     protectedPdfTouchEndSubscription?.cancel();
@@ -19202,11 +18670,6 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     nativePdfViewerController.dispose();
     unawaited(disableReaderScreenSecurity());
     unawaited(disableReaderStayAwake());
-
-    if (readingPositionRestoreCompleted &&
-        currentPdfPage != lastPersistedReadingPage) {
-      unawaited(persistLatestReadingPosition(currentPdfPage));
-    }
 
     if (readerSessionStarted) {
       final startedAt = readerSessionStartedAt;
@@ -19648,9 +19111,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                                                             .addPostFrameCallback((
                                                               _,
                                                             ) {
-                                                              if (!mounted) {
+                                                              if (!mounted)
                                                                 return;
-                                                              }
                                                               openPdfPage(
                                                                 page,
                                                                 searchQuery:

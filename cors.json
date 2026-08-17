@@ -1,6 +1,12 @@
 [
   {
-    "origin": ["http://localhost:*", "https://vault.ancientsociety.tech"],
+    "origin": [
+      "http://localhost:*",
+      "https://vault.ancientsociety.tech",
+      "https://ancient--docs.web.app",
+      "https://ancient--docs.firebaseapp.com",
+      "https://ancient--docs--premium-health-20260816-trli8hz5.web.app"
+    ],
     "method": ["GET"],
     "maxAgeSeconds": 3600
   }

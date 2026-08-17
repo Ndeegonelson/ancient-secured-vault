@@ -1,15 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-
-import 'services/ios_in_app_purchase_controller.dart';
 
 const _vaultUrl = String.fromEnvironment(
   'VAULT_URL',
@@ -17,6 +13,9 @@ const _vaultUrl = String.fromEnvironment(
 );
 const _readerScreenChannel = MethodChannel(
   'ancient_secure_docs/screen_security',
+);
+const _deviceContextChannel = MethodChannel(
+  'ancient_secure_docs/device_context',
 );
 
 void main() {
@@ -56,7 +55,6 @@ class VaultWebViewScreen extends StatefulWidget {
 class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   late final WebViewController controller;
   final FlutterTts nativeTts = FlutterTts();
-  IosInAppPurchaseController? iosPurchases;
   var loadProgress = 0;
   String? loadError;
   String? activeUtteranceId;
@@ -65,26 +63,33 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
   Timer? estimatedProgressTimer;
   Timer? launchSplashTimer;
   bool showLaunchSplash = true;
+  late final DateTime launchStartedAt;
+  int utteranceBaseOffset = 0;
 
   @override
   void initState() {
     super.initState();
+    launchStartedAt = DateTime.now();
     configureNativeTtsBridge();
-    launchSplashTimer = Timer(const Duration(seconds: 2), () {
+    launchSplashTimer = Timer(const Duration(seconds: 5), () {
       if (!mounted) return;
       setState(() {
         showLaunchSplash = false;
       });
     });
-    final isIos = Platform.isIOS;
-    final webViewController = WebViewController()
+    controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(
-        isIos
-            ? 'AncientSecureVaultIOSApp/1.0'
+        defaultTargetPlatform == TargetPlatform.iOS
+            ? 'AncientSecureVaultiOSApp/1.0'
             : 'AncientSecureVaultAndroidApp/1.0',
       )
       ..enableZoom(false)
+      ..setOnConsoleMessage((message) {
+        if (message.message.contains('Protected PDF')) {
+          debugPrint('AncientVaultWeb: ${message.message}');
+        }
+      })
       ..addJavaScriptChannel(
         'AncientVaultTts',
         onMessageReceived: handleNativeTtsMessage,
@@ -103,18 +108,16 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
               if (progress > 10) loadError = null;
             });
           },
+          onPageStarted: (_) {
+            if (!mounted) return;
+            setState(() {
+              loadProgress = 0;
+              loadError = null;
+            });
+          },
           onPageFinished: (_) async {
-            launchSplashTimer?.cancel();
-            if (mounted) {
-              setState(() {
-                loadProgress = 100;
-                showLaunchSplash = false;
-              });
-            }
             await lockMobileWebViewZoom();
-            if (isIos) {
-              await iosPurchases?.initialize(silent: true);
-            }
+            await finishLaunchSplash();
           },
           onWebResourceError: (error) {
             if (!mounted || error.isForMainFrame == false) return;
@@ -123,118 +126,38 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
             });
           },
         ),
-      )
-      ..loadRequest(Uri.parse(_vaultUrl));
-
-    if (isIos) {
-      iosPurchases = IosInAppPurchaseController(onEvent: emitIosPurchaseEvent);
-      webViewController.addJavaScriptChannel(
-        'AncientVaultPdf',
-        onMessageReceived: handleNativePdfMessage,
       );
-      webViewController.addJavaScriptChannel(
-        'AncientVaultIap',
-        onMessageReceived: (message) {
-          unawaited(iosPurchases?.handleMessage(message.message));
-        },
-      );
-    }
-    controller = webViewController;
+    loadVault();
   }
 
-  Future<void> handleNativePdfMessage(JavaScriptMessage message) async {
-    String requestId = '';
-    HttpClient? client;
+  Future<void> loadVault() async {
+    var vaultUri = Uri.parse(_vaultUrl);
     try {
-      final payload = jsonDecode(message.message);
-      if (payload is! Map<String, dynamic> ||
-          payload['action']?.toString() != 'fetch') {
-        return;
-      }
-
-      requestId = payload['requestId']?.toString() ?? '';
-      final url = payload['url']?.toString().trim() ?? '';
-      final uri = Uri.tryParse(url);
-      if (requestId.isEmpty ||
-          uri == null ||
-          (uri.scheme != 'https' && uri.scheme != 'http')) {
-        throw const FormatException('The PDF download request is invalid.');
-      }
-
-      await emitNativePdfEvent({'type': 'started', 'requestId': requestId});
-
-      client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
-      final request = await client.getUrl(uri);
-      request.headers.set(HttpHeaders.acceptHeader, 'application/pdf,*/*');
-      final response = await request.close().timeout(
-        const Duration(seconds: 30),
+      final countryCode = await _deviceContextChannel.invokeMethod<String>(
+        'getCountryCode',
       );
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException(
-          'PDF download returned HTTP ${response.statusCode}.',
-          uri: uri,
+      if (countryCode != null && countryCode.length == 2) {
+        vaultUri = vaultUri.replace(
+          queryParameters: {
+            ...vaultUri.queryParameters,
+            'deviceCountry': countryCode.toUpperCase(),
+          },
         );
       }
-
-      await emitNativePdfEvent({
-        'type': 'response',
-        'requestId': requestId,
-        'contentLength': response.contentLength,
-      });
-
-      var byteCount = 0;
-      var chunkIndex = 0;
-      await for (final chunk in response.timeout(const Duration(seconds: 30))) {
-        byteCount += chunk.length;
-        if (byteCount > 120 * 1024 * 1024) {
-          throw const FileSystemException(
-            'The PDF is too large for protected mobile rendering.',
-          );
-        }
-
-        // Keep each JavaScript evaluation small. WKWebView can silently reject
-        // very large source strings even though the network download succeeded.
-        const bridgeChunkSize = 24 * 1024;
-        for (var offset = 0; offset < chunk.length; offset += bridgeChunkSize) {
-          final end = (offset + bridgeChunkSize).clamp(0, chunk.length);
-          await emitNativePdfEvent({
-            'type': 'chunk',
-            'requestId': requestId,
-            'index': chunkIndex++,
-            'data': base64Encode(chunk.sublist(offset, end)),
-          });
-        }
-      }
-
-      if (byteCount == 0) {
-        throw const FileSystemException('The downloaded PDF is empty.');
-      }
-
-      await emitNativePdfEvent({
-        'type': 'complete',
-        'requestId': requestId,
-        'byteCount': byteCount,
-        'chunkCount': chunkIndex,
-      });
-    } catch (error) {
-      if (requestId.isNotEmpty) {
-        await emitNativePdfEvent({
-          'type': 'error',
-          'requestId': requestId,
-          'message': error.toString(),
-        });
-      }
-    } finally {
-      client?.close(force: true);
+    } on PlatformException {
+      // The hosted app falls back to the device locale when telephony data is absent.
     }
+    await controller.loadRequest(vaultUri);
   }
 
-  Future<void> emitNativePdfEvent(Map<String, dynamic> event) async {
-    final detail = jsonEncode(jsonEncode(event));
-    await controller.runJavaScript(
-      "window.dispatchEvent(new CustomEvent('ancientVaultPdfFetch', "
-      "{detail: $detail}));",
-    );
+  Future<void> finishLaunchSplash() async {
+    const minimumBrandingTime = Duration(seconds: 5);
+    final elapsed = DateTime.now().difference(launchStartedAt);
+    final remaining = minimumBrandingTime - elapsed;
+    if (remaining > Duration.zero) await Future<void>.delayed(remaining);
+    if (!mounted || !showLaunchSplash) return;
+    launchSplashTimer?.cancel();
+    setState(() => showLaunchSplash = false);
   }
 
   Future<void> handleReaderWakeLockMessage(JavaScriptMessage message) async {
@@ -278,9 +201,6 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     nativeTts.awaitSpeakCompletion(false);
     nativeTts.setVolume(1.0);
     nativeTts.setPitch(1.0);
-    if (Platform.isIOS) {
-      unawaited(configureIosNarrationAudioSession());
-    }
 
     nativeTts.setStartHandler(() {
       emitNativeTtsEvent({'type': 'start'});
@@ -305,35 +225,22 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
       emitNativeTtsEvent({'type': 'error', 'error': message.toString()});
     });
     nativeTts.setProgressHandler((text, start, end, word) {
-      activeUtteranceOffset = end;
+      final absoluteStart = (utteranceBaseOffset + start).clamp(
+        0,
+        activeUtteranceText.length,
+      );
+      final absoluteEnd = (utteranceBaseOffset + end).clamp(
+        absoluteStart,
+        activeUtteranceText.length,
+      );
+      activeUtteranceOffset = absoluteEnd;
       emitNativeTtsEvent({
         'type': 'boundary',
-        'start': start,
-        'end': end,
+        'start': absoluteStart,
+        'end': absoluteEnd,
         'word': word,
       });
     });
-  }
-
-  Future<void> configureIosNarrationAudioSession() async {
-    await nativeTts.setSharedInstance(true);
-    await nativeTts.autoStopSharedSession(false);
-    await nativeTts
-        .setIosAudioCategory(IosTextToSpeechAudioCategory.playback, const [
-          IosTextToSpeechAudioCategoryOptions.allowBluetooth,
-          IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
-          IosTextToSpeechAudioCategoryOptions.allowAirPlay,
-        ], IosTextToSpeechAudioMode.spokenAudio);
-  }
-
-  Future<void> disableReaderStayAwake() async {
-    try {
-      await _readerScreenChannel.invokeMethod<void>('disableReaderStayAwake');
-    } on PlatformException {
-      // The native shell may already be shutting down.
-    } on MissingPluginException {
-      // Keep disposal safe on platforms without a native screen bridge.
-    }
   }
 
   Future<void> handleNativeTtsMessage(JavaScriptMessage message) async {
@@ -372,6 +279,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     activeUtteranceId = payload['id']?.toString();
     activeUtteranceText = text;
     activeUtteranceOffset = 0;
+    utteranceBaseOffset = 0;
     estimatedProgressTimer?.cancel();
     await nativeTts.stop();
     await nativeTts.setLanguage(normalizeNativeTtsLanguage(payload['lang']));
@@ -389,6 +297,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     if (text.trim().isEmpty) return;
 
     estimatedProgressTimer?.cancel();
+    utteranceBaseOffset = offset;
     await nativeTts.speak(text);
   }
 
@@ -432,19 +341,6 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
       );
     } catch (_) {
       // The page may be navigating; narration events can be safely dropped.
-    }
-  }
-
-  Future<void> emitIosPurchaseEvent(Map<String, dynamic> event) async {
-    final payload = jsonEncode(jsonEncode(event));
-    try {
-      await controller.runJavaScript(
-        "window.dispatchEvent(new CustomEvent('ancientVaultIap', "
-        "{detail: $payload}));",
-      );
-    } catch (_) {
-      // The web page may still be loading. It requests current StoreKit state
-      // again after the dashboard becomes available.
     }
   }
 
@@ -499,14 +395,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
       child: Scaffold(
         body: Stack(
           children: [
-            WebViewWidget(
-              controller: controller,
-              gestureRecognizers: {
-                Factory<OneSequenceGestureRecognizer>(
-                  EagerGestureRecognizer.new,
-                ),
-              },
-            ),
+            WebViewWidget(controller: controller),
             if (showLaunchSplash) const _VaultLaunchSplash(),
             if (loadProgress < 100 && !showLaunchSplash)
               LinearProgressIndicator(
@@ -531,8 +420,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     launchSplashTimer?.cancel();
     estimatedProgressTimer?.cancel();
     nativeTts.stop();
-    unawaited(disableReaderStayAwake());
-    unawaited(iosPurchases?.dispose());
+    _readerScreenChannel.invokeMethod<void>('disableReaderStayAwake');
     super.dispose();
   }
 }

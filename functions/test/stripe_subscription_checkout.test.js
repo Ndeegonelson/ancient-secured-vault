@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   createStripeBillingPortalSessionHandler,
   createStripeCheckoutSessionHandler,
+  createStripeWebhookHandler,
   handleStripeEvent,
 } = require("../stripe_subscription_checkout");
 
@@ -191,13 +192,11 @@ test("creates a Stripe checkout session and records the request", async () => {
 
 test("active premium users cannot start a Stripe checkout", async () => {
   const firestore = new FakeFirestore();
-  const futureExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      .toISOString();
   await firestore.collection("users").doc("reader@example.com").set({
     email: "reader@example.com",
     accessLevel: "premium",
     subscriptionStatus: "active",
-    subscriptionExpiresAt: futureExpiry,
+    subscriptionExpiresAt: "2099-07-14T12:00:00.000Z",
   });
   let checkoutWasCreated = false;
   const handler = createStripeCheckoutSessionHandler({
@@ -226,6 +225,26 @@ test("active premium users cannot start a Stripe checkout", async () => {
   assert.equal(response.statusCode, 409);
   assert.equal(checkoutWasCreated, false);
   assert.match(response.body.error.message, /already active/i);
+});
+
+test("Stripe webhook rejects a missing signature as a bad request", async () => {
+  const handler = createStripeWebhookHandler({
+    firestore: new FakeFirestore(),
+    stripeClientFactory: () => ({
+      webhooks: {
+        constructEvent: () => {
+          assert.fail("unsigned payload must not reach Stripe verification");
+        },
+      },
+    }),
+    getWebhookSecret: () => "whsec_test",
+  });
+  const response = fakeResponse();
+
+  await handler(fakeRequest({authorization: ""}), response);
+
+  assert.equal(response.statusCode, 400);
+  assert.match(response.body.error.message, /signature is missing/i);
 });
 
 test("completed checkout approves the request and activates user access", async () => {

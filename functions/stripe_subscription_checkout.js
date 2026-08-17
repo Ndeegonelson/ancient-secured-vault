@@ -82,12 +82,21 @@ function createStripeWebhookHandler({
           getWebhookSecret(),
           "Stripe webhook secret is not configured.",
       );
-      const signature = request.get("stripe-signature");
-      const event = stripe.webhooks.constructEvent(
-          request.rawBody || request.body,
-          signature,
-          webhookSecret,
-      );
+      const signature = cleanText(request.get("stripe-signature"));
+      if (!signature) {
+        throw httpError(400, "Stripe signature is missing.");
+      }
+
+      let event;
+      try {
+        event = stripe.webhooks.constructEvent(
+            request.rawBody || request.body,
+            signature,
+            webhookSecret,
+        );
+      } catch (_) {
+        throw httpError(400, "Stripe signature is invalid.");
+      }
 
       await handleStripeEvent({firestore, event});
       response.json({received: true});
