@@ -96,7 +96,7 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
       )
       ..addJavaScriptChannel(
         'AncientVaultReader',
-        onMessageReceived: handleReaderWakeLockMessage,
+        onMessageReceived: handleReaderNativeCommandMessage,
       )
       ..setBackgroundColor(const Color(0xFF10131A))
       ..setNavigationDelegate(
@@ -160,14 +160,24 @@ class _VaultWebViewScreenState extends State<VaultWebViewScreen> {
     setState(() => showLaunchSplash = false);
   }
 
-  Future<void> handleReaderWakeLockMessage(JavaScriptMessage message) async {
+  Future<void> handleReaderNativeCommandMessage(
+    JavaScriptMessage message,
+  ) async {
     try {
       final payload = jsonDecode(message.message);
       if (payload is! Map<String, dynamic>) return;
-      final keepAwake = payload['keepAwake'] == true;
-      await _readerScreenChannel.invokeMethod<void>(
-        keepAwake ? 'enableReaderStayAwake' : 'disableReaderStayAwake',
-      );
+
+      if (payload['secureScreen'] case final bool secureScreen) {
+        await _readerScreenChannel.invokeMethod<void>(
+          secureScreen ? 'enableSecureScreen' : 'disableSecureScreen',
+        );
+      }
+
+      if (payload['keepAwake'] case final bool keepAwake) {
+        await _readerScreenChannel.invokeMethod<void>(
+          keepAwake ? 'enableReaderStayAwake' : 'disableReaderStayAwake',
+        );
+      }
     } on PlatformException {
       // The protected reader remains usable if a device rejects the flag.
     } on FormatException {

@@ -11879,233 +11879,113 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   )
-                : ListView(
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    children: [
-                      Text(
-                        canAccessMainVault
-                            ? 'Main Vault Access: Active'
-                            : 'Free Zone Only - Subscribe to unlock the Main Vault',
-                        style: const TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      const SizedBox(height: 30),
-
-                      if (pdfLoadError != null) ...[
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.redAccent),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.error_outline,
-                                color: Colors.redAccent,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  pdfLoadError!,
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: loadPDFs,
-                                child: const Text(
-                                  'Retry',
-                                  style: TextStyle(color: Colors.greenAccent),
-                                ),
-                              ),
-                            ],
+                : Builder(
+                    builder: (context) {
+                      final dashboardItems = <Widget>[
+                        Text(
+                          canAccessMainVault
+                              ? 'Main Vault Access: Active'
+                              : 'Free Zone Only - Subscribe to unlock the Main Vault',
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 20),
-                      ],
 
-                      if (userAccess.isAdmin) ...[
-                        buildAdminCommandCenter(vaultInventory),
-                        const SizedBox(height: 24),
-                      ],
+                        const SizedBox(height: 30),
 
-                      FutureBuilder<_ReaderDashboardOverview>(
-                        future: readerOverviewFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.hasError) {
-                            return Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.redAccent.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.redAccent),
-                              ),
-                              child: const Text(
-                                'My dashboard could not load right now.',
-                                style: TextStyle(color: Colors.redAccent),
-                              ),
-                            );
-                          }
-
-                          if (!snapshot.hasData) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: LinearProgressIndicator(
-                                color: Colors.greenAccent,
-                                backgroundColor: Colors.white10,
-                              ),
-                            );
-                          }
-
-                          return buildReaderDashboardPreview(snapshot.data!);
-                        },
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      buildDashboardDocumentSearch(),
-                      buildDashboardActiveFilterBar(dashboardFilterLabels),
-
-                      const SizedBox(height: 20),
-
-                      Text(
-                        vaultDocumentSectionTitle(
-                          title: 'FREE ACCESS ZONE',
-                          visibleCount: filteredFreePdfFiles.length,
-                          totalCount: freePdfFiles.length,
-                          hasActiveFilter: hasFreeDocumentFilter,
-                        ),
-                        style: const TextStyle(
-                          color: Colors.orangeAccent,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      const SizedBox(height: 15),
-
-                      buildDocumentCategoryFilter(
-                        filterId: 'free',
-                        documents: freePdfFiles,
-                        selectedCategory: freeDocumentCategoryFilter,
-                        onChanged: (category) {
-                          setState(() {
-                            freeDocumentCategoryFilter = category;
-                          });
-                        },
-                      ),
-
-                      if (isLoading && freePdfFiles.isEmpty)
-                        buildDocumentListLoading('Loading free PDFs...')
-                      else if (freePdfFiles.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text(
-                            'No free PDFs available yet.',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        )
-                      else if (filteredFreePdfFiles.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Text(
-                            hasDashboardDocumentSearch
-                                ? 'No free PDFs match these filters.'
-                                : 'No free PDFs match this category.',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        )
-                      else
-                        ...filteredFreePdfFiles.map((pdfFile) {
-                          return Card(
-                            color: Colors.orange.withValues(alpha: 0.12),
-                            child: ListTile(
-                              leading: const Icon(
-                                Icons.picture_as_pdf,
-                                color: Colors.orangeAccent,
-                              ),
-                              title: Text(
-                                pdfFile['name'],
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                              subtitle: Text(
-                                vaultDocumentListSubtitle(
-                                  pdfFile,
-                                  accessLabel: 'Free Access PDF',
-                                ),
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              trailing: userAccess.canManageVault
-                                  ? IconButton(
-                                      tooltip: 'Manage document',
-                                      icon: const Icon(
-                                        Icons.admin_panel_settings,
-                                      ),
-                                      color: Colors.orangeAccent,
-                                      onPressed: () {
-                                        showVaultDocumentAdminDialog(
-                                          pdfFile,
-                                          accessLabel: 'Free Access PDF',
-                                        );
-                                      },
-                                    )
-                                  : null,
-                              onTap: () async {
-                                final pdfUrl = await resolveSearchResultPdfUrl(
-                                  pdfFile,
-                                );
-
-                                if (pdfUrl == null) return;
-
-                                if (!context.mounted) return;
-
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => PDFViewerScreen(
-                                      pdfUrl: pdfUrl,
-                                      title: pdfFile['name'],
-                                      accessLevel:
-                                          pdfFile['accessLevel']?.toString() ??
-                                          'free',
-                                      readerMode:
-                                          pdfFile['readerMode']?.toString() ??
-                                          '',
-                                      protectionMode:
-                                          pdfFile['protectionMode']
-                                              ?.toString() ??
-                                          '',
-                                      openSource: 'free_dashboard',
-                                      storagePath:
-                                          pdfFile['storagePath']?.toString() ??
-                                          '',
-                                    ),
-                                  ),
-                                );
-                              },
+                        if (pdfLoadError != null) ...[
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.redAccent),
                             ),
-                          );
-                        }),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.error_outline,
+                                  color: Colors.redAccent,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    pdfLoadError!,
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: loadPDFs,
+                                  child: const Text(
+                                    'Retry',
+                                    style: TextStyle(color: Colors.greenAccent),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                        ],
 
-                      const SizedBox(height: 30),
-                      if (canAccessMainVault) ...[
+                        if (userAccess.isAdmin) ...[
+                          buildAdminCommandCenter(vaultInventory),
+                          const SizedBox(height: 24),
+                        ],
+
+                        FutureBuilder<_ReaderDashboardOverview>(
+                          future: readerOverviewFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent.withValues(
+                                    alpha: 0.12,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.redAccent),
+                                ),
+                                child: const Text(
+                                  'My dashboard could not load right now.',
+                                  style: TextStyle(color: Colors.redAccent),
+                                ),
+                              );
+                            }
+
+                            if (!snapshot.hasData) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: LinearProgressIndicator(
+                                  color: Colors.greenAccent,
+                                  backgroundColor: Colors.white10,
+                                ),
+                              );
+                            }
+
+                            return buildReaderDashboardPreview(snapshot.data!);
+                          },
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        buildDashboardDocumentSearch(),
+                        buildDashboardActiveFilterBar(dashboardFilterLabels),
+
+                        const SizedBox(height: 20),
+
                         Text(
                           vaultDocumentSectionTitle(
-                            title: 'MAIN VAULT PDFs',
-                            visibleCount: filteredPremiumPdfFiles.length,
-                            totalCount: premiumPdfFiles.length,
-                            hasActiveFilter: hasPremiumDocumentFilter,
+                            title: 'FREE ACCESS ZONE',
+                            visibleCount: filteredFreePdfFiles.length,
+                            totalCount: freePdfFiles.length,
+                            hasActiveFilter: hasFreeDocumentFilter,
                           ),
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: Colors.orangeAccent,
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
@@ -12114,76 +11994,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: 15),
 
                         buildDocumentCategoryFilter(
-                          filterId: 'premium',
-                          documents: premiumPdfFiles,
-                          selectedCategory: premiumDocumentCategoryFilter,
+                          filterId: 'free',
+                          documents: freePdfFiles,
+                          selectedCategory: freeDocumentCategoryFilter,
                           onChanged: (category) {
                             setState(() {
-                              premiumDocumentCategoryFilter = category;
+                              freeDocumentCategoryFilter = category;
                             });
                           },
                         ),
 
-                        if (isLoading && premiumPdfFiles.isEmpty)
-                          buildDocumentListLoading('Loading protected PDFs...')
-                        else if (premiumPdfFiles.isEmpty)
+                        if (isLoading && freePdfFiles.isEmpty)
+                          buildDocumentListLoading('Loading free PDFs...')
+                        else if (freePdfFiles.isEmpty)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
                             child: Text(
-                              'No protected PDFs available yet.',
+                              'No free PDFs available yet.',
                               style: TextStyle(color: Colors.white70),
                             ),
                           )
-                        else if (filteredPremiumPdfFiles.isEmpty)
+                        else if (filteredFreePdfFiles.isEmpty)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(
                               hasDashboardDocumentSearch
-                                  ? 'No protected PDFs match these filters.'
-                                  : 'No protected PDFs match this category.',
+                                  ? 'No free PDFs match these filters.'
+                                  : 'No free PDFs match this category.',
                               style: const TextStyle(color: Colors.white70),
                             ),
                           )
                         else
-                          ...filteredPremiumPdfFiles.map((pdfFile) {
+                          ...filteredFreePdfFiles.map((pdfFile) {
                             return Card(
-                              color: Colors.green.withValues(alpha: 0.12),
-
+                              color: const Color(0xFF2B1C0B),
+                              surfaceTintColor: Colors.transparent,
+                              elevation: 0,
                               child: ListTile(
                                 leading: const Icon(
                                   Icons.picture_as_pdf,
-                                  color: Colors.greenAccent,
+                                  color: Colors.orangeAccent,
                                 ),
-
                                 title: Text(
                                   pdfFile['name'],
                                   style: const TextStyle(color: Colors.white),
                                 ),
-
                                 subtitle: Text(
                                   vaultDocumentListSubtitle(
                                     pdfFile,
-                                    accessLabel: 'Protected PDF',
+                                    accessLabel: 'Free Access PDF',
                                   ),
                                   style: const TextStyle(color: Colors.white70),
                                 ),
-
                                 trailing: userAccess.canManageVault
                                     ? IconButton(
                                         tooltip: 'Manage document',
                                         icon: const Icon(
                                           Icons.admin_panel_settings,
                                         ),
-                                        color: Colors.greenAccent,
+                                        color: Colors.orangeAccent,
                                         onPressed: () {
                                           showVaultDocumentAdminDialog(
                                             pdfFile,
-                                            accessLabel: 'Protected PDF',
+                                            accessLabel: 'Free Access PDF',
                                           );
                                         },
                                       )
                                     : null,
-
                                 onTap: () async {
                                   final pdfUrl =
                                       await resolveSearchResultPdfUrl(pdfFile);
@@ -12194,7 +12071,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                                   Navigator.push(
                                     context,
-
                                     MaterialPageRoute(
                                       builder: (context) => PDFViewerScreen(
                                         pdfUrl: pdfUrl,
@@ -12202,7 +12078,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         accessLevel:
                                             pdfFile['accessLevel']
                                                 ?.toString() ??
-                                            'premium',
+                                            'free',
                                         readerMode:
                                             pdfFile['readerMode']?.toString() ??
                                             '',
@@ -12210,7 +12086,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             pdfFile['protectionMode']
                                                 ?.toString() ??
                                             '',
-                                        openSource: 'premium_dashboard',
+                                        openSource: 'free_dashboard',
                                         storagePath:
                                             pdfFile['storagePath']
                                                 ?.toString() ??
@@ -12222,8 +12098,154 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             );
                           }),
-                      ],
-                    ],
+
+                        const SizedBox(height: 30),
+                        if (canAccessMainVault) ...[
+                          Text(
+                            vaultDocumentSectionTitle(
+                              title: 'MAIN VAULT PDFs',
+                              visibleCount: filteredPremiumPdfFiles.length,
+                              totalCount: premiumPdfFiles.length,
+                              hasActiveFilter: hasPremiumDocumentFilter,
+                            ),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+
+                          const SizedBox(height: 15),
+
+                          buildDocumentCategoryFilter(
+                            filterId: 'premium',
+                            documents: premiumPdfFiles,
+                            selectedCategory: premiumDocumentCategoryFilter,
+                            onChanged: (category) {
+                              setState(() {
+                                premiumDocumentCategoryFilter = category;
+                              });
+                            },
+                          ),
+
+                          if (isLoading && premiumPdfFiles.isEmpty)
+                            buildDocumentListLoading(
+                              'Loading protected PDFs...',
+                            )
+                          else if (premiumPdfFiles.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'No protected PDFs available yet.',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            )
+                          else if (filteredPremiumPdfFiles.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                hasDashboardDocumentSearch
+                                    ? 'No protected PDFs match these filters.'
+                                    : 'No protected PDFs match this category.',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                            )
+                          else
+                            ...filteredPremiumPdfFiles.map((pdfFile) {
+                              return Card(
+                                color: const Color(0xFF10251D),
+                                surfaceTintColor: Colors.transparent,
+                                elevation: 0,
+
+                                child: ListTile(
+                                  leading: const Icon(
+                                    Icons.picture_as_pdf,
+                                    color: Colors.greenAccent,
+                                  ),
+
+                                  title: Text(
+                                    pdfFile['name'],
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+
+                                  subtitle: Text(
+                                    vaultDocumentListSubtitle(
+                                      pdfFile,
+                                      accessLabel: 'Protected PDF',
+                                    ),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+
+                                  trailing: userAccess.canManageVault
+                                      ? IconButton(
+                                          tooltip: 'Manage document',
+                                          icon: const Icon(
+                                            Icons.admin_panel_settings,
+                                          ),
+                                          color: Colors.greenAccent,
+                                          onPressed: () {
+                                            showVaultDocumentAdminDialog(
+                                              pdfFile,
+                                              accessLabel: 'Protected PDF',
+                                            );
+                                          },
+                                        )
+                                      : null,
+
+                                  onTap: () async {
+                                    final pdfUrl =
+                                        await resolveSearchResultPdfUrl(
+                                          pdfFile,
+                                        );
+
+                                    if (pdfUrl == null) return;
+
+                                    if (!context.mounted) return;
+
+                                    Navigator.push(
+                                      context,
+
+                                      MaterialPageRoute(
+                                        builder: (context) => PDFViewerScreen(
+                                          pdfUrl: pdfUrl,
+                                          title: pdfFile['name'],
+                                          accessLevel:
+                                              pdfFile['accessLevel']
+                                                  ?.toString() ??
+                                              'premium',
+                                          readerMode:
+                                              pdfFile['readerMode']
+                                                  ?.toString() ??
+                                              '',
+                                          protectionMode:
+                                              pdfFile['protectionMode']
+                                                  ?.toString() ??
+                                              '',
+                                          openSource: 'premium_dashboard',
+                                          storagePath:
+                                              pdfFile['storagePath']
+                                                  ?.toString() ??
+                                              '',
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            }),
+                        ],
+                      ];
+
+                      return ListView.builder(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        cacheExtent: 420,
+                        itemCount: dashboardItems.length,
+                        itemBuilder: (context, index) => dashboardItems[index],
+                      );
+                    },
                   ),
           ),
         ),
@@ -14287,7 +14309,23 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Future<void> enableReaderScreenSecurity() async {
-    if (kIsWeb) return;
+    if (kIsWeb) {
+      try {
+        final bridge = js_util.getProperty<Object?>(
+          html.window,
+          'AncientVaultReader',
+        );
+        if (bridge != null) {
+          js_util.callMethod<void>(bridge, 'postMessage', [
+            '{"secureScreen":true}',
+          ]);
+        }
+      } catch (_) {
+        // A normal browser cannot apply Android FLAG_SECURE. The embedded
+        // Android host supplies this bridge for protected reader sessions.
+      }
+      return;
+    }
 
     try {
       await readerScreenSecurityChannel.invokeMethod<void>(
@@ -14380,7 +14418,22 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Future<void> disableReaderScreenSecurity() async {
-    if (kIsWeb) return;
+    if (kIsWeb) {
+      try {
+        final bridge = js_util.getProperty<Object?>(
+          html.window,
+          'AncientVaultReader',
+        );
+        if (bridge != null) {
+          js_util.callMethod<void>(bridge, 'postMessage', [
+            '{"secureScreen":false}',
+          ]);
+        }
+      } catch (_) {
+        // Cleanup remains best-effort if the host is already navigating away.
+      }
+      return;
+    }
 
     try {
       await readerScreenSecurityChannel.invokeMethod<void>(
